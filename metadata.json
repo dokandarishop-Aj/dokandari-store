@@ -1,0 +1,6 @@
+{
+  "name": "Dokandari — Modest Fashion, Luxury Abayas & Skincare",
+  "description": "Dokandari online shopping store featuring premium modest fashion, Dubai cherry abayas, Malaysian instant hijabs, festive edits, and organic skincare in Bangladesh.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

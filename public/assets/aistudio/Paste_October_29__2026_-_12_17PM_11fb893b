@@ -1,0 +1,990 @@
+DOKANDARI.COM
+
+Complete AI-Powered International E-commerce Platform
+
+1. PROJECT OVERVIEW
+
+The brand name is Dokandari.
+
+Dokandari is an international-standard, all-in-one e-commerce platform designed for customers in Bangladesh, with the architecture to support international expansion in the future.
+
+This is NOT a women-focused brand. It must serve customers of all genders, ages, lifestyles, and interests.
+
+The platform will sell products across multiple categories, including home decor, gadgets, electronics, fashion, lifestyle, home and kitchen, and other everyday essentials.
+
+The primary objective is to build a fully functional e-commerce platform with a powerful administration system, real AI integrations, automated product importing, editable product management, and real-time synchronization between the admin panel and the customer-facing website.
+
+This project must deliver real functionality, not a visual prototype.
+
+Every important button, form, link, AI feature, database operation, and administrative action must perform its intended function.
+
+Do not create fake functionality, simulated API responses, hardcoded success messages, or dummy dashboard statistics.
+
+---
+
+2. FIRST: AUDIT THE EXISTING PROJECT
+
+Before changing any code, inspect the entire existing Dokandari project.
+
+Identify:
+
+- The existing frontend architecture.
+- The backend and API structure.
+- The database and data models.
+- The authentication system.
+- The current AI integrations.
+- Existing product management functionality.
+- The existing bulk import feature.
+- The current image and video storage system.
+- All admin dashboard pages.
+- All customer-facing pages.
+- Existing routes and navigation.
+- Existing buttons and event handlers.
+- Any broken or incomplete functionality.
+
+Do not unnecessarily rewrite the entire project.
+
+Do not remove existing working features.
+
+Do not replace real functionality with mock implementations.
+
+Create a concise internal checklist of existing features, broken features, and missing integrations.
+
+Fix existing problems while preserving the current architecture whenever possible.
+
+If a required AI integration already exists, inspect and reuse it rather than creating a duplicate.
+
+---
+
+3. BRAND IDENTITY AND WEBSITE DESIGN
+
+The brand name must consistently be:
+
+Dokandari
+
+Use the correct brand identity throughout:
+
+- Website header.
+- Logo area.
+- Homepage.
+- Footer.
+- Product pages.
+- Admin dashboard.
+- Browser title.
+- SEO metadata.
+- Customer-facing notifications.
+- Order-related pages.
+
+Do not use the name ViralWomanBD or DucanDari anywhere in the Dokandari interface unless it is explicitly required as historical project data.
+
+Create a premium, modern, international-standard e-commerce design.
+
+The design must:
+
+- Serve all genders.
+- Feel professional and trustworthy.
+- Be mobile-first and responsive.
+- Display product images clearly.
+- Use consistent typography and spacing.
+- Have intuitive navigation.
+- Provide accessible buttons and forms.
+- Avoid unnecessary visual clutter.
+- Support fast loading and smooth interactions.
+
+The website must look like a genuine, production-ready e-commerce business.
+
+---
+
+4. HOMEPAGE CATEGORY ORDER
+
+The homepage must display 11 main product categories.
+
+The first category must be:
+
+1. Home Decor
+2. Gadgets & Electronics
+3. Fashion & Clothing
+4. Beauty & Personal Care
+5. Home & Kitchen
+6. Mobile Accessories
+7. Lifestyle Products
+8. Travel & Outdoor
+9. Health & Fitness Accessories
+10. Kids & Baby Products
+11. Office & Everyday Essentials
+
+Home Decor must always appear first, and Gadgets & Electronics must appear second by default.
+
+Administrators should be able to edit category names, images, visibility, and display order.
+
+Each category must have a real category page with its own URL.
+
+Clicking a category must display the relevant products.
+
+Do not create buttons that lead to the homepage instead of their intended category.
+
+Category updates must be saved in the database and reflected on the website.
+
+---
+
+5. RESPONSIVE HOMEPAGE AND CAROUSELS
+
+Create responsive homepage banners, promotional sliders, category sections, and product carousels.
+
+Carousel requirements
+
+Support:
+
+- Automatic sliding.
+- Manual previous and next controls.
+- Mobile swipe gestures.
+- Configurable sliding intervals.
+- 1-second interval.
+- 3-second interval.
+- 5-second interval.
+- Optional custom interval.
+- Separate images and links for each slide.
+- Editable titles and descriptions.
+- Configurable CTA buttons.
+- Slide ordering.
+- Enable and disable controls.
+
+The carousel timing settings must work in practice.
+
+If an administrator changes the interval, the actual carousel must follow the new interval.
+
+Avoid broken images, layout shifts, and incorrect cropping.
+
+Mobile layout
+
+- Display product cards in two columns.
+- Use the available screen width efficiently.
+- Preserve appropriate image aspect ratios.
+- Keep prices, titles, and buttons readable.
+- Prevent unwanted horizontal scrolling.
+- Ensure touch controls work correctly.
+
+Desktop layout
+
+- Use a responsive multi-column product grid.
+- Adjust the number of columns according to screen width.
+- Maintain consistent card spacing.
+- Display images without unwanted cropping.
+- Keep the page visually balanced.
+
+Test the design on mobile phones, tablets, laptops, and desktop screens.
+
+---
+
+6. REAL AI-POWERED PRODUCT IMPORT BY URL
+
+This is one of the most important features of Dokandari.
+
+The admin dashboard must provide a dedicated feature named:
+
+AI Bulk Product Import
+
+The administrator should be able to provide one or multiple product URLs.
+
+The system must attempt to import the product information, original product images, and original product videos from each supported source.
+
+This must be a real import workflow, not a demo interface.
+
+6.1 URL Input Interface
+
+Provide:
+
+- A single product URL input.
+- A multiline URL input for multiple products.
+- A CSV file upload option for product URLs.
+- An Import Products button.
+- A Validate URLs button.
+- An import preview.
+- Import progress.
+- Import history.
+- Error reporting.
+
+The administrator must be able to paste product URLs directly into the import interface.
+
+6.2 Supported Source Configuration
+
+Build the import system using a configurable source-adapter architecture.
+
+Use official APIs or authorized integration methods when available.
+
+Support publicly accessible product pages where automated access is permitted.
+
+For sources requiring authentication, special permissions, or platform-specific APIs, clearly identify the required authorization.
+
+Do not claim universal compatibility with every website.
+
+Some websites block automated access or restrict the downloading and reuse of their content. When a source cannot be accessed legally or technically, show a clear error and provide an appropriate alternative.
+
+Do not bypass CAPTCHAs, authentication controls, anti-bot protections, or access restrictions.
+
+6.3 Product Information Extraction
+
+For every successfully processed URL, extract the available information:
+
+- Product title.
+- Product description.
+- Product price.
+- Original price, when available.
+- Product category.
+- Product SKU, when available.
+- Brand, when available.
+- Product variants.
+- Available colors.
+- Available sizes.
+- Product specifications.
+- Stock information, when accessible.
+- Product image URLs.
+- Product video URLs.
+- Source product URL.
+
+Extract original product information from the source whenever possible.
+
+If the source provides structured product data, use it where appropriate.
+
+If structured data is unavailable, use a permitted HTML extraction method or a connected AI vision/language service to analyze accessible content.
+
+Do not invent unavailable product specifications, dimensions, materials, prices, or stock information.
+
+If information cannot be verified, mark it as unavailable or requiring manual review.
+
+6.4 Original Product Image Import
+
+The importer must:
+
+1. Identify the original product images available from the source.
+2. Retrieve the images when access and reuse are permitted.
+3. Upload imported image files to the configured product storage.
+4. Save the resulting permanent storage references.
+5. Associate the images with the correct product record.
+6. Display image previews before publishing.
+7. Allow the administrator to remove, reorder, or replace images.
+
+Do not store temporary browser URLs as permanent product image references.
+
+Do not report that an image has been imported unless the image was successfully retrieved and stored, or a clearly identified external reference was intentionally saved.
+
+If the source blocks image retrieval, display an error and allow manual image upload.
+
+Preserve the original downloaded image when possible.
+
+Do not silently substitute unrelated images or AI-generated images for the source's original product images.
+
+6.5 Original Product Video Import
+
+Attempt to identify and import the source's original product videos where supported and authorized.
+
+The system must:
+
+- Identify accessible product video URLs.
+- Retrieve video files when permitted.
+- Upload retrieved video files to configured storage.
+- Associate videos with the correct product.
+- Generate playable video previews.
+- Allow administrators to remove or reorder videos.
+- Display accurate import status.
+
+If a video cannot be downloaded, show the actual reason when known.
+
+If external video embedding is permitted but downloading is not, offer a clearly labeled external video option.
+
+Never show a fake video preview or claim a video has been downloaded when it has not.
+
+6.6 AI-Assisted Data Processing
+
+After extracting the available source information, use the configured AI service to help:
+
+- Clean product titles.
+- Generate improved product descriptions.
+- Translate descriptions between English and Bengali when required.
+- Suggest product categories.
+- Identify visible colors.
+- Generate SEO titles.
+- Generate meta descriptions.
+- Create image alt text.
+- Organize product specifications.
+
+Maintain the original source data separately from AI-generated content.
+
+Allow administrators to switch between the original source description and the AI-improved description.
+
+AI must not silently replace original product information.
+
+6.7 Import Preview and Approval
+
+Before publishing, show an editable preview containing:
+
+- Product title.
+- Description.
+- Price.
+- Category.
+- Images.
+- Videos.
+- Variants.
+- SKU.
+- Source URL.
+- Import warnings.
+- Missing information.
+
+Provide the following actions:
+
+- Edit Product.
+- Save as Draft.
+- Import Product.
+- Publish Product.
+- Cancel Import.
+
+The administrator must be able to edit the imported information before publication.
+
+Do not publish products automatically unless an administrator has explicitly enabled an appropriate automatic publishing policy.
+
+6.8 Multiple Product Import
+
+When multiple URLs are provided, process them using a reliable background job or batch-processing system where appropriate.
+
+For every product, record:
+
+- Source URL.
+- Import job ID.
+- Processing status.
+- Start time.
+- Completion time.
+- Product ID, if created.
+- Success or failure.
+- Error details.
+
+Show accurate counts for:
+
+- Total URLs submitted.
+- Successfully imported products.
+- Failed imports.
+- Products requiring review.
+- Products awaiting processing.
+
+Allow failed imports to be retried.
+
+Prevent duplicate imports using configurable matching rules, such as source URL, SKU, or an appropriate product fingerprint.
+
+Do not report success until the corresponding operation has actually succeeded.
+
+---
+
+7. REAL PRODUCT EDITING SYSTEM
+
+Every product must be editable from the admin dashboard.
+
+The Edit button must perform a real operation.
+
+When an administrator clicks Edit:
+
+1. Load the correct product by its unique product ID.
+2. Retrieve the latest saved product data.
+3. Open an editable form.
+4. Allow changes to the product.
+5. Validate the updated values.
+6. Save changes to the database.
+7. Confirm success only after the database update succeeds.
+8. Refresh or update the relevant product data.
+9. Ensure the customer-facing website displays the updated information.
+
+The form must support editing:
+
+- Product title.
+- Bengali title.
+- English title.
+- Description.
+- Category.
+- Price.
+- Original price.
+- Images.
+- Videos.
+- Colors.
+- Sizes.
+- SKU.
+- Product specifications.
+- Stock quantity.
+- SEO metadata.
+- Product status.
+- Featured status.
+
+The administrator must be able to:
+
+- Add images.
+- Remove images.
+- Replace images.
+- Reorder images.
+- Add videos.
+- Remove videos.
+- Edit variants.
+- Save as Draft.
+- Publish.
+- Unpublish.
+
+Do not create a nonfunctional Edit button.
+
+Do not display a success notification if saving fails.
+
+If an error occurs, explain the problem and allow the administrator to retry.
+
+---
+
+8. REAL-TIME ADMIN-TO-CUSTOMER SYNCHRONIZATION
+
+This requirement is mandatory.
+
+When an administrator edits a product and saves the changes, the customer-facing website must display the updated information without requiring a new manual deployment.
+
+For example:
+
+1. An administrator changes a product's title.
+2. The administrator changes its price.
+3. The administrator replaces a product image.
+4. The administrator saves the changes.
+5. The database stores the updated values.
+6. The customer-facing product page displays the updated title, price, and image.
+
+Implement a reliable synchronization strategy using the existing application architecture.
+
+Where appropriate, use database subscriptions, real-time listeners, cache invalidation, or reliable revalidation mechanisms.
+
+If the application uses cached or statically generated product pages, ensure that product updates invalidate or refresh the relevant cached content.
+
+Do not depend on hardcoded product information inside frontend components.
+
+All product information displayed to customers must come from the authoritative product data source.
+
+Ensure that:
+
+- Product lists update correctly.
+- Product detail pages update correctly.
+- Category pages reflect relevant changes.
+- Updated prices appear consistently.
+- Replaced images display correctly.
+- Published and unpublished states are respected.
+- Stock information is consistent.
+
+Do not expose unpublished drafts to ordinary customers.
+
+Where immediate synchronization cannot be guaranteed because of technical constraints, explain the limitation and implement the fastest reliable update mechanism.
+
+---
+
+9. PRODUCT DETAILS PAGES
+
+Every product must have a dedicated product details page.
+
+Use unique product IDs and stable product URLs.
+
+Example:
+
+/products/wireless-earbuds
+
+Each product page should contain:
+
+- Product image gallery.
+- Product videos, when available.
+- Product title.
+- Product price.
+- Discount information, when applicable.
+- Product description.
+- Specifications.
+- Available colors.
+- Available sizes.
+- Stock status.
+- Quantity selector.
+- Add to Cart.
+- Buy Now.
+- Delivery information.
+- Related products.
+- Reviews, if implemented.
+- Product sharing controls.
+
+Every product card must link to the correct product details page.
+
+Do not redirect every product to the homepage.
+
+Support direct URL navigation and page refresh.
+
+Handle deleted, unpublished, and nonexistent products correctly.
+
+---
+
+10. COMPLETE PRODUCT MANAGEMENT DASHBOARD
+
+Build a fully functional product management system.
+
+Features:
+
+- Create Product.
+- Edit Product.
+- Delete Product.
+- Restore Product, when soft deletion is used.
+- Publish Product.
+- Unpublish Product.
+- Save Draft.
+- Search Products.
+- Filter by Category.
+- Filter by Status.
+- Sort Products.
+- Paginate Product Lists.
+- Bulk Edit.
+- Bulk Delete, with confirmation.
+- Bulk Category Assignment.
+- Stock Management.
+- Import History.
+
+Every action must be connected to real application logic and the database.
+
+Use unique product IDs rather than relying only on product titles.
+
+Protect destructive actions with confirmation dialogs.
+
+---
+
+11. DATABASE AND STORAGE
+
+Inspect the existing database before implementing new tables or collections.
+
+Reuse the current database and storage infrastructure whenever possible.
+
+If Firebase is already used, evaluate the existing implementation of:
+
+- Firebase Authentication.
+- Cloud Firestore.
+- Firebase Storage.
+- Security Rules.
+- Server-side API endpoints.
+
+Do not replace a working database unnecessarily.
+
+Each product should have a structured record containing, where appropriate:
+
+- Product ID.
+- SKU.
+- Slug.
+- Title.
+- Description.
+- Category ID.
+- Price.
+- Original price.
+- Images.
+- Videos.
+- Variants.
+- Specifications.
+- Stock quantity.
+- Product status.
+- Source URL.
+- Original source data.
+- AI-generated content.
+- Created timestamp.
+- Updated timestamp.
+
+Store product images and videos using a suitable persistent storage service.
+
+Save stable storage references in the product database.
+
+Implement appropriate database validation and authorization.
+
+Never expose private credentials or secret API keys in frontend code.
+
+---
+
+12. AI INTEGRATION REQUIREMENTS
+
+Inspect all AI integrations currently used by Dokandari.
+
+Reuse working AI services where appropriate.
+
+Do not create fake AI buttons that merely change the interface.
+
+Any AI feature advertised in the application must be connected to a real model or service capable of performing that task.
+
+Potential AI features include:
+
+- Product title generation.
+- Product description generation.
+- Image analysis.
+- Category suggestions.
+- Product information extraction.
+- Bengali-English translation.
+- SEO content generation.
+- Product image enhancement.
+- Product import assistance.
+
+For every AI operation:
+
+1. Send the required input to the configured AI service.
+2. Receive the actual response.
+3. Validate the response.
+4. Handle API errors.
+5. Display the generated result.
+6. Allow the administrator to review and edit the result.
+
+Keep API keys server-side.
+
+Use structured outputs where appropriate.
+
+Implement timeout handling, retry logic where appropriate, and understandable error messages.
+
+If an AI service is unavailable or not configured, clearly report the missing configuration.
+
+Never fabricate an AI response to make the feature appear operational.
+
+---
+
+13. BULK IMPORT BY CSV AND EXCEL
+
+In addition to URL-based importing, support file-based product importing where appropriate.
+
+Support:
+
+- CSV files.
+- Excel files.
+- Downloadable sample templates.
+- Column mapping.
+- Data validation.
+- Duplicate detection.
+- Preview before import.
+- Import progress.
+- Success and failure counts.
+- Import history.
+- Retry failed rows.
+
+Possible columns:
+
+- Product Name.
+- Description.
+- SKU.
+- Category.
+- Price.
+- Original Price.
+- Color.
+- Size.
+- Stock Quantity.
+- Image URL.
+- Video URL.
+- Source URL.
+- Product Status.
+
+The importer must write valid records to the real database.
+
+Validate required fields before saving.
+
+Do not silently ignore invalid rows.
+
+Show row-specific errors.
+
+Ensure that large imports do not freeze the interface or create uncontrolled duplicate products.
+
+---
+
+14. ADMIN AUTHENTICATION AND SECURITY
+
+Only authorized administrators should be allowed to manage products or run imports.
+
+Implement appropriate:
+
+- Authentication checks.
+- Role-based authorization.
+- Server-side validation.
+- Database security rules.
+- Upload validation.
+- API access controls.
+- Import permissions.
+- Audit logs for important operations.
+
+Do not trust frontend-only checks for administrative permissions.
+
+Never expose administrative operations to unauthorized users.
+
+Protect customer information and credentials.
+
+Do not break existing authentication functionality while making changes.
+
+---
+
+15. CUSTOMER-FACING E-COMMERCE FEATURES
+
+Inspect existing customer-facing features before implementing missing functionality.
+
+Where included in the project, ensure that these features work correctly:
+
+- Product Search.
+- Category Navigation.
+- Product Filters.
+- Product Details.
+- Shopping Cart.
+- Quantity Updates.
+- Variant Selection.
+- Checkout.
+- Customer Information Forms.
+- Delivery Information.
+- Order Creation.
+- Order Confirmation.
+
+If Cash on Delivery is enabled, ensure that orders are actually recorded in the database.
+
+If online payments are offered, connect a real payment gateway.
+
+Never simulate successful payments or create fake orders.
+
+Do not claim that an order has been placed unless the backend confirms its creation.
+
+---
+
+16. BULK IMPORT TROUBLESHOOTING
+
+The existing Bulk Import feature is currently not working correctly.
+
+Do not simply redesign the interface.
+
+Find the actual technical cause.
+
+Inspect:
+
+- Button event handlers.
+- Input validation.
+- URL validation.
+- File parsing.
+- API requests.
+- API responses.
+- Server logs.
+- Database permissions.
+- Database writes.
+- Authentication.
+- Product ID generation.
+- Storage uploads.
+- Error handling.
+- Import progress tracking.
+
+Fix the root cause.
+
+After fixing it, test a real supported product URL.
+
+Verify whether the system can actually retrieve the permitted product information, download the available media, save the product, and display the imported record in the admin dashboard.
+
+If the source blocks automated access, display the actual limitation instead of pretending the import succeeded.
+
+Also test the CSV or Excel import path independently.
+
+Do not mark the feature as complete until the tested workflow succeeds.
+
+---
+
+17. ERROR HANDLING AND USER FEEDBACK
+
+Every important action must provide accurate feedback.
+
+Examples:
+
+- Product saved successfully.
+- Product update failed.
+- Image upload completed.
+- Image upload failed.
+- Video import completed.
+- Video import failed.
+- URL could not be accessed.
+- Product requires manual review.
+- Import completed with errors.
+- Database connection failed.
+- AI service is unavailable.
+- Permission denied.
+
+Success messages must appear only after successful operations.
+
+Display loading indicators while work is in progress.
+
+Prevent accidental duplicate submissions.
+
+Handle timeouts and network failures gracefully.
+
+Do not leave users with an endless loading indicator.
+
+---
+
+18. PERFORMANCE AND RELIABILITY
+
+Implement:
+
+- Responsive images.
+- Image optimization.
+- Lazy loading.
+- Efficient database queries.
+- Appropriate pagination.
+- Caching where appropriate.
+- Cache invalidation after updates.
+- Secure upload handling.
+- Background jobs for long-running imports when needed.
+- Proper error logging.
+- Retry mechanisms for recoverable failures.
+
+Ensure that imported media and product information remain available after page refreshes, browser restarts, and subsequent admin sessions.
+
+Do not store important product data only in temporary browser state.
+
+---
+
+19. REQUIRED REAL-WORLD TESTING
+
+Do not consider a feature complete merely because its interface looks correct.
+
+Perform actual end-to-end testing.
+
+Test A: Product Editing
+
+1. Sign in as an administrator.
+2. Open an existing product.
+3. Click Edit.
+4. Change its title.
+5. Change its price.
+6. Replace its image.
+7. Save the product.
+8. Confirm that the database contains the updated information.
+9. Open the customer-facing product page.
+10. Verify that the updated title, price, and image appear.
+11. Refresh the page and verify persistence.
+12. Check that an ordinary customer cannot access unpublished products.
+
+Test B: URL-Based AI Import
+
+1. Enter a real, supported product URL.
+2. Validate the URL.
+3. Start the import.
+4. Confirm that the source is actually accessible.
+5. Extract the available product information.
+6. Retrieve permitted images and videos.
+7. Upload media to persistent storage.
+8. Create an editable product draft.
+9. Edit the imported product.
+10. Save it.
+11. Confirm that the product exists in the database.
+12. Publish it.
+13. Open its customer-facing product page.
+14. Verify that the imported information and media display correctly.
+
+If the source cannot be accessed, record the real error and test another supported source.
+
+Test C: CSV/Excel Import
+
+1. Create a sample import file.
+2. Upload it.
+3. Validate its columns.
+4. Preview the records.
+5. Import the records.
+6. Confirm that the database contains the imported products.
+7. Verify that the products appear in the admin dashboard.
+8. Test duplicate detection.
+9. Test invalid data.
+10. Confirm that errors are reported accurately.
+
+Test D: Real-Time Synchronization
+
+1. Open the same product on the admin panel and customer website.
+2. Change the product title in the admin panel.
+3. Save the change.
+4. Verify that the customer page updates.
+5. Change the price and image.
+6. Verify the changes.
+7. Refresh the customer page.
+8. Confirm that the updated data persists.
+
+Test E: Security
+
+1. Attempt to access administrative operations without authorization.
+2. Verify that unauthorized requests are rejected.
+3. Verify that private API credentials are not exposed.
+4. Confirm that customers cannot edit product records.
+5. Confirm that draft products remain private.
+
+---
+
+20. DEVELOPMENT WORKFLOW
+
+Work incrementally and preserve existing functionality.
+
+Phase 1: Audit
+
+Inspect the existing project and identify broken functionality.
+
+Phase 2: Critical Fixes
+
+Fix the broken bulk import feature, product editing, routing, and database persistence.
+
+Phase 3: AI Product Import
+
+Implement real URL-based product extraction and authorized media importing.
+
+Phase 4: Product Management
+
+Complete editing, publishing, image management, video management, and database synchronization.
+
+Phase 5: Homepage and Responsive Design
+
+Implement the category order, carousels, product grids, and responsive layouts.
+
+Phase 6: End-to-End Testing
+
+Test all critical workflows and fix any failures.
+
+Do not unnecessarily rewrite the application.
+
+Do not delete existing working features.
+
+Do not stop after generating a plan.
+
+Proceed with implementation and testing, subject to the available tools, permissions, and configured services.
+
+---
+
+21. FINAL ACCEPTANCE CRITERIA
+
+Dokandari is ready for production only when the following requirements have been verified:
+
+- The correct brand name, Dokandari, appears throughout the platform.
+- The platform is not restricted to a women-focused audience.
+- The homepage displays 11 main categories in the specified order.
+- Carousels respond to their configured timing.
+- Mobile product grids display two columns.
+- Every product has a dedicated details page.
+- The admin Edit button works.
+- Product changes persist in the database.
+- Customer-facing pages display updated product information.
+- URL-based product importing works for supported sources.
+- Original product images are imported when accessible and authorized.
+- Original product videos are imported when accessible and authorized.
+- AI processing uses a real configured AI service.
+- Imported products can be reviewed and edited.
+- CSV/Excel importing works when implemented.
+- Duplicate and invalid records are handled correctly.
+- Storage references remain valid.
+- Unpublished products are not exposed to ordinary customers.
+- Authentication and authorization work correctly.
+- Important error conditions are handled.
+- No fake data or fabricated success messages are used.
+- Existing working functionality remains intact.
+
+For every feature that cannot be completed because an API, permission, service, or infrastructure component is missing, identify the exact missing dependency.
+
+Do not label an untested or incomplete feature as fully operational.
+
+---
+
+YOUR FIRST TASK
+
+Start by auditing the existing Dokandari project.
+
+Identify the root cause of the broken Bulk Import feature and verify the current product editing and database synchronization workflows.
+
+Then fix these critical issues first.
+
+After that, implement the real AI-powered URL import workflow, including product information extraction, authorized original image and video retrieval, persistent media storage, editable drafts, and publishing.
+
+Preserve all existing working functionality.
+
+Work on the actual project files and existing backend.
+
+Do not merely provide sample code or a development plan. Implement the changes, run the available tests, and report exactly what works, what has been tested, and what still requires configuration or external permissions.

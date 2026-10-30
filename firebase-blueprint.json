@@ -1,0 +1,170 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "An e-commerce catalog product in the Dokandari store.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique product identifier."
+        },
+        "name": {
+          "type": "string",
+          "description": "Display name of the product."
+        },
+        "category": {
+          "type": "string",
+          "description": "Product category: hijab, abaya, festive, or skincare."
+        },
+        "price": {
+          "type": "number",
+          "description": "Selling price in Bangladeshi Taka (BDT)."
+        },
+        "originalPrice": {
+          "type": "number",
+          "description": "Original price before discount in BDT."
+        },
+        "description": {
+          "type": "string",
+          "description": "Full product description and material specifications."
+        },
+        "inStock": {
+          "type": "boolean",
+          "description": "Whether the product is currently in stock."
+        },
+        "rating": {
+          "type": "number",
+          "description": "Average review rating (1 to 5)."
+        },
+        "reviewCount": {
+          "type": "number",
+          "description": "Number of customer reviews."
+        }
+      },
+      "required": ["id", "name", "category", "price", "inStock"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Customer purchase order in Dokandari store.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Dokandari order reference code (e.g. DKD-104921)."
+        },
+        "subtotal": {
+          "type": "number",
+          "description": "Subtotal before shipping in BDT."
+        },
+        "shippingCost": {
+          "type": "number",
+          "description": "Shipping fee in BDT."
+        },
+        "total": {
+          "type": "number",
+          "description": "Total order amount in BDT."
+        },
+        "paymentMethod": {
+          "type": "string",
+          "description": "Payment method: cod, bkash, nagad, or rocket."
+        },
+        "status": {
+          "type": "string",
+          "description": "Order processing status: pending, confirmed, packed, in_transit, delivered, or cancelled."
+        },
+        "userId": {
+          "type": "string",
+          "description": "UID of the registered customer if signed in, or null."
+        }
+      },
+      "required": ["id", "subtotal", "shippingCost", "total", "paymentMethod", "status"]
+    },
+    "User": {
+      "title": "User",
+      "description": "Customer profile and preferences.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth user identifier."
+        },
+        "email": {
+          "type": "string",
+          "description": "Customer email address."
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Full customer name."
+        },
+        "role": {
+          "type": "string",
+          "description": "User role: customer or admin."
+        }
+      },
+      "required": ["uid", "email"]
+    },
+    "Setting": {
+      "title": "Setting",
+      "description": "Store configuration, banners, content, and API credentials.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Setting key identifier (e.g. store_content, api_credentials)."
+        }
+      },
+      "required": ["id"]
+    },
+    "Review": {
+      "title": "Review",
+      "description": "Customer feedback and ratings for a product.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Review unique identifier."
+        },
+        "productId": {
+          "type": "string",
+          "description": "Target product ID."
+        },
+        "userName": {
+          "type": "string",
+          "description": "Customer display name."
+        },
+        "rating": {
+          "type": "number",
+          "description": "Star rating 1 to 5."
+        },
+        "comment": {
+          "type": "string",
+          "description": "Customer review message."
+        }
+      },
+      "required": ["id", "productId", "userName", "rating", "comment"]
+    }
+  },
+  "firestore": {
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Public store products catalog."
+    },
+    "/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Customer orders and fulfillment records."
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles and customer accounts."
+    },
+    "/settings/{settingId}": {
+      "schema": "Setting",
+      "description": "Store settings, hero banners, and integration credentials."
+    },
+    "/reviews/{reviewId}": {
+      "schema": "Review",
+      "description": "Verified customer reviews."
+    }
+  }
+}
