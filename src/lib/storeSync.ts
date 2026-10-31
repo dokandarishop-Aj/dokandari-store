@@ -380,14 +380,33 @@ export async function saveStoreContentPersisted(
   return clean;
 }
 
+let remoteDeletedProductIdsCache = new Set<string>();
+
+export function setRemoteDeletedProductIds(ids: string[]): void {
+  remoteDeletedProductIdsCache = new Set(Array.isArray(ids) ? ids.filter(Boolean) : []);
+  try {
+    const localRaw = localStorage.getItem(LS_DELETED_PRODUCT_IDS_KEY);
+    const localArr = localRaw ? JSON.parse(localRaw) : [];
+    const merged = Array.from(
+      new Set([...(Array.isArray(localArr) ? localArr : []), ...remoteDeletedProductIdsCache])
+    );
+    localStorage.setItem(LS_DELETED_PRODUCT_IDS_KEY, JSON.stringify(merged));
+  } catch {
+    // ignore storage warning
+  }
+}
+
 export function getDeletedProductIds(): Set<string> {
   try {
     const raw = localStorage.getItem(LS_DELETED_PRODUCT_IDS_KEY);
-    if (!raw) return new Set();
-    const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? new Set(arr) : new Set();
+    const arr = raw ? JSON.parse(raw) : [];
+    const localSet = Array.isArray(arr) ? new Set<string>(arr) : new Set<string>();
+    for (const id of remoteDeletedProductIdsCache) {
+      localSet.add(id);
+    }
+    return localSet;
   } catch {
-    return new Set();
+    return new Set(remoteDeletedProductIdsCache);
   }
 }
 
@@ -982,25 +1001,31 @@ export function mergeCatalogProducts(remoteProducts?: Product[]): Product[] {
     }
   }
 
-  // 2. Overlay remote Firestore products (if not deleted)
+  // 2. Overlay remote Firestore products (if not deleted) — Firestore is the source of truth across live domain!
+  const remoteIdSet = new Set<string>();
   if (remoteProducts && remoteProducts.length > 0) {
     for (const p of remoteProducts) {
       if (p && p.id && !deletedIds.has(p.id)) {
+        remoteIdSet.add(p.id);
         map.set(p.id, normalizeProductImages(p));
       }
     }
   }
 
-  // 3. Overlay local custom/edited products (prefer local if newer OR if local has real images while remote was overwritten)
+  // 3. Overlay local custom/edited products ONLY if not yet in remote or if local was edited more recently
   for (const [id, prod] of Object.entries(customMap)) {
     if (!deletedIds.has(id)) {
       const existing = map.get(id);
-      const localHasReal = hasAuthenticCustomImage(prod);
-      const remoteHasReal = hasAuthenticCustomImage(existing);
+      const localUpdated = prod.updatedAt || 0;
+      const remoteUpdated = existing?.updatedAt || 0;
+      const localImageCount = Array.isArray(prod.images) ? prod.images.length : 0;
+      const remoteImageCount = Array.isArray(existing?.images) ? existing.images.length : 0;
+
       if (
         !existing ||
-        (prod.updatedAt || 0) >= (existing.updatedAt || 0) ||
-        (localHasReal && !remoteHasReal)
+        !remoteIdSet.has(id) ||
+        localUpdated > remoteUpdated ||
+        (localUpdated === remoteUpdated && localImageCount > remoteImageCount)
       ) {
         map.set(id, normalizeProductImages(prod));
       }
@@ -1024,8 +1049,18 @@ export async function restoreAllRealCatalogProducts(): Promise<Product[]> {
     const deleted = getDeletedProductIds();
     for (const id of initialIds) {
       deleted.delete(id);
+      remoteDeletedProductIdsCache.delete(id);
     }
     localStorage.setItem(LS_DELETED_PRODUCT_IDS_KEY, JSON.stringify(Array.from(deleted)));
+    try {
+      await setDoc(
+        doc(db, 'settings', 'deleted_products'),
+        { ids: Array.from(deleted), updatedAt: Date.now() },
+        { merge: true }
+      );
+    } catch {
+      // ignore
+    }
 
     // 2. Clean any corrupted/unplugged images in customMap and merge INITIAL_PRODUCTS
     const customMap = getCustomPersistedProductsMap();
@@ -1071,17 +1106,22 @@ export async function restoreAllRealCatalogProducts(): Promise<Product[]> {
 function ensureFirestoreSafeProductPayload(product: Product): Product {
   const clone = { ...product, images: [...(product.images || [])] };
   let serialized = JSON.stringify(clone);
-  if (serialized.length <= 750000) {
+  if (serialized.length <= 920000) {
     return clone;
   }
 
-  // If multiple large base64 images push the document over 750KB, keep the primary image + up to 2 compact images
-  if (clone.images.length > 2) {
-    clone.images = clone.images.slice(0, 2);
+  // Preserve at least 5 to 8 gallery images when Admin uploads 5+ photos
+  if (clone.images.length > 8) {
+    clone.images = clone.images.slice(0, 8);
     serialized = JSON.stringify(clone);
   }
-  if (serialized.length > 850000 && clone.images.length > 1) {
-    clone.images = [clone.images[0]];
+  while (serialized.length > 920000 && clone.images.length > 5) {
+    clone.images = clone.images.slice(0, clone.images.length - 1);
+    serialized = JSON.stringify(clone);
+  }
+  while (serialized.length > 950000 && clone.images.length > 2) {
+    clone.images = clone.images.slice(0, clone.images.length - 1);
+    serialized = JSON.stringify(clone);
   }
   return clone;
 }
@@ -1123,11 +1163,14 @@ export async function saveProductPersisted(product: Product): Promise<Product> {
   });
 
   // 1. Save to localStorage custom products map & remove from deleted set if re-added
+  let updatedDeletedArray: string[] | null = null;
   try {
     const deleted = getDeletedProductIds();
     if (deleted.has(normalized.id)) {
       deleted.delete(normalized.id);
-      localStorage.setItem(LS_DELETED_PRODUCT_IDS_KEY, JSON.stringify(Array.from(deleted)));
+      remoteDeletedProductIdsCache.delete(normalized.id);
+      updatedDeletedArray = Array.from(deleted);
+      localStorage.setItem(LS_DELETED_PRODUCT_IDS_KEY, JSON.stringify(updatedDeletedArray));
     }
     const customMap = getCustomPersistedProductsMap();
     customMap[normalized.id] = normalized;
@@ -1136,10 +1179,17 @@ export async function saveProductPersisted(product: Product): Promise<Product> {
     console.warn('localStorage product save note:', e);
   }
 
-  // 2. Save to Firestore (guarded for 1MB limit)
+  // 2. Save to Firestore (guarded for 1MB limit while keeping 5+ images)
   try {
     const firestoreSafe = sanitizeForFirestore(ensureFirestoreSafeProductPayload(normalized));
     await setDoc(doc(db, 'products', normalized.id), firestoreSafe, { merge: true });
+    if (updatedDeletedArray !== null) {
+      await setDoc(
+        doc(db, 'settings', 'deleted_products'),
+        { ids: updatedDeletedArray, updatedAt: now },
+        { merge: true }
+      );
+    }
   } catch (err) {
     console.warn('Firestore product save warning (saved locally):', err);
   }
@@ -1252,10 +1302,13 @@ export async function syncAllLocalProductsToFirestore(): Promise<{
  * Deletes a product permanently from localStorage, prevents re-seeding, and deletes from Firestore
  */
 export async function deleteProductPersisted(productId: string): Promise<void> {
+  let deletedList: string[] = [];
   try {
     const deleted = getDeletedProductIds();
     deleted.add(productId);
-    localStorage.setItem(LS_DELETED_PRODUCT_IDS_KEY, JSON.stringify(Array.from(deleted)));
+    remoteDeletedProductIdsCache.add(productId);
+    deletedList = Array.from(deleted);
+    localStorage.setItem(LS_DELETED_PRODUCT_IDS_KEY, JSON.stringify(deletedList));
 
     const customMap = getCustomPersistedProductsMap();
     if (customMap[productId]) {
@@ -1267,7 +1320,14 @@ export async function deleteProductPersisted(productId: string): Promise<void> {
   }
 
   try {
-    await deleteDoc(doc(db, 'products', productId));
+    await Promise.all([
+      deleteDoc(doc(db, 'products', productId)),
+      setDoc(
+        doc(db, 'settings', 'deleted_products'),
+        { ids: deletedList, updatedAt: Date.now() },
+        { merge: true }
+      ),
+    ]);
   } catch (err) {
     console.warn('Firestore delete product warning:', err);
   }
@@ -1320,8 +1380,8 @@ export function getPersistedOrders(): Order[] {
  */
 export function compressImageFileToDataUrl(
   file: File,
-  maxWidth = 680,
-  quality = 0.72
+  maxWidth = 640,
+  quality = 0.68
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1347,16 +1407,16 @@ export function compressImageFileToDataUrl(
         ctx.drawImage(img, 0, 0, width, height);
         let dataUrl = canvas.toDataURL('image/jpeg', quality);
 
-        // If still large (>160KB base64), compress slightly more so Firestore 1MB limit is never exceeded
-        if (dataUrl.length > 160000) {
-          const smallerW = Math.min(width, 520);
+        // Keep each base64 photo <= ~115KB so 5 to 8 uploaded gallery images fit inside a 1MB Firestore document
+        if (dataUrl.length > 115000) {
+          const smallerW = Math.min(width, 500);
           const smallerH = Math.round((height * smallerW) / width);
           canvas.width = smallerW;
           canvas.height = smallerH;
           const ctx2 = canvas.getContext('2d');
           if (ctx2) {
             ctx2.drawImage(img, 0, 0, smallerW, smallerH);
-            dataUrl = canvas.toDataURL('image/jpeg', 0.58);
+            dataUrl = canvas.toDataURL('image/jpeg', 0.56);
           }
         }
         resolve(dataUrl);

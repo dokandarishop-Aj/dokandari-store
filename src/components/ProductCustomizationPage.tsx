@@ -98,36 +98,68 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
   // Navigation tab in admin
   const [activeTab, setActiveTab] = useState<'product' | 'store' | 'whatsapp' | 'categories' | 'pixels'>('product');
 
-  // Trigger Gemini AI Vision & Enhancement analysis
+  // Trigger Gemini AI Vision & Enhancement analysis and auto-persist to Firestore
   const handleAiVisionAnalyze = async () => {
     setAiLoading(true);
     setToastMessage('এআই দ্বারা প্রোডাক্ট ছবি ও ভিজ্যুয়াল কনটেন্ট বিশ্লেষণ করা হচ্ছে...');
     try {
-      // Strictly avoid passing old product titles like "Two-Piece" into the prompt when analyzing image
       const visionPrompt = images[0]
         ? 'Analyze and identify this uploaded product image strictly based on visual content for Dokandari catalog'
         : (nameBn || nameEn);
 
       const result = await smartImportOrAnalyzeProduct(visionPrompt, images[0]);
-      setNameBn(result.titleBn);
-      setNameEn(result.titleEn);
-      setCategory(result.category);
-      setPrice(result.price);
-      setOriginalPrice(result.originalPrice);
-      setFabric(result.fabric);
-      setDescription(result.description);
-      if (result.colors?.length) setColors(result.colors);
-      if (result.sizes?.length) setSizes(result.sizes);
-      if (result.images?.length && result.images[0] !== images[0]) {
-        setImages(Array.from(new Set([...images, ...result.images])));
-      }
-      if (result.videos?.length) {
-        setVideos(Array.from(new Set([...videos, ...result.videos])));
-      }
-      setComboSinglePrice(result.price);
-      setComboDoublePrice(result.comboOffers?.doublePrice || result.price * 2 - 100);
-      setComboTriplePrice(result.comboOffers?.triplePrice || result.price * 3 - 200);
-      setToastMessage('✨ এআই বিশ্লেষণ সম্পন্ন! সঠিক নাম, ক্যাটাগরি ও মূল্য আপডেট করা হয়েছে।');
+      const nextNameBn = cleanProductTitle(result.titleBn || nameBn);
+      const nextNameEn = result.titleEn || nameEn;
+      const nextCat = (result.category as ProductCategory) || category;
+      const nextPrice = Number(result.price) || price;
+      const nextOrigPrice = Number(result.originalPrice) || originalPrice;
+      const nextFabric = result.fabric || fabric;
+      const nextDesc = result.description || description;
+      const nextColors = result.colors?.length ? result.colors : colors;
+      const nextSizes = result.sizes?.length ? result.sizes : sizes;
+      const nextImages =
+        result.images?.length && result.images[0] !== images[0]
+          ? Array.from(new Set([...images, ...result.images]))
+          : images;
+      const nextVideos = result.videos?.length
+        ? Array.from(new Set([...videos, ...result.videos]))
+        : videos;
+
+      setNameBn(nextNameBn);
+      setNameEn(nextNameEn);
+      setCategory(nextCat);
+      setPrice(nextPrice);
+      setOriginalPrice(nextOrigPrice);
+      setFabric(nextFabric);
+      setDescription(nextDesc);
+      setColors(nextColors);
+      setSizes(nextSizes);
+      setImages(nextImages);
+      setVideos(nextVideos);
+      setComboSinglePrice(nextPrice);
+      setComboDoublePrice(result.comboOffers?.doublePrice || nextPrice * 2 - 100);
+      setComboTriplePrice(result.comboOffers?.triplePrice || nextPrice * 3 - 200);
+
+      // Immediately persist AI-updated product to Firestore & live storefront
+      const autoSaved = await saveProductPersisted({
+        ...product,
+        name: nextNameBn,
+        titleEn: nextNameEn,
+        category: nextCat,
+        price: nextPrice,
+        originalPrice: nextOrigPrice,
+        fabric: nextFabric,
+        description: nextDesc,
+        sku: skuCode,
+        inStock,
+        status: productStatus,
+        images: nextImages,
+        videos: nextVideos,
+        variants: { colors: nextColors, sizes: nextSizes },
+        updatedAt: Date.now(),
+      });
+      onProductUpdated(autoSaved);
+      setToastMessage('✨ এআই বিশ্লেষণ সম্পন্ন এবং ফায়ারবেস লাইভ ডাটাবেজে স্বয়ংক্রিয়ভাবে সেভ হয়েছে!');
     } catch (e) {
       console.warn('AI analysis note:', e);
       setToastMessage('এআই বিশ্লেষণ সম্পন্ন হয়েছে!');
@@ -137,7 +169,7 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
     }
   };
 
-  // Trigger 1-Click Smart Auto Import (with real scraped images & videos!)
+  // Trigger 1-Click Smart Auto Import (with real scraped images & videos!) and auto-persist to Firestore
   const handleSmartImport = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!smartInput.trim()) return;
@@ -146,22 +178,53 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
     setToastMessage('লিংক থেকে সরাসরি আসল ছবি, ভিডিও, প্রোডাক্ট তথ্য ও ৩টি কম্বো অফার তৈরি হচ্ছে...');
     try {
       const result = await smartImportOrAnalyzeProduct(smartInput);
-      setNameBn(result.titleBn);
-      setNameEn(result.titleEn);
-      setCategory(result.category);
-      setPrice(result.price);
-      setOriginalPrice(result.originalPrice);
-      setFabric(result.fabric);
-      setDescription(result.description);
-      if (result.colors?.length) setColors(result.colors);
-      if (result.sizes?.length) setSizes(result.sizes);
-      if (result.images?.length) setImages(result.images);
-      if (result.videos?.length) setVideos(result.videos);
-      setComboSinglePrice(result.price);
-      setComboDoublePrice(result.comboOffers?.doublePrice || result.price * 2 - 100);
-      setComboTriplePrice(result.comboOffers?.triplePrice || result.price * 3 - 200);
+      const nextNameBn = cleanProductTitle(result.titleBn || nameBn);
+      const nextNameEn = result.titleEn || nameEn;
+      const nextCat = (result.category as ProductCategory) || category;
+      const nextPrice = Number(result.price) || price;
+      const nextOrigPrice = Number(result.originalPrice) || originalPrice;
+      const nextFabric = result.fabric || fabric;
+      const nextDesc = result.description || description;
+      const nextColors = result.colors?.length ? result.colors : colors;
+      const nextSizes = result.sizes?.length ? result.sizes : sizes;
+      const nextImages = result.images?.length ? result.images : images;
+      const nextVideos = result.videos?.length ? result.videos : videos;
+
+      setNameBn(nextNameBn);
+      setNameEn(nextNameEn);
+      setCategory(nextCat);
+      setPrice(nextPrice);
+      setOriginalPrice(nextOrigPrice);
+      setFabric(nextFabric);
+      setDescription(nextDesc);
+      setColors(nextColors);
+      setSizes(nextSizes);
+      setImages(nextImages);
+      setVideos(nextVideos);
+      setComboSinglePrice(nextPrice);
+      setComboDoublePrice(result.comboOffers?.doublePrice || nextPrice * 2 - 100);
+      setComboTriplePrice(result.comboOffers?.triplePrice || nextPrice * 3 - 200);
       setSmartInput('');
-      setToastMessage('⚡ ১-ক্লিকে প্রোডাক্ট, আসল ছবি ও ৩টি কম্বো অফার সফলভাবে ইমপোর্ট সম্পন্ন হয়েছে!');
+
+      const autoSaved = await saveProductPersisted({
+        ...product,
+        name: nextNameBn,
+        titleEn: nextNameEn,
+        category: nextCat,
+        price: nextPrice,
+        originalPrice: nextOrigPrice,
+        fabric: nextFabric,
+        description: nextDesc,
+        sku: skuCode,
+        inStock,
+        status: productStatus,
+        images: nextImages,
+        videos: nextVideos,
+        variants: { colors: nextColors, sizes: nextSizes },
+        updatedAt: Date.now(),
+      });
+      onProductUpdated(autoSaved);
+      setToastMessage('⚡ ১-ক্লিকে প্রোডাক্ট, আসল ছবি ও ৩টি কম্বো অফার ইমপোর্ট ও লাইভ ডাটাবেজে সেভ হয়েছে!');
     } catch (err) {
       console.warn('Smart import fallback note:', err);
       setToastMessage('ইমপোর্ট সফল হয়েছে!');
@@ -197,27 +260,47 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
     setNewImageUrl('');
   };
 
-  // Local file upload support with automatic canvas compression
+  // Local file upload support with automatic canvas compression & instant Firestore persistence for 5+ photos
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    setToastMessage('ছবি প্রসেস ও আপলোড হচ্ছে...');
+    setToastMessage(`📸 ${files.length}টি ছবি প্রসেস ও ফায়ারবেসে আপলোড হচ্ছে...`);
     try {
       const uploadedUrls: string[] = [];
       for (let i = 0; i < files.length; i++) {
-        const compressed = await compressImageFileToDataUrl(files[i], 960, 0.82);
+        const compressed = await compressImageFileToDataUrl(files[i], 640, 0.68);
         if (compressed) uploadedUrls.push(compressed);
       }
       if (uploadedUrls.length > 0) {
-        setImages((prev) => [...uploadedUrls, ...prev]);
-        setToastMessage(`✅ ${uploadedUrls.length}টি ছবি সফলভাবে গ্যালারিতে যুক্ত হয়েছে!`);
+        const mergedGallery = [...uploadedUrls, ...images];
+        setImages(mergedGallery);
+        const autoSaved = await saveProductPersisted({
+          ...product,
+          name: cleanProductTitle(nameBn),
+          titleEn: nameEn,
+          category,
+          price: Number(price),
+          originalPrice: Number(originalPrice),
+          description,
+          fabric,
+          sku: skuCode,
+          inStock,
+          status: productStatus,
+          images: mergedGallery,
+          videos,
+          variants: { colors, sizes },
+          updatedAt: Date.now(),
+        });
+        onProductUpdated(autoSaved);
+        setToastMessage(`✅ ${uploadedUrls.length}টি ছবি সফলভাবে গ্যালারি ও ফায়ারবেস লাইভ ডাটাবেজে সেভ হয়েছে!`);
       }
     } catch (err) {
       console.warn('File upload error:', err);
       setToastMessage('ছবি আপলোডে সমস্যা হয়েছে।');
     } finally {
-      setTimeout(() => setToastMessage(''), 3000);
+      e.target.value = '';
+      setTimeout(() => setToastMessage(''), 3500);
     }
   };
 

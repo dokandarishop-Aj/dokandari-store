@@ -34,6 +34,9 @@ import { collection, query, where, getDocs, addDoc, doc, setDoc } from 'firebase
 import { db } from '../lib/firebase';
 import {
   OFFICIAL_WHATSAPP_INT,
+  DEFAULT_CATEGORY_HEROES,
+  CategoryHeroConfig,
+  saveStoreContentPersisted,
   resolveSafeProductImageUrl,
   handleProductImageError,
   saveOrderPersisted,
@@ -73,6 +76,8 @@ interface ProductDetailPageProps {
   allProducts?: Product[];
   onSelectProduct?: (product: Product) => void;
   onInstantOrderProduct?: (product: Product) => void;
+  categoryHeroes?: Record<string, CategoryHeroConfig>;
+  onSaveCategoryHero?: (categoryId: string, updatedHero: CategoryHeroConfig) => Promise<void>;
 }
 
 interface ReviewItem {
@@ -94,6 +99,8 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   allProducts = [],
   onSelectProduct,
   onInstantOrderProduct,
+  categoryHeroes,
+  onSaveCategoryHero,
 }) => {
   const { addToCart } = useCart();
   const { firebaseUser, userProfile } = useAuth();
@@ -121,15 +128,38 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     setActivatedVideos({});
   }, [initialStep, product.id]);
 
-  // In-place 1-click URL refresh & AI Photo Auto-Fill state
+  // In-place 1-click URL refresh, multi-photo upload & AI Photo Auto-Fill state
   const [showRefreshBar, setShowRefreshBar] = useState(false);
   const [refreshUrl, setRefreshUrl] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshToast, setRefreshToast] = useState('');
   const [showAiEditBar, setShowAiEditBar] = useState(false);
   const [aiPromptInput, setAiPromptInput] = useState('');
-  const [aiUploadedImage, setAiUploadedImage] = useState<string>('');
+  const [aiUploadedImages, setAiUploadedImages] = useState<string[]>([]);
   const [isAiEditing, setIsAiEditing] = useState(false);
+
+  // Product Detail Hero Banner Edit state (Admin-only)
+  const activeHeroConfig: CategoryHeroConfig =
+    categoryHeroes?.[product.category] ||
+    DEFAULT_CATEGORY_HEROES[product.category] ||
+    DEFAULT_CATEGORY_HEROES.home_decor;
+  const [isEditingHero, setIsEditingHero] = useState(false);
+  const [heroTitleInput, setHeroTitleInput] = useState(activeHeroConfig.title);
+  const [heroSubtitleInput, setHeroSubtitleInput] = useState(activeHeroConfig.subtitle);
+  const [heroTagInput, setHeroTagInput] = useState(activeHeroConfig.tag);
+  const [heroImageInput, setHeroImageInput] = useState(activeHeroConfig.image);
+  const [savingHero, setSavingHero] = useState(false);
+
+  useEffect(() => {
+    const cfg =
+      categoryHeroes?.[product.category] ||
+      DEFAULT_CATEGORY_HEROES[product.category] ||
+      DEFAULT_CATEGORY_HEROES.home_decor;
+    setHeroTitleInput(cfg.title);
+    setHeroSubtitleInput(cfg.subtitle);
+    setHeroTagInput(cfg.tag);
+    setHeroImageInput(cfg.image);
+  }, [product.category, categoryHeroes]);
 
   // Instant Checkout Form state
   const initialCustomerName =
@@ -473,13 +503,77 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   };
 
   const handleAiPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    setRefreshToast(`📸 ${files.length}টি ছবি অপ্টিমাইজ করা হচ্ছে...`);
     try {
-      const dataUrl = await compressImageFileToDataUrl(file, 900, 0.84);
-      setAiUploadedImage(dataUrl);
+      const uploaded: string[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const dataUrl = await compressImageFileToDataUrl(files[i], 640, 0.68);
+        if (dataUrl) uploaded.push(dataUrl);
+      }
+      if (uploaded.length > 0) {
+        setAiUploadedImages((prev) => [...prev, ...uploaded]);
+        setRefreshToast(`✅ ${uploaded.length}টি ছবি প্রস্তুত! এখন "✨ AI অটো-ফিল ও সেভ" বা "ছবি সেভ করুন" চাপুন।`);
+        setTimeout(() => setRefreshToast(''), 3500);
+      }
     } catch (err) {
       console.warn('AI photo upload note:', err);
+    } finally {
+      e.target.value = '';
+    }
+  };
+
+  const handleSaveUploadedPhotosOnly = async () => {
+    if (aiUploadedImages.length === 0) return;
+    setIsAiEditing(true);
+    setRefreshToast('📸 নতুন ছবিগুলো ফায়ারবেস ডাটাবেজে সেভ হচ্ছে...');
+    try {
+      const mergedImages = [
+        ...aiUploadedImages,
+        ...product.images.filter((u) => !aiUploadedImages.includes(u)),
+      ];
+      const updated: Product = enrichProductFields({
+        ...product,
+        images: mergedImages,
+        updatedAt: Date.now(),
+      });
+      const saved = await saveProductPersisted(updated);
+      if (onProductUpdated) onProductUpdated(saved);
+      setSelectedImage(0);
+      setAiUploadedImages([]);
+      setRefreshToast(`✅ মোট ${saved.images.length}টি ছবি লাইভ ডাটাবেজে সফলভাবে সেভ হয়েছে!`);
+      setTimeout(() => setRefreshToast(''), 3500);
+    } finally {
+      setIsAiEditing(false);
+    }
+  };
+
+  const handleSavePdpHeroBanner = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingHero(true);
+    try {
+      const updatedHero: CategoryHeroConfig = {
+        title: heroTitleInput.trim() || activeHeroConfig.title,
+        subtitle: heroSubtitleInput.trim() || activeHeroConfig.subtitle,
+        tag: heroTagInput.trim() || activeHeroConfig.tag,
+        image: heroImageInput.trim() || activeHeroConfig.image,
+      };
+      if (onSaveCategoryHero) {
+        await onSaveCategoryHero(product.category, updatedHero);
+      } else {
+        await saveStoreContentPersisted({
+          categoryHeroes: {
+            ...(categoryHeroes || DEFAULT_CATEGORY_HEROES),
+            [product.category]: updatedHero,
+          },
+        });
+      }
+      setIsEditingHero(false);
+      setRefreshToast('✅ প্রোডাক্ট হিরো ব্যানার ফায়ারস্টোরে লাইভ সেভ হয়েছে!');
+      setTimeout(() => setRefreshToast(''), 3000);
+    } finally {
+      setSavingHero(false);
     }
   };
 
@@ -488,13 +582,14 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     setIsAiEditing(true);
     setRefreshToast('✨ AI দিয়ে প্রোডাক্টের বাংলা নাম, বিবরণ, ফিচার ও ভ্যারিয়েন্ট সাজানো হচ্ছে...');
     try {
-      const targetImage = aiUploadedImage || product.images[selectedImage] || product.images[0] || '';
+      const targetImage =
+        aiUploadedImages[0] || product.images[selectedImage] || product.images[0] || '';
       const res = await fetch('/api/gemini/ai-edit-section', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           sectionType: 'product',
-          prompt:
+          instruction:
             aiPromptInput.trim() ||
             `এই প্রোডাক্টটির (${product.name}) জন্য আকর্ষণীয় খাঁটি বাংলা নাম, বিস্তারিত বিবরণ, ফ্যাব্রিক/ম্যাটেরিয়াল, ৫টি মূল বৈশিষ্ট্য এবং সাইজ ও কালার ভ্যারিয়েন্ট তৈরি করো।`,
           imageDataUrl: targetImage,
@@ -510,13 +605,14 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
       });
       const json = await res.json();
       const d = json?.data || {};
-      const nextImages = aiUploadedImage
-        ? [aiUploadedImage, ...product.images.filter((u) => u !== aiUploadedImage)]
-        : product.images;
+      const nextImages =
+        aiUploadedImages.length > 0
+          ? [...aiUploadedImages, ...product.images.filter((u) => !aiUploadedImages.includes(u))]
+          : product.images;
 
       const updated: Product = enrichProductFields({
         ...product,
-        name: d.titleBn || product.name,
+        name: cleanProductTitle(d.name || d.titleBn || product.name),
         titleEn: d.titleEn || product.titleEn,
         category: d.category || product.category,
         price: Number(d.price) > 0 ? Number(d.price) : product.price,
@@ -543,9 +639,9 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
       const saved = await saveProductPersisted(updated);
       if (onProductUpdated) onProductUpdated(saved);
       setSelectedImage(0);
-      setAiUploadedImage('');
+      setAiUploadedImages([]);
       setAiPromptInput('');
-      setRefreshToast('✅ AI দিয়ে প্রোডাক্টের সকল তথ্য আপডেট ও লাইভ ডাটাবেজে সেভ হয়েছে!');
+      setRefreshToast('✅ AI দিয়ে প্রোডাক্টের সকল তথ্য ও ছবি লাইভ ফায়ারবেস ডাটাবেজে সেভ হয়েছে!');
       setTimeout(() => {
         setRefreshToast('');
         setShowAiEditBar(false);
@@ -1084,7 +1180,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
             <span>&larr; শপে ফিরে যান</span>
           </button>
 
-          <div className="flex items-center gap-1.5 sm:gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
             <button
               onClick={handleCopyLink}
               className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-bold text-stone-700 bg-white hover:bg-rose-50 px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-xl border border-stone-200 shadow-2xs transition-colors cursor-pointer"
@@ -1103,9 +1199,18 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               )}
             </button>
 
-            {/* Admin-Only Refresh, AI Auto-Edit & Full Edit Controls — Strictly hidden from customers unless Admin is logged in */}
+            {/* Admin-Only Refresh, AI Auto-Edit, Hero Edit & Full Edit Controls — Strictly hidden from customers unless Admin is logged in */}
             {isAdmin && (
               <>
+                <button
+                  onClick={() => setIsEditingHero(!isEditingHero)}
+                  className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-bold bg-amber-400 hover:bg-amber-300 text-stone-950 px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-xl shadow-2xs transition-colors cursor-pointer"
+                  title="প্রোডাক্ট হিরো ব্যানার এডিট করুন"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  <span>হিরো ব্যানার এডিট</span>
+                </button>
+
                 <button
                   onClick={() => {
                     setShowAiEditBar(!showAiEditBar);
@@ -1115,7 +1220,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                   title="ছবি বা নির্দেশনা দিয়ে AI অটো-ফিল ও এডিট করুন"
                 >
                   <Sparkles className="w-3.5 h-3.5 text-[#E11D48]" />
-                  <span>✨ AI এডিট</span>
+                  <span>✨ AI ও ৫+ ছবি আপলোড</span>
                 </button>
 
                 <button
@@ -1138,14 +1243,142 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                   title="Edit this product"
                 >
                   <Edit3 className="w-3.5 h-3.5 text-white" />
-                  <span>এডিট</span>
+                  <span>ফুল এডিট</span>
                 </button>
               </>
             )}
           </div>
         </div>
 
-        {/* Admin-Only AI Photo & Prompt Auto-Fill Bar on PDP */}
+        {/* Realistic Product Detail Hero Banner */}
+        <div className="relative rounded-2xl overflow-hidden bg-stone-900 border border-rose-200/60 shadow-sm">
+          <img
+            src={resolveSafeProductImageUrl(
+              activeHeroConfig.image || product.images[0],
+              product,
+              0
+            )}
+            alt={activeHeroConfig.title}
+            onError={(e) => handleProductImageError(e, product, 0)}
+            className="w-full h-28 sm:h-36 object-cover object-center opacity-45"
+            referrerPolicy="no-referrer"
+          />
+          <div className="absolute inset-0 bg-gradient-to-r from-stone-950/90 via-stone-950/65 to-stone-900/40 flex items-center justify-between px-4 sm:px-8">
+            <div className="space-y-1 max-w-2xl">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#E11D48] text-white text-[10px] font-bold uppercase tracking-wider">
+                  {activeHeroConfig.tag || categoryNameBn}
+                </span>
+                <span className="text-[11px] text-amber-300 font-bold">
+                  ✓ ১০০% অরিজিনাল কোয়ালিটি • সারা দেশে ক্যাশ অন ডেলিভারি
+                </span>
+              </div>
+              <h2 className="text-sm sm:text-xl font-extrabold text-white line-clamp-1">
+                {activeHeroConfig.title || `${categoryNameBn} — অফিশিয়াল কালেকশন`}
+              </h2>
+              <p className="text-[11px] sm:text-xs text-stone-200 line-clamp-1">
+                {activeHeroConfig.subtitle}
+              </p>
+            </div>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => setIsEditingHero(!isEditingHero)}
+                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-stone-950 text-xs font-extrabold shadow-md cursor-pointer shrink-0"
+              >
+                <Edit3 className="w-3.5 h-3.5" />
+                <span>হিরো ব্যানার এডিট</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Admin-Only Product Detail Hero Editor Box */}
+        {isAdmin && isEditingHero && (
+          <form
+            onSubmit={handleSavePdpHeroBanner}
+            className="bg-white border-2 border-amber-400 rounded-2xl p-4 shadow-md space-y-3 text-xs animate-in fade-in"
+          >
+            <div className="flex items-center justify-between pb-2 border-b border-stone-200">
+              <h3 className="font-extrabold text-stone-900 flex items-center gap-1.5">
+                <Edit3 className="w-4 h-4 text-[#E11D48]" />
+                <span>প্রোডাক্ট ও ক্যাটাগরি হিরো ব্যানার এডিট (ফায়ারস্টোরে লাইভ সেভ হবে)</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsEditingHero(false)}
+                className="text-stone-500 hover:text-stone-800 font-bold cursor-pointer"
+              >
+                ✕ বন্ধ করুন
+              </button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <div>
+                <label className="block font-bold text-stone-700 mb-1">ব্যানার শিরোনাম</label>
+                <input
+                  type="text"
+                  value={heroTitleInput}
+                  onChange={(e) => setHeroTitleInput(e.target.value)}
+                  className="w-full px-3 py-2 border border-stone-300 rounded-xl"
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-stone-700 mb-1">ট্যাগ ব্যাজ</label>
+                <input
+                  type="text"
+                  value={heroTagInput}
+                  onChange={(e) => setHeroTagInput(e.target.value)}
+                  className="w-full px-3 py-2 border border-stone-300 rounded-xl"
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-stone-700 mb-1">ব্যানার ছবির লিংক বা আপলোড</label>
+                <div className="flex gap-1.5">
+                  <input
+                    type="text"
+                    value={heroImageInput}
+                    onChange={(e) => setHeroImageInput(e.target.value)}
+                    className="flex-1 px-3 py-2 border border-stone-300 rounded-xl"
+                  />
+                  <label className="px-2.5 py-2 bg-rose-50 text-[#E11D48] border border-rose-200 rounded-xl font-bold cursor-pointer shrink-0 flex items-center">
+                    <Upload className="w-3.5 h-3.5" />
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={async (ev) => {
+                        const file = ev.target.files?.[0];
+                        if (!file) return;
+                        const dUrl = await compressImageFileToDataUrl(file, 900, 0.72);
+                        if (dUrl) setHeroImageInput(dUrl);
+                      }}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-col sm:flex-row gap-2.5 items-end">
+              <div className="flex-1 w-full">
+                <label className="block font-bold text-stone-700 mb-1">সাবটাইটেল</label>
+                <input
+                  type="text"
+                  value={heroSubtitleInput}
+                  onChange={(e) => setHeroSubtitleInput(e.target.value)}
+                  className="w-full px-3 py-2 border border-stone-300 rounded-xl"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={savingHero}
+                className="px-5 py-2 bg-[#E11D48] hover:bg-[#BE123C] text-white font-bold rounded-xl cursor-pointer shrink-0"
+              >
+                {savingHero ? 'সেভ হচ্ছে...' : 'ব্যানার লাইভ সেভ করুন'}
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* Admin-Only AI Photo & Multi-Image (5+ Photos) Auto-Fill Bar on PDP */}
         {isAdmin && showAiEditBar && (
           <section className="bg-[#FFF5F7] border-2 border-[#E11D48] rounded-2xl p-4 sm:p-5 shadow-md space-y-3 animate-in fade-in">
             <div className="flex items-center justify-between flex-wrap gap-2">
@@ -1155,10 +1388,10 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                 </span>
                 <div>
                   <h3 className="text-xs sm:text-sm font-extrabold text-stone-900">
-                    ✨ ছবি বা নির্দেশনা দিয়ে এই প্রোডাক্টের সকল তথ্য AI দিয়ে অটো-ফিল ও এডিট করুন
+                    ✨ একসাথে ৫+ ছবি আপলোড এবং AI দিয়ে এই প্রোডাক্টের সকল তথ্য অটো-ফিল ও এডিট করুন
                   </h3>
                   <p className="text-[11px] text-stone-600">
-                    নতুন প্রোডাক্টের ছবি আপলোড করুন অথবা সংক্ষেপে নির্দেশনা লিখুন — AI স্বয়ংক্রিয়ভাবে বাংলা নাম, দাম, ফ্যাব্রিক, ৫টি ফিচার ও বিবরণ সাজিয়ে ডাটাবেজে সেভ করবে।
+                    একসাথে ৫টি বা তার বেশি ছবি সিলেক্ট করে আপলোড করুন অথবা সংক্ষেপে নির্দেশনা লিখুন — সকল ছবি ও তথ্য সরাসরি ফায়ারবেস ডাটাবেজে রিয়েল-টাইম সেভ হবে।
                   </p>
                 </div>
               </div>
@@ -1168,26 +1401,42 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
                 <label className="px-3.5 py-2 bg-white hover:bg-rose-50 text-[#E11D48] border border-rose-300 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shrink-0 shadow-2xs">
                   <Upload className="w-3.5 h-3.5" />
-                  <span>📸 নতুন প্রোডাক্ট ছবি দিন (ঐচ্ছিক)</span>
+                  <span>📸 একসাথে একাধিক (৫+টি) ছবি আপলোড করুন</span>
                   <input
                     type="file"
                     accept="image/*"
+                    multiple
                     onChange={handleAiPhotoUpload}
                     className="hidden"
                   />
                 </label>
 
-                {aiUploadedImage && (
-                  <div className="flex items-center gap-2 bg-white px-2.5 py-1 rounded-xl border border-rose-200">
-                    <img
-                      src={aiUploadedImage}
-                      alt="Uploaded preview"
-                      className="w-9 h-9 rounded-lg object-cover"
-                    />
-                    <span className="text-[11px] font-bold text-emerald-700">নতুন ছবি যুক্ত হয়েছে</span>
+                {aiUploadedImages.length > 0 && (
+                  <div className="flex items-center gap-2 bg-white px-2.5 py-1.5 rounded-xl border border-rose-200 flex-wrap">
+                    <div className="flex -space-x-1.5">
+                      {aiUploadedImages.slice(0, 6).map((imgSrc, i) => (
+                        <img
+                          key={i}
+                          src={imgSrc}
+                          alt="Uploaded preview"
+                          className="w-8 h-8 rounded-lg object-cover border border-white shadow-2xs"
+                        />
+                      ))}
+                    </div>
+                    <span className="text-[11px] font-bold text-emerald-700">
+                      {aiUploadedImages.length}টি নতুন ছবি যুক্ত হয়েছে
+                    </span>
                     <button
                       type="button"
-                      onClick={() => setAiUploadedImage('')}
+                      onClick={handleSaveUploadedPhotosOnly}
+                      disabled={isAiEditing}
+                      className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold cursor-pointer"
+                    >
+                      শুধু ছবিগুলো সেভ করুন
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAiUploadedImages([])}
                       className="text-[11px] text-rose-600 font-bold hover:underline cursor-pointer"
                     >
                       বাতিল

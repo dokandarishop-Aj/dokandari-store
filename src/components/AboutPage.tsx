@@ -35,6 +35,7 @@ interface AboutPageProps {
   onOpenStoreProducts?: () => void;
   onEditFounder?: () => void;
   onRemoveFounderPhoto?: () => void;
+  totalProductsCount?: number;
 }
 
 export const AboutPage: React.FC<AboutPageProps> = ({
@@ -45,6 +46,7 @@ export const AboutPage: React.FC<AboutPageProps> = ({
   onOpenStoreProducts,
   onEditFounder,
   onRemoveFounderPhoto,
+  totalProductsCount = 27,
 }) => {
   const [isEditingPage, setIsEditingPage] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -68,7 +70,7 @@ export const AboutPage: React.FC<AboutPageProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           sectionType: 'founder_brand',
-          prompt:
+          instruction:
             aiPrompt.trim() ||
             'Dokandari ব্র্যান্ড পরিচিতি, প্রতিষ্ঠাতা পরিচিতি এবং অফিসের ঠিকানা সুন্দর ও প্রফেশনাল বাংলায় সাজিয়ে দাও।',
           currentData: {
@@ -123,17 +125,27 @@ export const AboutPage: React.FC<AboutPageProps> = ({
 
   return (
     <div className="bg-[#FAF9F6] min-h-screen pb-16 animate-in fade-in">
-      {/* Top Hero Banner */}
-      <div className="relative bg-gradient-to-br from-stone-900 via-stone-950 to-[#4c0519] text-white py-12 sm:py-16 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-5xl mx-auto space-y-4">
+      {/* Top Hero Banner with Live Store Metrics */}
+      <div className="relative bg-gradient-to-br from-stone-900 via-stone-950 to-[#4c0519] text-white py-10 sm:py-14 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-5xl mx-auto space-y-5">
           <div className="flex items-center justify-between gap-3 flex-wrap">
-            <button
-              onClick={onBackToHome}
-              className="inline-flex items-center gap-2 text-xs font-bold text-rose-200 hover:text-white transition-colors cursor-pointer bg-white/10 px-3.5 py-1.5 rounded-full backdrop-blur-xs border border-white/15"
-            >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              <span>&larr; হোম পেজে ফিরে যান</span>
-            </button>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={onBackToHome}
+                className="inline-flex items-center gap-2 text-xs font-bold text-rose-200 hover:text-white transition-colors cursor-pointer bg-white/10 px-3.5 py-2 rounded-xl backdrop-blur-xs border border-white/15"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span>হোম পেজে ফিরে যান</span>
+              </button>
+              {onOpenStoreProducts && (
+                <button
+                  onClick={onOpenStoreProducts}
+                  className="inline-flex items-center gap-1.5 text-xs font-bold bg-[#E11D48] hover:bg-[#BE123C] text-white px-3.5 py-2 rounded-xl shadow-xs cursor-pointer transition-colors"
+                >
+                  <span>সকল প্রোডাক্ট দেখুন ({totalProductsCount}টি)</span>
+                </button>
+              )}
+            </div>
 
             {isAdmin && (
               <div className="flex items-center gap-2 flex-wrap">
@@ -148,7 +160,7 @@ export const AboutPage: React.FC<AboutPageProps> = ({
                 )}
                 <button
                   onClick={() => setIsEditingPage(!isEditingPage)}
-                  className="inline-flex items-center gap-1.5 text-xs font-bold bg-[#E11D48] hover:bg-[#BE123C] text-white px-4 py-1.5 rounded-xl shadow-sm cursor-pointer transition-colors"
+                  className="inline-flex items-center gap-1.5 text-xs font-bold bg-amber-400 hover:bg-amber-300 text-stone-950 px-4 py-1.5 rounded-xl shadow-sm cursor-pointer transition-colors"
                 >
                   <Edit3 className="w-3.5 h-3.5" />
                   <span>{isEditingPage ? 'এডিট বন্ধ করুন' : '✨ AI ও পেইজ এডিট করুন'}</span>
@@ -157,16 +169,40 @@ export const AboutPage: React.FC<AboutPageProps> = ({
             )}
           </div>
 
-          <div className="inline-block px-3 py-1 rounded-md bg-[#E11D48] text-white text-xs font-bold tracking-wider uppercase">
-            BRAND STORY &amp; HERITAGE
-          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
+            <div className="lg:col-span-8 space-y-3">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#E11D48] text-white text-xs font-bold tracking-wider uppercase">
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>ভেরিফাইড ব্র্যান্ড পরিচিতি • Dokandari Official</span>
+              </div>
 
-          <h1 className="text-2xl sm:text-4xl font-black tracking-tight leading-tight">
-            {localPage.aboutHeadline}
-          </h1>
-          <p className="text-xs sm:text-base text-stone-200 max-w-2xl leading-relaxed">
-            {localPage.aboutSubtitle}
-          </p>
+              <h1 className="text-2xl sm:text-4xl font-black tracking-tight leading-tight">
+                {localPage.aboutHeadline}
+              </h1>
+              <p className="text-xs sm:text-base text-stone-200 max-w-2xl leading-relaxed">
+                {localPage.aboutSubtitle}
+              </p>
+            </div>
+
+            <div className="lg:col-span-4 grid grid-cols-2 gap-2.5">
+              <div className="bg-white/10 backdrop-blur-xs border border-white/15 rounded-2xl p-3.5 text-center">
+                <span className="block text-xl sm:text-2xl font-black text-amber-300">{totalProductsCount}+</span>
+                <span className="text-[11px] text-rose-100">অরিজিনাল পণ্য</span>
+              </div>
+              <div className="bg-white/10 backdrop-blur-xs border border-white/15 rounded-2xl p-3.5 text-center">
+                <span className="block text-xl sm:text-2xl font-black text-emerald-300">৬৪ জেলা</span>
+                <span className="text-[11px] text-rose-100">হোম ডেলিভারি</span>
+              </div>
+              <div className="bg-white/10 backdrop-blur-xs border border-white/15 rounded-2xl p-3.5 text-center">
+                <span className="block text-xl sm:text-2xl font-black text-white">১০০%</span>
+                <span className="text-[11px] text-rose-100">পার্সেল খুলে দেখার সুবিধা</span>
+              </div>
+              <div className="bg-white/10 backdrop-blur-xs border border-white/15 rounded-2xl p-3.5 text-center">
+                <span className="block text-xl sm:text-2xl font-black text-amber-300">৭ দিন</span>
+                <span className="text-[11px] text-rose-100">সহজ এক্সচেঞ্জ গ্যারান্টি</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -449,24 +485,40 @@ export const AboutPage: React.FC<AboutPageProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 text-xs text-stone-700">
             <div className="flex items-start gap-3">
               <MapPin className="w-5 h-5 text-[#E11D48] shrink-0 mt-0.5" />
-              <div>
+              <div className="space-y-1">
                 <span className="font-bold block text-stone-900">ঠিকানা ১ (শোরুম ও ওয়্যারহাউজ)</span>
-                <span className="text-stone-600">
+                <span className="text-stone-600 block">
                   {localPage.warehouseAddress ||
                     founderData.address ||
                     'বি-৬১/১৪, জলেশ্বর, সাভার - ১৩৪০, ঢাকা (১ম তলা)'}
                 </span>
+                <a
+                  href="https://www.google.com/maps/search/?api=1&query=Jaleshwar+Savar+Dhaka+1340+Bangladesh"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-[11px] font-bold text-[#E11D48] hover:underline"
+                >
+                  <span>📍 Google Map-এ লোকেশন দেখুন &rarr;</span>
+                </a>
               </div>
             </div>
 
             <div className="flex items-start gap-3">
               <MapPin className="w-5 h-5 text-[#E11D48] shrink-0 mt-0.5" />
-              <div>
+              <div className="space-y-1">
                 <span className="font-bold block text-stone-900">ঠিকানা ২ (কর্পোরেট ও ট্রেনিং অফিস)</span>
-                <span className="text-stone-600">
+                <span className="text-stone-600 block">
                   {localPage.corporateAddress ||
                     'সাভার বাস স্ট্যান্ড, শহীদ প্লাজা, দ্বিতীয় তলা'}
                 </span>
+                <a
+                  href="https://www.google.com/maps/search/?api=1&query=Shahid+Plaza+Savar+Bus+Stand+Dhaka+Bangladesh"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-[11px] font-bold text-[#E11D48] hover:underline"
+                >
+                  <span>📍 Google Map-এ লোকেশন দেখুন &rarr;</span>
+                </a>
               </div>
             </div>
 

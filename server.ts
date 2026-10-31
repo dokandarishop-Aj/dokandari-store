@@ -2373,17 +2373,21 @@ Return strict JSON.
     }
   });
 
-  // 6. Real Server-Side Conversions API (Meta CAPI & Multi-Platform Event Dispatcher)
+  // 6. Real Server-Side Conversions API (Meta CAPI + TikTok Events API + Deduplication)
   app.post('/api/pixel/event', async (req, res) => {
     const {
       eventName,
+      eventId,
       eventData,
       customer,
+      fbp,
+      fbc,
       url,
       metaPixelIds,
       tiktokPixelIds,
       youtubeTagIds,
       facebookCapiToken,
+      tiktokAccessToken,
     } = req.body || {};
 
     const activeMetaIds: string[] = Array.isArray(metaPixelIds)
@@ -2391,16 +2395,43 @@ Return strict JSON.
       : process.env.FACEBOOK_PIXEL_ID
       ? [process.env.FACEBOOK_PIXEL_ID]
       : [];
+    const activeTiktokIds: string[] = Array.isArray(tiktokPixelIds) ? tiktokPixelIds : [];
     const capiToken = (facebookCapiToken || process.env.FACEBOOK_CAPI_TOKEN || '').trim();
+    const ttToken = (tiktokAccessToken || process.env.TIKTOK_ACCESS_TOKEN || '').trim();
 
-    const capiResults: { pixelId: string; status: string }[] = [];
+    const deduplicationEventId =
+      eventId || `dkd_${String(eventName || 'event').toLowerCase()}_${Date.now()}`;
+    const eventTime = Math.floor(Date.now() / 1000);
+    const clientIp =
+      (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
+      req.ip ||
+      req.socket.remoteAddress ||
+      '127.0.0.1';
+    const clientUa = req.headers['user-agent'] || 'Mozilla/5.0';
+
+    const contentIds: string[] = Array.isArray(eventData?.content_ids)
+      ? eventData.content_ids.map(String)
+      : eventData?.product?.id
+      ? [String(eventData.product.id)]
+      : Array.isArray(eventData?.items)
+      ? eventData.items.map((i: any) => String(i.productId || i.id || 'item'))
+      : [];
+
+    const numericValue = Number(
+      eventData?.total ?? eventData?.value ?? eventData?.product?.price ?? 0
+    );
+
+    const capiResults: { platform: string; pixelId: string; status: string; eventId: string }[] = [];
 
     if (activeMetaIds.length > 0 && capiToken) {
-      const eventTime = Math.floor(Date.now() / 1000);
       const userData: Record<string, any> = {
-        client_ip_address: req.ip || req.socket.remoteAddress || '127.0.0.1',
-        client_user_agent: req.headers['user-agent'] || 'Mozilla/5.0',
+        client_ip_address: clientIp,
+        client_user_agent: clientUa,
+        country: [crypto.createHash('sha256').update('bd').digest('hex')],
       };
+
+      if (fbp) userData.fbp = String(fbp);
+      if (fbc) userData.fbc = String(fbc);
 
       if (customer?.phone) {
         const cleanPhone = String(customer.phone).replace(/\D/g, '');
@@ -2415,6 +2446,26 @@ Return strict JSON.
             .digest('hex'),
         ];
       }
+      if (customer?.name) {
+        userData.fn = [
+          crypto
+            .createHash('sha256')
+            .update(String(customer.name).trim().toLowerCase())
+            .digest('hex'),
+        ];
+      }
+
+      const customData: Record<string, any> = {
+        currency: 'BDT',
+        value: numericValue,
+        content_type: 'product',
+      };
+      if (contentIds.length > 0) {
+        customData.content_ids = contentIds;
+      }
+      if (eventData?.orderId) {
+        customData.order_id = String(eventData.orderId);
+      }
 
       await Promise.all(
         activeMetaIds.map(async (pixelId) => {
@@ -2428,23 +2479,80 @@ Return strict JSON.
                   {
                     event_name: eventName || 'PageView',
                     event_time: eventTime,
+                    event_id: deduplicationEventId,
                     action_source: 'website',
                     event_source_url: url || 'https://dokandari.com',
                     user_data: userData,
-                    custom_data: {
-                      currency: 'BDT',
-                      value: Number(eventData?.total || eventData?.value || eventData?.product?.price || 0),
-                    },
+                    custom_data: customData,
                   },
                 ],
               }),
             });
             capiResults.push({
+              platform: 'meta_capi',
               pixelId,
+              eventId: deduplicationEventId,
               status: graphRes.ok ? 'sent_to_meta_graph_api' : `http_${graphRes.status}`,
             });
           } catch (e: any) {
-            capiResults.push({ pixelId, status: e?.message || 'network_error' });
+            capiResults.push({
+              platform: 'meta_capi',
+              pixelId,
+              eventId: deduplicationEventId,
+              status: e?.message || 'network_error',
+            });
+          }
+        })
+      );
+    }
+
+    if (activeTiktokIds.length > 0 && ttToken) {
+      await Promise.all(
+        activeTiktokIds.map(async (ttPixelId) => {
+          try {
+            const ttRes = await fetch('https://business-api.tiktok.com/open_api/v1.3/event/track/', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Access-Token': ttToken,
+              },
+              body: JSON.stringify({
+                pixel_code: ttPixelId,
+                event: eventName === 'Purchase' ? 'CompletePayment' : eventName || 'PageView',
+                event_id: deduplicationEventId,
+                timestamp: new Date().toISOString(),
+                context: {
+                  page: { url: url || 'https://dokandari.com' },
+                  user: {
+                    ip: clientIp,
+                    user_agent: clientUa,
+                  },
+                },
+                properties: {
+                  currency: 'BDT',
+                  value: numericValue,
+                  content_type: 'product',
+                  contents: contentIds.map((cid) => ({
+                    content_id: cid,
+                    quantity: 1,
+                    price: numericValue,
+                  })),
+                },
+              }),
+            });
+            capiResults.push({
+              platform: 'tiktok_events_api',
+              pixelId: ttPixelId,
+              eventId: deduplicationEventId,
+              status: ttRes.ok ? 'sent_to_tiktok_events_api' : `http_${ttRes.status}`,
+            });
+          } catch (e: any) {
+            capiResults.push({
+              platform: 'tiktok_events_api',
+              pixelId: ttPixelId,
+              eventId: deduplicationEventId,
+              status: e?.message || 'network_error',
+            });
           }
         })
       );
@@ -2453,13 +2561,117 @@ Return strict JSON.
     res.json({
       success: true,
       eventName: eventName || 'PageView',
+      eventId: deduplicationEventId,
       dispatchedAt: Date.now(),
       metaPixels: activeMetaIds,
-      tiktokPixels: tiktokPixelIds || [],
+      tiktokPixels: activeTiktokIds,
       youtubeTags: youtubeTagIds || [],
+      contentIds,
+      value: numericValue,
+      currency: 'BDT',
       capiResults,
       status: capiResults.length > 0 ? 'live_capi_dispatched' : 'browser_pixel_active',
     });
+  });
+
+  // 6.1 Live Meta Commerce Manager & Google Merchant Center Product Catalog Feed (XML & JSON)
+  // Syncs directly with live Firestore database so product IDs (content_ids) and URLs always match 100%
+  const fetchLiveFirestoreCatalogForFeed = async () => {
+    try {
+      const firestoreUrl =
+        'https://firestore.googleapis.com/v1/projects/mineral-goal-vc70r/databases/ai-studio-2b5c8a27-d4b7-4db4-9f08-095cd99a7c33/documents/products?pageSize=200';
+      const resp = await fetch(firestoreUrl);
+      if (!resp.ok) return [];
+      const data: any = await resp.json();
+      const docs = Array.isArray(data?.documents) ? data.documents : [];
+      return docs
+        .map((d: any) => {
+          const f = d.fields || {};
+          const id = f.id?.stringValue || d.name?.split('/').pop() || '';
+          const name = f.name?.stringValue || 'Dokandari Product';
+          const description =
+            f.description?.stringValue ||
+            `${name} — Dokandari অফিশিয়াল স্টোরের ১০০% অরিজিনাল কোয়ালিটি পণ্য।`;
+          const price = Number(f.price?.integerValue || f.price?.doubleValue || 990);
+          const category = f.category?.stringValue || 'home_decor';
+          const status = f.status?.stringValue || 'published';
+          const inStock = f.inStock?.booleanValue !== false;
+          const rawImgs = f.images?.arrayValue?.values || [];
+          const firstImg = rawImgs[0]?.stringValue || '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg';
+          const imageLink = firstImg.startsWith('http')
+            ? firstImg
+            : firstImg.startsWith('data:')
+            ? 'https://dokandari.com/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg'
+            : `https://dokandari.com${firstImg.startsWith('/') ? '' : '/'}${firstImg}`;
+          return { id, name, description, price, category, status, inStock, imageLink };
+        })
+        .filter((p: any) => p.id && p.status !== 'draft');
+    } catch {
+      return [];
+    }
+  };
+
+  app.get('/api/catalog/feed.json', async (_req, res) => {
+    const items = await fetchLiveFirestoreCatalogForFeed();
+    res.json({
+      store: 'Dokandari (দোকানদারি)',
+      domain: 'https://dokandari.com',
+      currency: 'BDT',
+      count: items.length,
+      products: items.map((p: any) => ({
+        id: p.id,
+        title: p.name,
+        description: p.description,
+        availability: p.inStock ? 'in stock' : 'out of stock',
+        condition: 'new',
+        price: `${p.price} BDT`,
+        link: `https://dokandari.com/products/${encodeURIComponent(p.id)}`,
+        image_link: p.imageLink,
+        brand: 'Dokandari',
+        category: p.category,
+      })),
+    });
+  });
+
+  app.get('/api/catalog/feed.xml', async (_req, res) => {
+    const items = await fetchLiveFirestoreCatalogForFeed();
+    const escapeXml = (str: string) =>
+      String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&apos;');
+
+    const xmlItems = items
+      .map(
+        (p: any) => `    <item>
+      <g:id>${escapeXml(p.id)}</g:id>
+      <g:title>${escapeXml(p.name)}</g:title>
+      <g:description>${escapeXml(p.description)}</g:description>
+      <g:link>https://dokandari.com/products/${encodeURIComponent(p.id)}</g:link>
+      <g:image_link>${escapeXml(p.imageLink)}</g:image_link>
+      <g:brand>Dokandari</g:brand>
+      <g:condition>new</g:condition>
+      <g:availability>${p.inStock ? 'in stock' : 'out of stock'}</g:availability>
+      <g:price>${p.price} BDT</g:price>
+      <g:product_type>${escapeXml(p.category)}</g:product_type>
+    </item>`
+      )
+      .join('\n');
+
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<rss xmlns:g="http://base.google.com/ns/1.0" version="2.0">
+  <channel>
+    <title>Dokandari Official Product Catalog</title>
+    <link>https://dokandari.com</link>
+    <description>Dokandari Bangladesh Official Live E-Commerce Product Feed</description>
+${xmlItems}
+  </channel>
+</rss>`;
+
+    res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+    res.send(xml);
   });
 
   // 5. Real AI Customer Shopping Assistant Endpoint

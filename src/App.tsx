@@ -45,6 +45,7 @@ import {
   mergeCatalogProducts,
   saveProductPersisted,
   deleteProductPersisted,
+  setRemoteDeletedProductIds,
   syncAllLocalProductsToFirestore,
   compressImageFileToDataUrl,
 } from './lib/storeSync';
@@ -172,12 +173,15 @@ function StoreMain() {
     fetch('/api/catalog/recover-real-images', { method: 'POST' }).catch(() => null);
     syncAllLocalProductsToFirestore().catch(() => null);
 
+    let latestRemoteList: Product[] = INITIAL_PRODUCTS;
+
     const unsubProducts = onSnapshot(
       collection(db, 'products'),
       (snap) => {
         if (!snap.empty) {
           const list: Product[] = [];
           snap.forEach((docSnap) => list.push(docSnap.data() as Product));
+          latestRemoteList = list;
           const merged = mergeCatalogProducts(list);
           setProducts(merged);
           setDetailedProduct((current) => {
@@ -186,11 +190,29 @@ function StoreMain() {
             return updated || current;
           });
         } else {
+          latestRemoteList = INITIAL_PRODUCTS;
           setProducts(mergeCatalogProducts(INITIAL_PRODUCTS));
         }
       },
       (err) => {
         console.warn('Realtime products listener note', err);
+      }
+    );
+
+    const unsubDeletedProducts = onSnapshot(
+      doc(db, 'settings', 'deleted_products'),
+      (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          if (Array.isArray(data?.ids)) {
+            setRemoteDeletedProductIds(data.ids);
+            const merged = mergeCatalogProducts(latestRemoteList);
+            setProducts(merged);
+          }
+        }
+      },
+      (err) => {
+        console.warn('Realtime deleted_products listener note', err);
       }
     );
 
@@ -275,6 +297,7 @@ function StoreMain() {
 
     return () => {
       unsubProducts();
+      unsubDeletedProducts();
       unsubSettings();
       unsubCredentials();
     };
@@ -736,9 +759,20 @@ function StoreMain() {
             founderData={founderData}
             pageContent={pageContent}
             isAdmin={isAdminAuthenticated}
+            totalProductsCount={publishedProducts.length}
             onBackToHome={() => {
               setIsAboutOpen(false);
               window.history.pushState(null, '', '/');
+            }}
+            onOpenStoreProducts={() => {
+              setIsAboutOpen(false);
+              setActiveCategory('all');
+              setActiveCategoryPage(null);
+              window.history.pushState(null, '', '/');
+              setTimeout(() => {
+                const elem = document.getElementById('products-section');
+                if (elem) elem.scrollIntoView({ behavior: 'smooth' });
+              }, 100);
             }}
             onEditFounder={() => setIsFounderEditOpen(true)}
             onRemoveFounderPhoto={handleRemoveFounderPhoto}
@@ -777,6 +811,8 @@ function StoreMain() {
             initialStep={detailedProductStep}
             isAdmin={isAdminAuthenticated}
             allProducts={publishedProducts}
+            categoryHeroes={categoryHeroes}
+            onSaveCategoryHero={handleSaveCategoryHero}
             onSelectProduct={(p) => {
               setDetailedProductStep('product');
               setDetailedProduct(p);
@@ -833,7 +869,7 @@ function StoreMain() {
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
             onInstantOrder={handleInstantOrder}
-            onEditProduct={(p) => setEditingProduct(p)}
+            onEditProduct={isAdminAuthenticated ? (p) => setEditingProduct(p) : undefined}
           />
         ) : (
           <>
@@ -1627,6 +1663,102 @@ function StoreMain() {
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
       />
+
+      {/* Responsive Mobile & Web-App Quick Navigation Dock */}
+      {!isAdminOpen && !editingProduct && (
+        <nav
+          aria-label="Mobile Web App Navigation"
+          className="fixed bottom-0 inset-x-0 z-40 sm:hidden bg-white/95 backdrop-blur-md border-t border-rose-100 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] px-2 py-1.5 flex items-center justify-around"
+        >
+          <button
+            onClick={() => {
+              setActiveCategory('all');
+              setActiveCategoryPage(null);
+              setDetailedProduct(null);
+              setIsAboutOpen(false);
+              setIsVideoGalleryOpen(false);
+              setIsPolicyOpen(false);
+              setIsTrackingOpen(false);
+              window.history.pushState(null, '', '/');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className={`flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-xl text-[10px] font-bold transition-colors cursor-pointer ${
+              !detailedProduct && !activeCategoryPage && !isAboutOpen && !isTrackingOpen && !isVideoGalleryOpen
+                ? 'text-[#E11D48] bg-rose-50'
+                : 'text-stone-600'
+            }`}
+          >
+            <span className="text-sm leading-none">🏠</span>
+            <span>হোম</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setActiveCategory('all');
+              setActiveCategoryPage(null);
+              setDetailedProduct(null);
+              setIsAboutOpen(false);
+              setIsVideoGalleryOpen(false);
+              setIsPolicyOpen(false);
+              setIsTrackingOpen(false);
+              window.history.pushState(null, '', '/');
+              setTimeout(() => {
+                const elem = document.getElementById('products-section');
+                if (elem) elem.scrollIntoView({ behavior: 'smooth' });
+              }, 80);
+            }}
+            className="flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-xl text-[10px] font-bold text-stone-600 hover:text-[#E11D48] transition-colors cursor-pointer"
+          >
+            <span className="text-sm leading-none">🛍️</span>
+            <span>সব পণ্য</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setIsAboutOpen(true);
+              setActiveCategoryPage(null);
+              setDetailedProduct(null);
+              setIsVideoGalleryOpen(false);
+              setIsPolicyOpen(false);
+              setIsTrackingOpen(false);
+              window.location.hash = '#/about';
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className={`flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-xl text-[10px] font-bold transition-colors cursor-pointer ${
+              isAboutOpen ? 'text-[#E11D48] bg-rose-50' : 'text-stone-600'
+            }`}
+          >
+            <span className="text-sm leading-none">🏢</span>
+            <span>ব্র্যান্ড</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setIsTrackingOpen(true);
+              setActiveCategoryPage(null);
+              setDetailedProduct(null);
+              setIsAboutOpen(false);
+              setIsVideoGalleryOpen(false);
+              setIsPolicyOpen(false);
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className={`flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-xl text-[10px] font-bold transition-colors cursor-pointer ${
+              isTrackingOpen ? 'text-[#E11D48] bg-rose-50' : 'text-stone-600'
+            }`}
+          >
+            <span className="text-sm leading-none">🚚</span>
+            <span>ট্র্যাকিং</span>
+          </button>
+
+          <button
+            onClick={() => setIsMenuOpen(true)}
+            className="flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-xl text-[10px] font-bold text-stone-600 hover:text-[#E11D48] transition-colors cursor-pointer"
+          >
+            <span className="text-sm leading-none">☰</span>
+            <span>মেনু</span>
+          </button>
+        </nav>
+      )}
     </div>
   );
 }
