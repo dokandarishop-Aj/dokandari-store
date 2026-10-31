@@ -41,7 +41,13 @@ import {
 } from 'lucide-react';
 import { Product } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { compressImageFileToDataUrl, saveProductPersisted } from '../lib/storeSync';
+import {
+  compressImageFileToDataUrl,
+  saveProductPersisted,
+  resolveSafeProductImageUrl,
+  handleProductImageError,
+} from '../lib/storeSync';
+import { OmniAuth } from './OmniAuth';
 import {
   AssistantLanguageMode,
   PRODUCT_IMAGE_SLOT_META,
@@ -1166,88 +1172,57 @@ export const OmniFlowStudio: React.FC<OmniFlowStudioProps> = ({
   });
 
   // ============================================================================
-  // COMPACT / HIDDEN MINI LAUNCHER VIEW (Default when not in Full Edit Mode)
+  // COMPACT / HIDDEN MINI LAUNCHER VIEW (Soft Pink Theme + OmniAuth + Zero Billing Buttons)
   // ============================================================================
   if (!isFullEditMode) {
     return (
-      <div className="bg-white rounded-3xl border border-rose-200 p-5 sm:p-6 shadow-xs space-y-5 transition-all">
-        {/* Top Row: Mini Studio Title + Gmail Login + Open Full Edit Mode Button */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      <div className="bg-[#FFF0F3] rounded-3xl border-2 border-rose-300 p-5 sm:p-7 shadow-sm space-y-5 transition-all">
+        {/* 1. Dedicated OmniAuth Component (Google/Gmail Subscription Verification saved to localStorage) */}
+        <OmniAuth compact />
+
+        {/* 2. Mini Studio Header + Open Full Edit Mode Button */}
+        <div className="bg-[#FFE4E9]/80 rounded-2xl border border-rose-300 p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="flex items-start sm:items-center gap-3.5">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#E11D48] to-rose-500 flex items-center justify-center text-white shadow-sm shrink-0">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#E11D48] to-rose-600 flex items-center justify-center text-white shadow-sm shrink-0">
               <Video className="w-6 h-6" />
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <h2 className="text-base sm:text-lg font-extrabold text-stone-900">
-                  🎬 গুগল ফ্লো ও ওমনি মিনি ভিডিও জেনারেটর (Google Flow & Omni 1.1)
+                <h2 className="text-base sm:text-lg font-extrabold text-rose-950">
+                  🎬 গুগল ফ্লো ও ওমনি এআই স্টুডিও (Google Flow & Gemini Omni 1.1)
                 </h2>
-                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-50 text-[#E11D48] border border-rose-200">
-                  মিনি মোড (সংক্ষিপ্ত ভিউ)
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-white text-[#E11D48] border border-rose-300">
+                  সফট পিঙ্ক সংক্ষিপ্ত ভিউ
                 </span>
-                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                  ১০০% রিয়েল এপিআই (No Demo)
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                  ✓ Gmail লগইন সক্রিয় (কোনো বিলিং লাগবে না)
                 </span>
               </div>
-              <p className="text-xs text-stone-600 mt-1">
-                প্যানেলটি এখানে সংক্ষিপ্ত (Hidden) রাখা হয়েছে। নিচে বা ডানপাশের বাটনে ক্লিক করলে সরাসরি <strong>ফুল এডিট মোডে (Full Edit Mode)</strong> চলে যাবে—যেখানে প্রম্পট জেনারেট ও মডিফাই করে রিয়েল ভিডিও বানাতে পারবেন।
+              <p className="text-xs text-rose-900/80 mt-1">
+                প্রতিটি ফিচার আলাদা আলাদা কার্ডে সাজানো হয়েছে। ডানপাশের বাটনে ক্লিক করলে সরাসরি <strong>ফুল এডিট মোডে (Full Edit Mode)</strong> চলে যাবে।
               </p>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-            {/* Gmail Login / Connected Badge */}
-            {connectedEmail ? (
-              <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-xs">
-                {connectedPhoto ? (
-                  <img
-                    src={connectedPhoto}
-                    alt={connectedEmail}
-                    className="w-6 h-6 rounded-full object-cover border border-emerald-300"
-                  />
-                ) : (
-                  <UserCheck className="w-4 h-4 text-emerald-600" />
-                )}
-                <div className="text-left">
-                  <div className="text-[11px] font-extrabold text-emerald-900 leading-none">
-                    {connectedEmail}
-                  </div>
-                  <div className="text-[10px] text-emerald-700 font-semibold mt-0.5">
-                    ✓ জিমেইল ও ওমনি সংযুক্ত
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={handleGmailLogin}
-                disabled={authLoading}
-                className="px-3.5 py-2.5 rounded-xl bg-white hover:bg-stone-50 text-stone-800 border border-stone-300 text-xs font-extrabold flex items-center gap-2 shadow-2xs cursor-pointer"
-              >
-                <LogIn className="w-4 h-4 text-[#E11D48]" />
-                <span>{authLoading ? 'লগইন হচ্ছে...' : '🔐 জিমেইল (Gmail) দিয়ে ওমনি লগইন'}</span>
-              </button>
-            )}
-
-            {/* Open Full Edit Mode Primary Button */}
-            <button
-              type="button"
-              onClick={() => setIsFullEditMode(true)}
-              className="px-5 py-2.5 rounded-xl bg-[#E11D48] hover:bg-[#BE123C] text-white text-xs sm:text-sm font-extrabold flex items-center gap-2 shadow-md transition-all cursor-pointer"
-            >
-              <Edit3 className="w-4 h-4" />
-              <span>ফুল এডিট মোডে যান (Open Full Studio)</span>
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => setIsFullEditMode(true)}
+            className="px-5 py-3 rounded-2xl bg-[#E11D48] hover:bg-[#BE123C] text-white text-xs sm:text-sm font-extrabold flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer shrink-0"
+          >
+            <Edit3 className="w-4 h-4" />
+            <span>ফুল এডিট মোডে যান (Open Full Studio)</span>
+            <ChevronRight className="w-4 h-4" />
+          </button>
         </div>
 
-        {/* Quick Mini Launcher Strip: Click anywhere or pick product to jump into Full Edit Mode */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 border-t border-rose-100">
-          <div className="p-3.5 rounded-2xl bg-[#FFFBFB] border border-rose-100 flex items-center justify-between gap-3">
+        {/* 3. Separated Soft Pink Feature Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="p-4 rounded-2xl bg-[#FFF7F9] border-2 border-rose-200 flex items-center justify-between gap-3 shadow-2xs">
             <div>
-              <span className="text-[11px] font-bold text-stone-500 block">ধাপ ১: প্রোডাক্ট ও ব্র্যান্ড</span>
-              <span className="text-xs font-extrabold text-stone-900">
+              <span className="text-[11px] font-extrabold text-[#E11D48] block">
+                ফিচার ০১: প্রোডাক্ট ও শোরুম নির্বাচন
+              </span>
+              <span className="text-xs font-extrabold text-stone-900 mt-0.5 block">
                 {uploadedImages.length > 0
                   ? `${uploadedImages.length}টি ছবি সিলেক্টেড • ${brandName}`
                   : `ক্যাটালগ থেকে ৩-৪টি ছবি নির্বাচন করুন`}
@@ -1256,16 +1231,18 @@ export const OmniFlowStudio: React.FC<OmniFlowStudioProps> = ({
             <button
               type="button"
               onClick={() => setIsFullEditMode(true)}
-              className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-[#E11D48] text-xs font-bold border border-rose-200 cursor-pointer shrink-0"
+              className="px-3.5 py-2 rounded-xl bg-[#FFE4E9] hover:bg-rose-200 text-[#E11D48] text-xs font-extrabold border border-rose-300 cursor-pointer shrink-0"
             >
               ছবি দিন &rarr;
             </button>
           </div>
 
-          <div className="p-3.5 rounded-2xl bg-[#FFFBFB] border border-rose-100 flex items-center justify-between gap-3">
+          <div className="p-4 rounded-2xl bg-[#FFF7F9] border-2 border-rose-200 flex items-center justify-between gap-3 shadow-2xs">
             <div>
-              <span className="text-[11px] font-bold text-stone-500 block">ধাপ ২: প্রম্পট জেনারেট ও এডিট</span>
-              <span className="text-xs font-extrabold text-stone-900">
+              <span className="text-[11px] font-extrabold text-[#E11D48] block">
+                ফিচার ০২: বাংলা স্ক্রিপ্ট ও প্রম্পট এডিটর
+              </span>
+              <span className="text-xs font-extrabold text-stone-900 mt-0.5 block">
                 {hasGeneratedPlan
                   ? 'প্রম্পট প্রস্তুত — ক্লিক করে মডিফাই করুন'
                   : 'প্রম্পট তৈরি করে নিজের মতো মডিফাই করুন'}
@@ -1274,26 +1251,27 @@ export const OmniFlowStudio: React.FC<OmniFlowStudioProps> = ({
             <button
               type="button"
               onClick={() => setIsFullEditMode(true)}
-              className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-[#E11D48] text-xs font-bold border border-rose-200 cursor-pointer shrink-0"
+              className="px-3.5 py-2 rounded-xl bg-[#FFE4E9] hover:bg-rose-200 text-[#E11D48] text-xs font-extrabold border border-rose-300 cursor-pointer shrink-0"
             >
               প্রম্পট এডিটর &rarr;
             </button>
           </div>
 
-          <div className="p-3.5 rounded-2xl bg-[#FFFBFB] border border-rose-100 flex items-center justify-between gap-3">
+          <div className="p-4 rounded-2xl bg-[#FFF7F9] border-2 border-rose-200 flex items-center justify-between gap-3 shadow-2xs">
             <div>
-              <span className="text-[11px] font-bold text-stone-500 block">ধাপ ৩: রিয়েল ওমনি ভিডিও</span>
-              <span className="text-xs font-extrabold text-stone-900">
-                সাবস্ক্রিপশন / ফ্রি ক্রেডিটে রিয়েল রেন্ডার
+              <span className="text-[11px] font-extrabold text-[#E11D48] block">
+                ফিচার ০৩: রিয়েল ওমনি ভিডিও ও ছবি
+              </span>
+              <span className="text-xs font-extrabold text-stone-900 mt-0.5 block">
+                জিমেইল লগইনে সরাসরি রিয়েল ভিডিও রেন্ডার
               </span>
             </div>
             <button
               type="button"
-              onClick={handleConnectGoogleSubscriptionKey}
-              className="px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold border border-emerald-200 cursor-pointer shrink-0 flex items-center gap-1"
+              onClick={() => setIsFullEditMode(true)}
+              className="px-3.5 py-2 rounded-xl bg-[#E11D48] hover:bg-[#BE123C] text-white text-xs font-extrabold cursor-pointer shrink-0"
             >
-              <Key className="w-3.5 h-3.5" />
-              <span>ক্রেডিট সংযোগ</span>
+              স্টুডিও খুলুন &rarr;
             </button>
           </div>
         </div>
@@ -1302,181 +1280,74 @@ export const OmniFlowStudio: React.FC<OmniFlowStudioProps> = ({
   }
 
   // ============================================================================
-  // FULL EDIT MODE WORKSPACE (100% Clean Light Theme, Real Gmail Login, Prompt Editor)
+  // FULL EDIT MODE WORKSPACE (100% Soft Pink Theme #FFF0F3, OmniAuth, Separated Feature Cards, Zero Billing Prompts)
   // ============================================================================
   return (
     <div
       className={`${
         isFullscreenModal
-          ? 'fixed inset-0 z-50 bg-[#FAF9F6] overflow-y-auto p-4 sm:p-6'
-          : 'rounded-3xl bg-white border border-rose-200 shadow-sm overflow-hidden'
+          ? 'fixed inset-0 z-50 bg-[#FFF0F3] overflow-y-auto p-4 sm:p-6'
+          : 'rounded-3xl bg-[#FFF0F3] border-2 border-rose-300 shadow-md overflow-hidden'
       } text-stone-900 transition-all`}
     >
-      {/* Top Header Bar (Light Theme) */}
-      <div className="bg-gradient-to-r from-rose-50 via-white to-rose-50 border-b border-rose-200 px-5 py-4 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+      {/* Top Header Bar (Soft Pink Theme) */}
+      <div className="bg-gradient-to-r from-[#FFE4E9] via-[#FFF0F3] to-[#FFE4E9] border-b-2 border-rose-300 px-5 py-4 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
         <div className="flex items-center gap-3 flex-wrap">
           <div className="w-11 h-11 rounded-2xl bg-[#E11D48] flex items-center justify-center shadow-xs text-white shrink-0">
             <Video className="w-5 h-5" />
           </div>
           <div>
             <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="text-base sm:text-lg font-extrabold tracking-tight text-stone-900">
-                Google Flow • Gemini Omni 1.1 Flash ও Nano Banana স্টুডিও (Full Edit Mode)
+              <h2 className="text-base sm:text-lg font-extrabold tracking-tight text-rose-950">
+                Google Flow • Gemini Omni 1.1 Flash ও Nano Banana স্টুডিও (সফট পিঙ্ক এডিটর)
               </h2>
-              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                ১০০% রিয়েল এপিআই (Zero Demo)
+              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                ✓ জিমেইল সাবস্ক্রিপশন সক্রিয় (No Billing Required)
               </span>
             </div>
-            <p className="text-xs text-stone-600 mt-0.5">
-              ১. ক্যাটালগ থেকে ছবি নিন &rarr; ২. প্রম্পট ও বাংলা স্ক্রিপ্ট জেনারেট করে নিজের মতো এডিট/মডিফাই করুন &rarr; ৩. আপনার জিমেইল সাবস্ক্রিপশন বা ফ্রি ক্রেডিটে রিয়েল ভিডিও তৈরি করুন
+            <p className="text-xs text-rose-900/80 mt-0.5 font-medium">
+              প্রতিটি ফিচার নিচে আলাদা আলাদা বক্সে সাজানো হয়েছে: ১. ক্যাটালগ ছবি নির্বাচন &rarr; ২. ব্র্যান্ড ও শোরুম সেটআপ &rarr; ৩. প্রম্পট ও বাংলা স্ক্রিপ্ট এডিট &rarr; ৪. রিয়েল ভিডিও তৈরি
             </p>
           </div>
         </div>
 
-        {/* Right Controls: Gmail Login, Subscription Key Selector, Fullscreen & Collapse to Mini Mode */}
+        {/* Right Controls: Fullscreen & Collapse to Mini Mode (Zero Billing Buttons) */}
         <div className="flex flex-wrap items-center gap-2">
-          {/* Gmail Account Login / Switcher */}
-          {connectedEmail && !showGmailInputBox ? (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200">
-              {connectedPhoto ? (
-                <img
-                  src={connectedPhoto}
-                  alt={connectedEmail}
-                  className="w-6 h-6 rounded-full object-cover border border-emerald-300"
-                />
-              ) : (
-                <UserCheck className="w-4 h-4 text-emerald-700" />
-              )}
-              <div className="text-left">
-                <div className="text-[11px] font-extrabold text-emerald-950 leading-none">
-                  {connectedEmail}
-                </div>
-                <div className="text-[10px] font-bold text-emerald-700">
-                  ✓ Gmail ও Omni সাবস্ক্রিপশন লগইন সক্রিয়
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setCustomGmailInput(connectedEmail);
-                  setShowGmailInputBox(true);
-                }}
-                title="অন্য জিমেইল অ্যাকাউন্ট দিন"
-                className="ml-1 px-2 py-1 rounded-lg bg-white hover:bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-bold cursor-pointer"
-              >
-                জিমেইল পরিবর্তন
-              </button>
-              <button
-                type="button"
-                onClick={() => signOutUser()}
-                title="জিমেইল লগআউট"
-                className="p-1 rounded-lg text-stone-500 hover:text-rose-600 cursor-pointer"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          ) : showGmailInputBox ? (
-            <form onSubmit={handleDirectGmailSubmit} className="flex items-center gap-1.5">
-              <input
-                type="email"
-                required
-                value={customGmailInput}
-                onChange={(e) => setCustomGmailInput(e.target.value)}
-                placeholder="your-omni-email@gmail.com"
-                className="px-3 py-1.5 rounded-xl bg-white border border-rose-300 text-xs font-bold text-stone-900 focus:outline-none focus:border-[#E11D48]"
-              />
-              <button
-                type="submit"
-                className="px-3 py-1.5 rounded-xl bg-[#E11D48] text-white text-xs font-extrabold cursor-pointer"
-              >
-                ✓ কানেক্ট
-              </button>
-              <button
-                type="button"
-                onClick={handleGmailLogin}
-                className="px-2.5 py-1.5 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-700 text-[11px] font-bold cursor-pointer"
-              >
-                Google পপআপ
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowGmailInputBox(false)}
-                className="px-2 py-1.5 text-stone-400 hover:text-stone-700 text-xs cursor-pointer"
-              >
-                ✕
-              </button>
-            </form>
-          ) : (
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={handleGmailLogin}
-                disabled={authLoading}
-                className="px-3.5 py-2 rounded-xl bg-white hover:bg-rose-50 text-stone-900 border border-rose-300 text-xs font-extrabold flex items-center gap-1.5 shadow-2xs cursor-pointer"
-              >
-                <LogIn className="w-4 h-4 text-[#E11D48]" />
-                <span>{authLoading ? 'লগইন হচ্ছে...' : '🔐 জিমেইল (Gmail) দিয়ে ওমনিতে লগইন করুন'}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowGmailInputBox(true)}
-                className="px-2.5 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-[#E11D48] border border-rose-200 text-[11px] font-bold cursor-pointer"
-              >
-                ইমেইল লিখুন
-              </button>
-            </div>
-          )}
-
-          {/* Connect Google AI Studio Subscription / Free Credit Key */}
-          <button
-            type="button"
-            onClick={handleConnectGoogleSubscriptionKey}
-            className={`px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-1.5 border transition-all cursor-pointer ${
-              aiKeySelected || serverAccountStatus.connected
-                ? 'bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border-indigo-200'
-                : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
-            }`}
-          >
-            <Key className="w-3.5 h-3.5" />
-            <span>
-              {aiKeySelected
-                ? '✓ সাবস্ক্রিপশন / ফ্রি ক্রেডিট প্রজেক্ট সংযুক্ত'
-                : '🔑 Google AI ফ্রি ক্রেডিট / সাবস্ক্রিপশন কানেক্ট'}
-            </span>
-          </button>
-
-          {/* Toggle Fullscreen */}
           <button
             type="button"
             onClick={() => setIsFullscreenModal((prev) => !prev)}
-            className="px-3 py-2 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+            className="px-3.5 py-2 rounded-xl bg-[#FFF7F9] hover:bg-rose-200/70 text-rose-950 border border-rose-300 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer"
           >
             {isFullscreenModal ? (
               <>
-                <Minimize2 className="w-3.5 h-3.5" />
+                <Minimize2 className="w-3.5 h-3.5 text-[#E11D48]" />
                 <span>সাধারণ সাইজ</span>
               </>
             ) : (
               <>
-                <Maximize2 className="w-3.5 h-3.5" />
-                <span>ফুল-স্ক্রিন এডিটর</span>
+                <Maximize2 className="w-3.5 h-3.5 text-[#E11D48]" />
+                <span>ফুল-স্ক্রিন ভিউ</span>
               </>
             )}
           </button>
 
-          {/* Collapse back to Hidden / Mini Mode */}
           <button
             type="button"
             onClick={() => {
               setIsFullscreenModal(false);
               setIsFullEditMode(false);
             }}
-            className="px-3.5 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-[#E11D48] border border-rose-200 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer"
+            className="px-3.5 py-2 rounded-xl bg-[#E11D48] hover:bg-[#BE123C] text-white text-xs font-extrabold flex items-center gap-1.5 cursor-pointer shadow-xs"
           >
             <EyeOff className="w-3.5 h-3.5" />
-            <span>প্যানেল সংক্ষিপ্ত / হিডেন রাখুন</span>
+            <span>সংক্ষিপ্ত মোডে রাখুন</span>
           </button>
         </div>
+      </div>
+
+      {/* Dedicated OmniAuth Component Inside Full Studio */}
+      <div className="px-5 pt-4">
+        <OmniAuth compact />
       </div>
 
       {/* Global Status & Error Banners */}
@@ -1497,72 +1368,58 @@ export const OmniFlowStudio: React.FC<OmniFlowStudioProps> = ({
       )}
 
       {errorBanner && (
-        <div className="mx-5 mt-4 px-4 py-3.5 rounded-2xl bg-rose-50 border border-rose-300 text-rose-950 text-xs font-bold flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="mx-5 mt-4 px-4 py-3.5 rounded-2xl bg-[#FFE4E9] border border-rose-400 text-rose-950 text-xs font-bold flex items-center justify-between gap-3">
           <div className="flex items-start gap-2">
             <AlertCircle className="w-4 h-4 text-[#E11D48] shrink-0 mt-0.5" />
-            <div>
-              <span>{errorBanner}</span>
-              <p className="text-[11px] font-normal text-stone-600 mt-0.5">
-                কোনো ফেক বা ডেমো ভিডিও দেখানো হয়নি। আপনার জিমেইল সাবস্ক্রিপশন বা ফ্রি ক্রেডিট প্রজেক্ট কানেক্ট করে রিয়েল জেনারেশন চালান।
-              </p>
-            </div>
+            <span>{errorBanner}</span>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={handleConnectGoogleSubscriptionKey}
-              className="px-3 py-1.5 rounded-xl bg-[#E11D48] hover:bg-[#BE123C] text-white text-[11px] font-extrabold cursor-pointer"
-            >
-              🔑 সাবস্ক্রিপশন / ক্রেডিট কানেক্ট করুন
-            </button>
-            <button
-              type="button"
-              onClick={() => setErrorBanner('')}
-              className="px-2.5 py-1.5 rounded-xl bg-white border border-rose-200 text-stone-600 text-[11px] cursor-pointer"
-            >
-              ✕
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => setErrorBanner('')}
+            className="px-2.5 py-1 rounded-xl bg-[#FFF0F3] border border-rose-300 text-rose-900 text-[11px] cursor-pointer"
+          >
+            ✕
+          </button>
         </div>
       )}
 
-      {/* Brand Name & Showroom Configuration Strip (Light Theme) */}
-      <div className="bg-[#FAF9F6] border-b border-rose-100 px-5 py-3.5 grid grid-cols-1 md:grid-cols-4 gap-3">
+      {/* FEATURE CARD A: Brand Name & Showroom Configuration Strip (Soft Pink Card) */}
+      <div className="mx-5 mt-4 p-4 rounded-2xl bg-[#FFE4E9]/70 border-2 border-rose-300 grid grid-cols-1 md:grid-cols-4 gap-3.5">
         <div>
-          <label className="block text-[11px] font-extrabold text-stone-700 mb-1 flex items-center gap-1">
+          <label className="block text-[11px] font-extrabold text-rose-950 mb-1 flex items-center gap-1">
             <Building2 className="w-3.5 h-3.5 text-[#E11D48]" />
-            <span>ব্র্যান্ডের নাম প্লেসহোল্ডার (শোরুমের পিছনে দেখাবে):</span>
+            <span>১. ব্র্যান্ডের নাম (শোরুমের পিছনে দেখাবে):</span>
           </label>
           <input
             type="text"
             value={brandName}
             onChange={(e) => setBrandName(e.target.value)}
             placeholder="যেমন: দোকানদারি (Dokandari)"
-            className="w-full px-3 py-2 rounded-xl bg-white border border-stone-300 text-xs font-bold text-stone-900 focus:outline-none focus:border-[#E11D48]"
+            className="w-full px-3 py-2 rounded-xl bg-[#FFF7F9] border border-rose-300 text-xs font-bold text-stone-900 focus:outline-none focus:border-[#E11D48]"
           />
         </div>
 
         <div>
-          <label className="block text-[11px] font-extrabold text-stone-700 mb-1">
-            ব্র্যান্ড স্লোগান / অফার ট্যাগলাইন:
+          <label className="block text-[11px] font-extrabold text-rose-950 mb-1">
+            ২. ব্র্যান্ড স্লোগান / অফার ট্যাগলাইন:
           </label>
           <input
             type="text"
             value={brandSlogan}
             onChange={(e) => setBrandSlogan(e.target.value)}
             placeholder="১০০% অরিজিনাল কোয়ালিটি — সারা দেশে ক্যাশ অন ডেলিভারি"
-            className="w-full px-3 py-2 rounded-xl bg-white border border-stone-300 text-xs text-stone-800 focus:outline-none focus:border-[#E11D48]"
+            className="w-full px-3 py-2 rounded-xl bg-[#FFF7F9] border border-rose-300 text-xs text-stone-800 focus:outline-none focus:border-[#E11D48]"
           />
         </div>
 
         <div>
-          <label className="block text-[11px] font-extrabold text-stone-700 mb-1">
-            আমাদের শোরুমের ধরন (স্থির ব্যাকগ্রাউন্ড):
+          <label className="block text-[11px] font-extrabold text-rose-950 mb-1">
+            ৩. শোরুমের ব্যাকগ্রাউন্ড স্টাইল:
           </label>
           <select
             value={selectedShowroomId}
             onChange={(e) => setSelectedShowroomId(e.target.value)}
-            className="w-full px-3 py-2 rounded-xl bg-white border border-stone-300 text-xs font-bold text-stone-900 focus:outline-none focus:border-[#E11D48]"
+            className="w-full px-3 py-2 rounded-xl bg-[#FFF7F9] border border-rose-300 text-xs font-bold text-stone-900 focus:outline-none focus:border-[#E11D48]"
           >
             {SHOWROOM_STYLES.map((st) => (
               <option key={st.id} value={st.id}>
@@ -1573,14 +1430,14 @@ export const OmniFlowStudio: React.FC<OmniFlowStudioProps> = ({
         </div>
 
         <div>
-          <label className="block text-[11px] font-extrabold text-stone-700 mb-1 flex items-center gap-1">
+          <label className="block text-[11px] font-extrabold text-rose-950 mb-1 flex items-center gap-1">
             <UserCheck className="w-3.5 h-3.5 text-[#E11D48]" />
-            <span>স্থায়ী ভার্চুয়াল অ্যাভাটার (বাংলায় কথা বলবে):</span>
+            <span>৪. ভার্চুয়াল অ্যাভাটার (বাংলা উপস্থাপক):</span>
           </label>
           <select
             value={selectedAvatarId}
             onChange={(e) => setSelectedAvatarId(e.target.value)}
-            className="w-full px-3 py-2 rounded-xl bg-white border border-stone-300 text-xs font-bold text-stone-900 focus:outline-none focus:border-[#E11D48]"
+            className="w-full px-3 py-2 rounded-xl bg-[#FFF7F9] border border-rose-300 text-xs font-bold text-stone-900 focus:outline-none focus:border-[#E11D48]"
           >
             {avatars.map((av) => (
               <option key={av.id} value={av.id}>
@@ -1591,13 +1448,13 @@ export const OmniFlowStudio: React.FC<OmniFlowStudioProps> = ({
         </div>
       </div>
 
-      {/* Main 3-Column Light Theme Workspace */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 min-h-[680px]">
-        {/* LEFT SIDEBAR: Navigation Tabs + Quick Settings */}
-        <div className="lg:col-span-2 bg-[#FFFBFB] border-r border-rose-100 p-4 flex flex-col justify-between gap-4">
-          <div className="space-y-1.5">
-            <div className="px-2 py-1.5 text-[11px] font-extrabold text-stone-400 uppercase tracking-wider">
-              Google Flow নেভিগেশন
+      {/* Main 3-Column Soft Pink Workspace */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 min-h-[680px] p-5 gap-5">
+        {/* LEFT SIDEBAR: Separated Soft Pink Feature Menu */}
+        <div className="lg:col-span-2 bg-[#FFE4E9]/65 rounded-2xl border-2 border-rose-300 p-4 flex flex-col justify-between gap-4">
+          <div className="space-y-2">
+            <div className="px-2 py-1 text-[11px] font-extrabold text-[#E11D48] uppercase tracking-wider border-b border-rose-300">
+              আলাদা ফিচার মেনু
             </div>
 
             {[
@@ -1662,16 +1519,16 @@ export const OmniFlowStudio: React.FC<OmniFlowStudioProps> = ({
             })}
           </div>
 
-          {/* Optional Advanced Prompt Template & Logs Toggles (Hidden unless clicked) */}
-          <div className="p-3 rounded-2xl bg-white border border-rose-200 space-y-2">
-            <div className="text-[11px] font-extrabold text-stone-800 flex items-center gap-1.5">
+          {/* Optional Advanced Prompt Template & Logs Toggles */}
+          <div className="p-3 rounded-2xl bg-[#FFF7F9] border border-rose-300 space-y-2">
+            <div className="text-[11px] font-extrabold text-rose-950 flex items-center gap-1.5">
               <Sliders className="w-3.5 h-3.5 text-[#E11D48]" />
               <span>অ্যাডভান্সড টুলস (ঐচ্ছিক)</span>
             </div>
             <button
               type="button"
               onClick={() => setShowPromptBuilder((prev) => !prev)}
-              className="w-full px-2.5 py-1.5 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 text-[11px] font-bold text-left flex items-center justify-between cursor-pointer"
+              className="w-full px-2.5 py-1.5 rounded-lg bg-[#FFE4E9] hover:bg-rose-200 text-rose-950 text-[11px] font-bold text-left flex items-center justify-between cursor-pointer"
             >
               <span>প্রম্পট টেমপ্লেট বিল্ডার</span>
               <span>{showPromptBuilder ? '▲' : '▼'}</span>
@@ -1679,7 +1536,7 @@ export const OmniFlowStudio: React.FC<OmniFlowStudioProps> = ({
             <button
               type="button"
               onClick={() => setShowStoreLogs((prev) => !prev)}
-              className="w-full px-2.5 py-1.5 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 text-[11px] font-bold text-left flex items-center justify-between cursor-pointer"
+              className="w-full px-2.5 py-1.5 rounded-lg bg-[#FFE4E9] hover:bg-rose-200 text-rose-950 text-[11px] font-bold text-left flex items-center justify-between cursor-pointer"
             >
               <span>এজেন্ট লগ ({storeLogs.length})</span>
               <span>{showStoreLogs ? '▲' : '▼'}</span>
@@ -1687,17 +1544,17 @@ export const OmniFlowStudio: React.FC<OmniFlowStudioProps> = ({
           </div>
         </div>
 
-        {/* CENTER WORKSPACE: 1. Product Image Selector -> 2. Editable Prompt & Script Box -> 3. Real Video Gallery */}
-        <div className="lg:col-span-6 p-5 bg-white space-y-5 overflow-y-auto max-h-[880px]">
-          {/* STEP 1: Select 3-4 Product Images from Store Catalog or Upload */}
-          <div className="p-4 rounded-2xl bg-[#FAF9F6] border border-rose-200 space-y-3">
+        {/* CENTER WORKSPACE: Clearly Separated Soft Pink Feature Cards */}
+        <div className="lg:col-span-6 space-y-5 overflow-y-auto max-h-[880px]">
+          {/* FEATURE CARD 1: Select 3-4 Product Images from Store Catalog or Upload */}
+          <div className="p-4 sm:p-5 rounded-2xl bg-[#FFE4E9]/60 border-2 border-rose-300 space-y-3.5 shadow-2xs">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <h3 className="text-xs sm:text-sm font-extrabold text-stone-900 flex items-center gap-1.5">
+                <h3 className="text-xs sm:text-sm font-extrabold text-rose-950 flex items-center gap-1.5">
                   <ShoppingBag className="w-4 h-4 text-[#E11D48]" />
-                  <span>ধাপ ১: ক্যাটালগ থেকে প্রোডাক্ট বা ৩-৪টি ছবি সিলেক্ট করুন ({uploadedImages.length}/4)</span>
+                  <span>ফিচার বক্স ১: ক্যাটালগ থেকে প্রোডাক্ট বা ৩-৪টি ছবি সিলেক্ট করুন ({uploadedImages.length}/4)</span>
                 </h3>
-                <p className="text-[11px] text-stone-500">
+                <p className="text-[11px] text-rose-900/75">
                   এখান থেকে যেকোনো প্রোডাক্ট সিলেক্ট করুন অথবা নিজের কম্পিউটার/ফোন থেকে ৩–৪টি ছবি আপলোড করুন।
                 </p>
               </div>
@@ -1807,10 +1664,11 @@ export const OmniFlowStudio: React.FC<OmniFlowStudioProps> = ({
               </div>
               <div className="flex items-center gap-2 overflow-x-auto pb-1.5">
                 {products.slice(0, 16).map((prod) => {
-                  const thumb = prod.images?.[0];
-                  if (!thumb) return null;
-                  const isSelected = uploadedImages.includes(thumb);
-                  const selectedIdx = uploadedImages.indexOf(thumb);
+                  const rawThumb = prod.images?.[0];
+                  if (!rawThumb) return null;
+                  const thumb = resolveSafeProductImageUrl(rawThumb, prod, 0);
+                  const isSelected = uploadedImages.includes(thumb) || uploadedImages.includes(rawThumb);
+                  const selectedIdx = uploadedImages.indexOf(thumb) >= 0 ? uploadedImages.indexOf(thumb) : uploadedImages.indexOf(rawThumb);
                   return (
                     <button
                       key={prod.id}
@@ -1820,10 +1678,15 @@ export const OmniFlowStudio: React.FC<OmniFlowStudioProps> = ({
                       className={`relative w-12 h-12 rounded-xl overflow-hidden shrink-0 border-2 transition-all cursor-pointer ${
                         isSelected
                           ? 'border-[#E11D48] ring-2 ring-rose-300 scale-105'
-                          : 'border-stone-200 opacity-85 hover:opacity-100'
+                          : 'border-rose-200 opacity-85 hover:opacity-100'
                       }`}
                     >
-                      <img src={thumb} alt={prod.name} className="w-full h-full object-cover" />
+                      <img
+                        src={thumb}
+                        alt={prod.name}
+                        onError={(e) => handleProductImageError(e, prod, 0)}
+                        className="w-full h-full object-cover"
+                      />
                       {isSelected && (
                         <div className="absolute inset-0 bg-rose-600/35 flex items-center justify-center">
                           <span className="w-5 h-5 rounded-full bg-[#E11D48] text-white text-[10px] font-extrabold flex items-center justify-center">
@@ -1897,19 +1760,19 @@ export const OmniFlowStudio: React.FC<OmniFlowStudioProps> = ({
             </div>
           </div>
 
-          {/* STEP 2: EDITABLE PROMPT & BENGALI SCRIPT WORKSPACE (User reviews & modifies before real generation) */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-[#FFFBFB] border-2 border-rose-200 space-y-4 shadow-2xs">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-rose-100 pb-3">
+          {/* FEATURE CARD 2: EDITABLE PROMPT & BENGALI SCRIPT WORKSPACE (Soft Pink Card) */}
+          <div className="p-4 sm:p-5 rounded-2xl bg-[#FFE4E9]/65 border-2 border-rose-300 space-y-4 shadow-2xs">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-rose-300 pb-3">
               <div>
                 <div className="flex items-center gap-2">
                   <span className="px-2.5 py-0.5 rounded-full bg-[#E11D48] text-white text-[11px] font-extrabold">
-                    ধাপ ২: প্রম্পট এডিট ও মডিফাই
+                    ফিচার বক্স ২: প্রম্পট এডিট ও মডিফাই
                   </span>
-                  <h4 className="text-xs sm:text-sm font-extrabold text-stone-900">
+                  <h4 className="text-xs sm:text-sm font-extrabold text-rose-950">
                     জেনারেট করা প্রম্পট ও বাংলা ভয়েসওভার স্ক্রিপ্ট (নিজের মতো পরিবর্তন করুন)
                   </h4>
                 </div>
-                <p className="text-[11px] text-stone-600 mt-0.5">
+                <p className="text-[11px] text-rose-900/80 mt-0.5">
                   এখানে প্রম্পট ও স্ক্রিপ্ট সরাসরি লিখে বা মডিফাই করে নিচের <strong>"২. রিয়েল Omni 1.1 ভিডিও জেনারেট করুন"</strong> বাটনে ক্লিক করুন।
                 </p>
               </div>
@@ -2247,19 +2110,19 @@ export const OmniFlowStudio: React.FC<OmniFlowStudioProps> = ({
           )}
         </div>
 
-        {/* RIGHT PANEL: Bengali AI Assistant Chat & Scene-by-Scene Editor (Light Theme) */}
-        <div className="lg:col-span-4 bg-[#FAF9F6] border-l border-rose-100 flex flex-col justify-between h-full max-h-[880px]">
+        {/* RIGHT PANEL: Separated Soft Pink Bengali AI Assistant Card */}
+        <div className="lg:col-span-4 bg-[#FFE4E9]/65 rounded-2xl border-2 border-rose-300 flex flex-col justify-between h-full max-h-[880px] overflow-hidden">
           {/* Assistant Header */}
-          <div className="p-4 border-b border-rose-100 bg-white flex items-center justify-between gap-2">
+          <div className="p-4 border-b border-rose-300 bg-[#FFF0F3] flex items-center justify-between gap-2">
             <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-xl bg-rose-50 border border-rose-200 flex items-center justify-center text-[#E11D48]">
+              <div className="w-9 h-9 rounded-xl bg-[#E11D48] text-white flex items-center justify-center shadow-2xs">
                 <Bot className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="text-xs font-extrabold text-stone-900">
-                  বাংলা এআই প্রম্পট ও স্ক্রিপ্ট অ্যাসিস্ট্যান্ট
+                <h3 className="text-xs font-extrabold text-rose-950">
+                  ফিচার বক্স ৩: বাংলা এআই প্রম্পট অ্যাসিস্ট্যান্ট
                 </h3>
-                <p className="text-[10px] text-emerald-700 font-semibold">
+                <p className="text-[10px] text-emerald-700 font-bold">
                   প্রম্পট তৈরি ও মডিফিকেশন গাইড (Gemini 3.8 Flash)
                 </p>
               </div>

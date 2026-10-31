@@ -13,6 +13,7 @@ import { useAuth } from '../context/AuthContext';
 import { CustomerInfo, Order } from '../types';
 import { trackPixelInitiateCheckout, trackPixelPurchase } from '../lib/pixelManager';
 import { captureAbandonedLeadDebounced, markLeadConverted } from '../lib/leadRecovery';
+import { resolveSafeProductImageUrl, handleProductImageError } from '../lib/storeSync';
 
 interface CheckoutModalProps {
   isOpen: boolean;
@@ -40,7 +41,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [errorMsg, setErrorMsg] = useState('');
   const [completedOrder, setCompletedOrder] = useState<Order | null>(null);
 
-  const currentShippingFee = deliveryZone === 'dhaka' ? 70 : 130;
+  const currentShippingFee = deliveryZone === 'dhaka' ? 70 : 120;
   const currentTotal = subtotal + currentShippingFee;
 
   // Track InitiateCheckout cleanly when modal opens
@@ -170,7 +171,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       onClick={onClose}
     >
       <div
-        className="relative bg-white rounded-3xl max-w-xl w-full max-h-[92vh] overflow-y-auto shadow-2xl border border-rose-100 flex flex-col"
+        className="relative bg-white rounded-3xl max-w-3xl w-full max-h-[92vh] overflow-y-auto shadow-2xl border border-rose-100 flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Top Header matching image_89df9fa6.png */}
@@ -270,8 +271,19 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     className="p-2.5 rounded-xl border border-stone-200 bg-stone-50/70 flex items-center justify-between gap-3"
                   >
                     <img
-                      src={item.image}
+                      src={resolveSafeProductImageUrl(item.image, {
+                        id: item.productId,
+                        name: item.name,
+                        category: item.category,
+                      })}
                       alt={item.name}
+                      onError={(e) =>
+                        handleProductImageError(e, {
+                          id: item.productId,
+                          name: item.name,
+                          category: item.category,
+                        })
+                      }
                       className="w-12 h-12 rounded-lg object-cover border border-stone-200 shrink-0"
                     />
                     <div className="flex-1 min-w-0">
@@ -389,7 +401,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                         : 'bg-white border border-stone-300 text-stone-700 hover:bg-stone-50'
                     }`}
                   >
-                    <span>✓ ঢাকা সিটির ভেতরে (৳৭০)</span>
+                    <span>{deliveryZone === 'dhaka' ? '✓ ' : ''}ঢাকার ভেতরে (+ ৳৭০)</span>
                   </button>
 
                   <button
@@ -401,7 +413,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                         : 'bg-white border border-stone-300 text-stone-700 hover:bg-stone-50'
                     }`}
                   >
-                    <span>ঢাকার বাইরে (৳১৩০)</span>
+                    <span>{deliveryZone === 'outside_dhaka' ? '✓ ' : ''}ঢাকার বাইরে (+ ৳১২০)</span>
                   </button>
                 </div>
               </div>

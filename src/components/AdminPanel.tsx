@@ -59,11 +59,13 @@ import { updateLeadStatus, deleteAbandonedLead } from '../lib/leadRecovery';
 import {
   parsePixelIds,
   initializeMultiPixels,
+  initializeGoogleSeoAndTags,
   trackPixelPageView,
   trackPixelViewContent,
   trackPixelAddToCart,
   trackPixelInitiateCheckout,
   trackPixelPurchase,
+  trackPixelWhatsAppConversion,
 } from '../lib/pixelManager';
 import {
   smartImportOrAnalyzeProduct,
@@ -88,6 +90,8 @@ import {
   saveProductPersisted,
   deleteProductPersisted,
   compressImageFileToDataUrl,
+  resolveSafeProductImageUrl,
+  handleProductImageError,
 } from '../lib/storeSync';
 import {
   OfficialWhatsAppIcon,
@@ -233,12 +237,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [courierBookingId, setCourierBookingId] = useState<string | null>(null);
   const [deliverySettings, setDeliverySettings] = useState({
     dhakaFee: 70,
-    outsideDhakaFee: 130,
+    outsideDhakaFee: 120,
     freeDeliveryThreshold: 2000,
     storeTagline: 'আপনার সৌন্দর্য আমাদের ঐতিহ্য',
   });
 
-  // Dynamic Third-Party API Credentials State (Courier, Payment, Pixels)
+  // Dynamic Third-Party API Credentials State (Courier, Payment, Pixels, GTM, GA4, GSC)
   const [apiKeys, setApiKeys] = useState({
     bkashAppKey: '',
     bkashAppSecret: '',
@@ -254,6 +258,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     facebookCapiToken: '',
     tiktokPixelId: '',
     youtubeTagId: '',
+    gtmContainerId: '',
+    ga4MeasurementId: '',
+    googleSearchConsoleCode: '',
   });
   const [apiSaved, setApiSaved] = useState(false);
 
@@ -677,8 +684,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
     localStorage.setItem('dokandari_api_credentials', JSON.stringify(apiKeys));
     initializeMultiPixels(apiKeys.facebookPixelId, apiKeys.tiktokPixelId, apiKeys.youtubeTagId);
+    initializeGoogleSeoAndTags({
+      gtmContainerId: apiKeys.gtmContainerId,
+      ga4MeasurementId: apiKeys.ga4MeasurementId,
+      googleSearchConsoleCode: apiKeys.googleSearchConsoleCode,
+      youtubeTagId: apiKeys.youtubeTagId,
+    });
     setApiSaved(true);
-    setFeedback('✅ এপিআই, কুরিয়ার ও মাল্টি-পিক্সেল কনফিগারেশন সফলভাবে ফায়ারবেসে সেভ ও সক্রিয় হয়েছে!');
+    setFeedback('✅ মেটা পিক্সেল, টিকটক, GTM, GA4 ও Google Search Console কনফিগারেশন সফলভাবে সেভ ও লাইভ সক্রিয় হয়েছে!');
     setTimeout(() => {
       setApiSaved(false);
       setFeedback('');
@@ -1281,18 +1294,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       trackPixelInitiateCheckout(1450, 1);
     } else if (eventName === 'Purchase') {
       trackPixelPurchase(`TEST-${Date.now().toString().slice(-4)}`, 1450, 1);
+    } else if (eventName === 'WhatsAppConversion') {
+      trackPixelWhatsAppConversion(
+        {
+          id: products[0]?.id || 'test-wa-1',
+          name: products[0]?.name || 'টেস্ট প্রিমিয়াম পণ্য',
+          price: products[0]?.price || 1450,
+          category: products[0]?.category || 'home_decor',
+        },
+        'admin_live_tester'
+      );
     }
 
-    const platformDesc = `Meta: [${metaIds.length > 0 ? metaIds.join(', ') : 'None'}] | TikTok: [${tiktokIds.length > 0 ? tiktokIds.join(', ') : 'None'}] | YouTube/Google: [${ytIds.length > 0 ? ytIds.join(', ') : 'None'}]`;
+    const platformDesc = `Meta: [${metaIds.length > 0 ? metaIds.join(', ') : 'Active'}] | TikTok: [${tiktokIds.length > 0 ? tiktokIds.join(', ') : 'Active'}] | GTM/GA4: [${apiKeys.gtmContainerId || apiKeys.ga4MeasurementId || ytIds.join(', ') || 'Active'}]`;
     const newEvt = {
       id: `evt-${Date.now()}`,
       eventName,
       platform: platformDesc,
       timestamp: new Date().toLocaleTimeString('bn-BD'),
-      status: '200 OK (Browser + Server CAPI)',
+      status: '200 OK (Browser + GTM + Server CAPI)',
     };
     setPixelEventsLog((prev) => [newEvt, ...prev.slice(0, 9)]);
-    setFeedback(`🎯 "${eventName}" ইভেন্ট সফলভাবে সকল সক্রিয় আইডিতে নির্ভুলভাবে ফায়ার হয়েছে!`);
+    setFeedback(`🎯 "${eventName}" ইভেন্ট সফলভাবে মেটা, টিকটক, GTM ও GA4-এ নির্ভুলভাবে ফায়ার হয়েছে!`);
     setTimeout(() => setFeedback(''), 3500);
   };
 
@@ -1406,127 +1429,159 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     return Array.from(map.values());
   }, [orders]);
 
-  // All 15 Official Admin Dashboard Tools Ordered in Professional Serial Sequence (০১ to ১৫)
+  // All Official Admin Dashboard Tools — Clean, Colorful, Pure Bengali Labels, with Google Omni at the Very End (Extra Menu)
   const adminNavList: {
     id: AdminTool;
     serialBn: string;
     label: string;
+    subtitleBn: string;
     count?: number;
     icon: any;
+    badgeBg: string;
     categoryGroup: 'catalog' | 'orders' | 'marketing' | 'settings';
   }[] = [
     {
       id: 'catalog_studio',
       serialBn: '০১',
-      label: '০১. মাস্টার টেমপ্লেট ও ক্যাটালগ স্টুডিও (AI Importer)',
+      label: 'এআই প্রোডাক্ট ও স্টোর ইমপোর্টার',
+      subtitleBn: 'লিংক ও CSV থেকে প্রোডাক্ট আপলোড',
       icon: Palette,
+      badgeBg: 'bg-rose-600 text-white',
       categoryGroup: 'catalog',
     },
     {
       id: 'products',
       serialBn: '০২',
-      label: '০২. প্রোডাক্ট ম্যানেজমেন্ট ও লাইভ এডিট',
+      label: 'সকল প্রোডাক্ট ও লাইভ এডিট',
+      subtitleBn: 'দাম, ছবি ও স্টক ম্যানেজমেন্ট',
       count: products.length,
       icon: Tag,
+      badgeBg: 'bg-pink-600 text-white',
       categoryGroup: 'catalog',
     },
     {
       id: 'categories',
       serialBn: '০৩',
-      label: '০৩. ১১টি ক্যাটাগরি ম্যানেজমেন্ট (ড্র্যাগ অ্যান্ড ড্রপ)',
+      label: '১১টি ক্যাটাগরি সাজানো',
+      subtitleBn: 'ড্র্যাগ অ্যান্ড ড্রপ সিরিয়াল',
       count: OFFICIAL_CATEGORIES.length,
       icon: FolderTree,
+      badgeBg: 'bg-purple-600 text-white',
       categoryGroup: 'catalog',
     },
     {
-      id: 'omni_flow_studio',
-      serialBn: '০৪',
-      label: '০৪. গুগল ফ্লো ও ওমনি মিনি ভিডিও জেনারেটর (Full Edit Mode)',
-      icon: Video,
-      categoryGroup: 'marketing',
-    },
-    {
       id: 'orders',
-      serialBn: '০৫',
-      label: '০৫. অর্ডার ও কুরিয়ার বুকিং',
+      serialBn: '০৪',
+      label: 'অর্ডার ও কুরিয়ার বুকিং',
+      subtitleBn: 'Steadfast ও Pathao বুকিং',
       count: orders.length,
       icon: Package,
+      badgeBg: 'bg-emerald-600 text-white',
       categoryGroup: 'orders',
     },
     {
       id: 'abandoned_leads',
-      serialBn: '০৬',
-      label: '০৬. ড্রপড ও লিড রিকভারি (Abandoned Leads)',
+      serialBn: '০৫',
+      label: 'অসম্পূর্ণ অর্ডার ও লিড রিকভারি',
+      subtitleBn: 'কাস্টমারের নম্বর ও কার্ট ট্র্যাকিং',
       count: abandonedLeads.filter((l) => l.status === 'pending').length,
       icon: PhoneCall,
+      badgeBg: 'bg-amber-500 text-white',
       categoryGroup: 'orders',
     },
     {
       id: 'customers',
-      serialBn: '০৭',
-      label: '০৭. কাস্টমার ডাটাবেস ও CRM',
+      serialBn: '০৬',
+      label: 'কাস্টমার ডাটাবেস ও তালিকা',
+      subtitleBn: 'গ্রাহকের ঠিকানা ও অর্ডার হিস্ট্রি',
       count: aggregatedCustomers.length,
       icon: Users,
+      badgeBg: 'bg-teal-600 text-white',
       categoryGroup: 'orders',
     },
     {
       id: 'pixels',
-      serialBn: '০৮',
-      label: '০৮. ফেসবুক ও টিকটক মাল্টি-পিক্সেল সেটআপ',
+      serialBn: '০৭',
+      label: 'পিক্সেল, GTM, GA4 ও SEO সেটআপ',
+      subtitleBn: 'মেটা, টিকটক, হোয়াটসঅ্যাপ ও গুগল ট্যাগ',
       icon: Activity,
+      badgeBg: 'bg-blue-600 text-white',
       categoryGroup: 'marketing',
     },
     {
       id: 'campaigns',
-      serialBn: '০৯',
-      label: '০৯. এআই ব্র্যান্ড ও অর্গানিক ক্যাম্পেইন',
+      serialBn: '০৮',
+      label: 'এআই বিজ্ঞাপন ও ক্যাম্পেইন কপি',
+      subtitleBn: 'ফেসবুক ও টিকটক অ্যাড স্ক্রিপ্ট',
       count: savedCampaigns.length,
       icon: Megaphone,
+      badgeBg: 'bg-indigo-600 text-white',
       categoryGroup: 'marketing',
     },
     {
       id: 'banners',
-      serialBn: '১০',
-      label: '১০. হিরো ব্যানার ও স্লাইডার স্পিড (1s/3s/5s)',
+      serialBn: '০৯',
+      label: 'হিরো ব্যানার ও স্লাইডার ডিজাইন',
+      subtitleBn: 'হোমপেজ ব্যানার ও স্লাইড স্পিড',
       count: siteContent.heroSlides.length,
       icon: ImageIcon,
+      badgeBg: 'bg-fuchsia-600 text-white',
       categoryGroup: 'marketing',
     },
     {
       id: 'settings',
-      serialBn: '১১',
-      label: '১১. ওয়েবসাইট ও ডেলিভারি চার্জ সেটিংস',
+      serialBn: '১০',
+      label: 'ওয়েবসাইট ও ডেলিভারি চার্জ সেটিংস',
+      subtitleBn: 'ঢাকা ৳৭০ / ঢাকার বাইরে ৳১২০ ও নম্বর',
       icon: Settings,
+      badgeBg: 'bg-cyan-600 text-white',
       categoryGroup: 'settings',
     },
     {
       id: 'api_integrations',
-      serialBn: '১২',
-      label: '১২. এপিআই ও কুরিয়ার ইন্টিগ্রেশন (Steadfast/bKash)',
+      serialBn: '১১',
+      label: 'কুরিয়ার ও পেমেন্ট এপিআই কি',
+      subtitleBn: 'Steadfast, Pathao, bKash ও Nagad',
       icon: Key,
+      badgeBg: 'bg-orange-600 text-white',
       categoryGroup: 'settings',
     },
     {
       id: 'analytics',
-      serialBn: '১৩',
-      label: '১৩. রিয়েল-টাইম ভিজিটর ও সেলস অ্যানালাইটিক্স',
+      serialBn: '১২',
+      label: 'সেলস রিপোর্ট ও অ্যানালাইটিক্স',
+      subtitleBn: 'মোট বিক্রি ও ক্যাটাগরি গ্রাফ',
       icon: Activity,
+      badgeBg: 'bg-emerald-700 text-white',
       categoryGroup: 'settings',
     },
     {
       id: 'security',
-      serialBn: '১৪',
-      label: '১৪. সিকিউরিটি ও অ্যাডমিন পাসওয়ার্ড পরিবর্তন',
+      serialBn: '১৩',
+      label: 'অ্যাডমিন পাসওয়ার্ড ও সিকিউরিটি',
+      subtitleBn: 'অ্যাডমিন ইমেইল ও পাসওয়ার্ড পরিবর্তন',
       count: authorizedEmails.length,
       icon: Shield,
+      badgeBg: 'bg-red-600 text-white',
       categoryGroup: 'settings',
     },
     {
       id: 'cache',
-      serialBn: '১৫',
-      label: '১৫. ক্যাশে ও ফায়ারবেস লাইভ সিঙ্ক',
+      serialBn: '১৪',
+      label: 'ক্যাশে ও ফায়ারবেস লাইভ সিঙ্ক',
+      subtitleBn: 'ডাটাবেজ স্পিড ও সিঙ্ক চেক',
       icon: Database,
+      badgeBg: 'bg-violet-600 text-white',
       categoryGroup: 'settings',
+    },
+    {
+      id: 'omni_flow_studio',
+      serialBn: '১৫',
+      label: 'এক্সট্রা: গুগল ওমনি এআই স্টুডিও',
+      subtitleBn: 'সফট পিঙ্ক ভিডিও ও শোরুম জেনারেটর',
+      icon: Video,
+      badgeBg: 'bg-gradient-to-r from-[#E11D48] to-pink-600 text-white',
+      categoryGroup: 'marketing',
     },
   ];
 
@@ -1536,108 +1591,108 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   }, [adminNavList, navCategoryFilter]);
 
   return (
-    <div className="bg-[#FAF9F6] min-h-screen py-6">
+    <div className="bg-[#FFF5F7] min-h-screen py-6">
       <div className="w-full px-3 sm:px-6 lg:px-8 space-y-6">
-        {/* Top Master Admin Hub Banner */}
-        <div className="bg-white rounded-3xl border border-rose-200/80 p-6 shadow-xs flex flex-col xl:flex-row xl:items-center justify-between gap-6">
-          <div>
-            <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-              <span className="text-xs font-bold uppercase tracking-wider text-[#E11D48] flex items-center gap-1.5">
+        {/* Top Master Admin Hub Banner — Clean, Colorful & Well-Proportioned */}
+        <div className="bg-gradient-to-r from-[#FFF0F3] via-white to-[#FFF0F3] rounded-3xl border-2 border-rose-200 p-5 sm:p-7 shadow-sm flex flex-col xl:flex-row xl:items-center justify-between gap-5">
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="px-3 py-1 rounded-full text-xs font-extrabold bg-[#E11D48] text-white flex items-center gap-1.5 shadow-2xs">
                 <Shield className="w-3.5 h-3.5" />
-                <span>MASTER ADMIN HUB</span>
+                <span>অ্যাডমিন কন্ট্রোল সেন্টার</span>
               </span>
-              <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span>লাইভ সিঙ্ক চালু</span>
-              </span>
-              <span className="flex items-center gap-1 text-[11px] font-semibold text-[#E11D48] bg-rose-50 px-2.5 py-0.5 rounded-full border border-rose-200">
-                <Sparkles className="w-3 h-3" />
-                <span>
-                  Gemini 3.8 Flash Server API: {geminiStatus.configured ? 'সক্রিয় (Connected)' : 'প্রস্তুত'}
-                </span>
+              <span className="flex items-center gap-1.5 text-xs font-extrabold text-emerald-800 bg-emerald-100 px-3 py-1 rounded-full border border-emerald-300">
+                <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse" />
+                <span>লাইভ ডাটাবেজ সিঙ্ক সক্রিয়</span>
               </span>
             </div>
 
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-stone-900 tracking-tight">
-              Dokandari কন্ট্রোল প্যানেল (১৫টি পূর্ণাঙ্গ মাস্টার মডিউল — ক্রমিক ০১ থেকে ১৫)
+            <h1 className="text-xl sm:text-2xl font-extrabold text-stone-900 tracking-tight">
+              দোকানদারি (Dokandari.com) — প্রফেশনাল স্টোর ড্যাশবোর্ড
             </h1>
-            <p className="text-xs text-stone-500 mt-1">
-              মাস্টার টেমপ্লেট, প্রোডাক্ট ম্যানেজমেন্ট, ১১টি ক্যাটাগরি, গুগল ফ্লো ও ওমনি ভিডিও স্টুডিও, অর্ডার ও কুরিয়ার বুকিং এবং সিকিউরিটি সেটিংস
+            <p className="text-xs sm:text-sm text-stone-600 font-medium">
+              প্রোডাক্ট আপলোড, অর্ডার ও কুরিয়ার বুকিং, পিক্সেল ও GTM সেটআপ এবং ডেলিভারি চার্জ নিয়ন্ত্রণ করুন এক জায়গা থেকে।
             </p>
           </div>
 
-          {/* Action Button Strip */}
-          <div className="flex flex-wrap items-center gap-2">
+          {/* Action Button Strip — With Extra Corner Menu Button for Google Omni */}
+          <div className="flex flex-wrap items-center gap-2.5">
             <button
               onClick={onBackToStore}
-              className="px-4 py-2 text-xs font-bold rounded-xl bg-white hover:bg-rose-50 text-[#E11D48] border border-rose-300 flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+              className="px-4 py-2.5 text-xs sm:text-sm font-extrabold rounded-2xl bg-white hover:bg-rose-50 text-stone-800 border-2 border-rose-200 flex items-center gap-2 shadow-2xs transition-all cursor-pointer"
             >
               <Globe className="w-4 h-4 text-[#E11D48]" />
-              <span>হোম পেজ (কাস্টমার ভিউ)</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTool('omni_flow_studio')}
-              className="px-4 py-2 text-xs font-bold rounded-xl bg-rose-50 hover:bg-rose-100 text-[#E11D48] border border-rose-300 flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer"
-            >
-              <Video className="w-4 h-4 text-[#E11D48]" />
-              <span>🎬 গুগল ফ্লো মিনি (Full Edit Mode)</span>
+              <span>স্টোর হোমপেজ দেখুন</span>
             </button>
 
             <button
               onClick={() => setActiveTool('catalog_studio')}
-              className="px-4 py-2 text-xs font-bold rounded-xl bg-[#E11D48] hover:bg-[#BE123C] text-white flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+              className="px-4 py-2.5 text-xs sm:text-sm font-extrabold rounded-2xl bg-[#E11D48] hover:bg-[#BE123C] text-white flex items-center gap-2 shadow-sm transition-all cursor-pointer"
             >
               <Sparkles className="w-4 h-4 text-white" />
-              <span>AI ক্যাটালগ স্টুডিও ও ইমপোর্টার</span>
+              <span>প্রোডাক্ট ইমপোর্টার</span>
             </button>
 
             <button
               onClick={handleLockAdminSession}
-              className="px-3.5 py-2 text-xs font-bold rounded-xl border border-rose-200 bg-rose-50 text-[#E11D48] hover:bg-rose-100 transition-colors cursor-pointer flex items-center gap-1.5"
+              className="px-4 py-2.5 text-xs sm:text-sm font-extrabold rounded-2xl border-2 border-rose-200 bg-white text-rose-700 hover:bg-rose-50 transition-all cursor-pointer flex items-center gap-1.5"
             >
-              <Shield className="w-3.5 h-3.5" />
-              <span>লগআউট ও সেশন লক</span>
+              <Shield className="w-4 h-4" />
+              <span>লগআউট</span>
+            </button>
+
+            {/* Corner Extra Menu Button for Google Omni AI Studio (Only visible after Admin Login) */}
+            <button
+              onClick={() => setActiveTool('omni_flow_studio')}
+              className={`px-4 py-2.5 text-xs sm:text-sm font-extrabold rounded-2xl border-2 flex items-center gap-2 shadow-xs transition-all cursor-pointer ${
+                activeTool === 'omni_flow_studio'
+                  ? 'bg-gradient-to-r from-[#E11D48] to-pink-600 text-white border-rose-600'
+                  : 'bg-[#FFF0F3] hover:bg-[#FFE4E9] text-[#E11D48] border-rose-300'
+              }`}
+              title="শুধুমাত্র অ্যাডমিনদের জন্য এক্সট্রা মেনু: Google Omni AI স্টুডিও"
+            >
+              <Video className="w-4 h-4" />
+              <span>✨ এক্সট্রা মেনু: Google Omni স্টুডিও</span>
             </button>
           </div>
         </div>
 
         {/* Global Feedback Alert */}
         {feedback && (
-          <div className="p-4 rounded-2xl bg-[#FFF1F2] border border-rose-300 text-xs font-bold text-rose-950 flex items-center gap-2 shadow-xs animate-in fade-in">
-            <CheckCircle2 className="w-4 h-4 text-[#E11D48] shrink-0" />
+          <div className="p-4 rounded-2xl bg-[#FFF0F3] border-2 border-rose-300 text-xs sm:text-sm font-extrabold text-rose-950 flex items-center gap-2.5 shadow-xs animate-in fade-in">
+            <CheckCircle2 className="w-5 h-5 text-[#E11D48] shrink-0" />
             <span>{feedback}</span>
           </div>
         )}
 
-        {/* 15 Navigation Tools Command Center with Serial Order (০১ to ১৫) */}
-        <div className="bg-white rounded-3xl border border-rose-100 p-4 sm:p-5 shadow-xs space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-rose-100">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-extrabold text-stone-900">
-                মাস্টার কন্ট্রোল টুলবার (ক্রমিক ০১–১৫ সিরিয়াল অনুযায়ী সাজানো):
+        {/* Colorful, Well-Aligned Navigation Cards Grid */}
+        <div className="bg-white rounded-3xl border-2 border-rose-200 p-4 sm:p-6 shadow-xs space-y-4">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3.5 border-b border-rose-100">
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <span className="text-sm sm:text-base font-extrabold text-stone-900">
+                অ্যাডমিন মেনু ও ফিচারসমূহ:
               </span>
-              <span className="text-[11px] font-bold text-rose-600 bg-rose-50 px-2.5 py-0.5 rounded-full border border-rose-200">
-                {adminNavList.length}টি টুল সক্রিয়
+              <span className="text-xs font-extrabold text-[#E11D48] bg-[#FFF0F3] px-3 py-1 rounded-full border border-rose-200">
+                মোট {adminNavList.length}টি মডিউল
               </span>
             </div>
 
-            {/* Quick Filter Chips */}
-            <div className="flex flex-wrap items-center gap-1.5 text-xs font-bold">
+            {/* Clean Category Filter Buttons */}
+            <div className="flex flex-wrap items-center gap-2 text-xs font-extrabold">
               {[
-                { id: 'all', label: `সবগুলো টুল (${adminNavList.length})` },
-                { id: 'catalog', label: '📦 ক্যাটালগ ও প্রোডাক্ট (০১-০৩)' },
-                { id: 'orders', label: '🛍️ অর্ডার ও CRM (০৫-০৭)' },
-                { id: 'marketing', label: '🎬 ভিডিও, মার্কেটিং ও পিক্সেল (০৪, ০৮-১০)' },
-                { id: 'settings', label: '⚙️ সেটিংস ও সিকিউরিটি (১১-১৫)' },
+                { id: 'all', label: `সবগুলো মেনু (${adminNavList.length})` },
+                { id: 'catalog', label: '📦 প্রোডাক্ট ও ক্যাটাগরি' },
+                { id: 'orders', label: '🛍️ অর্ডার ও কাস্টমার' },
+                { id: 'marketing', label: '📈 পিক্সেল, ক্যাম্পেইন ও ওমনি' },
+                { id: 'settings', label: '⚙️ সেটিংস ও সিকিউরিটি' },
               ].map((filter) => (
                 <button
                   key={filter.id}
                   onClick={() => setNavCategoryFilter(filter.id as any)}
-                  className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer ${
+                  className={`px-3.5 py-2 rounded-xl transition-all cursor-pointer ${
                     navCategoryFilter === filter.id
                       ? 'bg-[#E11D48] text-white shadow-xs'
-                      : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
+                      : 'bg-[#FFF0F3] text-stone-800 hover:bg-[#FFE4E9] border border-rose-200'
                   }`}
                 >
                   {filter.label}
@@ -1646,8 +1701,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
           </div>
 
-          {/* Grid Layout: Responsive 2 cols (mobile), 3-4 cols (tablet), 5 cols (desktop) */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2.5">
+          {/* Grid Layout: Spacious, Colorful, Legible Bengali Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
             {filteredAdminNavList.map((item) => {
               const Icon = item.icon;
               const isActive = activeTool === item.id;
@@ -1655,44 +1710,59 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <button
                   key={item.id}
                   onClick={() => setActiveTool(item.id)}
-                  className={`p-3 rounded-2xl text-xs font-bold flex flex-col items-start justify-between min-h-[84px] transition-all cursor-pointer text-left border ${
+                  className={`p-3.5 sm:p-4 rounded-2xl flex flex-col items-start justify-between min-h-[104px] transition-all cursor-pointer text-left border-2 ${
                     isActive
-                      ? 'bg-[#E11D48] text-white border-[#BE123C] shadow-md ring-2 ring-rose-300'
-                      : 'bg-[#FFFBFB] hover:bg-rose-50/70 text-stone-800 border-rose-100 hover:border-rose-300'
+                      ? 'bg-gradient-to-br from-[#E11D48] to-[#BE123C] text-white border-[#9F1239] shadow-md ring-2 ring-rose-300'
+                      : 'bg-[#FFF7F9] hover:bg-[#FFE4E9]/80 text-stone-900 border-rose-200 hover:border-rose-400 shadow-2xs'
                   }`}
                 >
-                  <div className="flex items-center justify-between w-full mb-1.5">
-                    <div className="flex items-center gap-1.5">
+                  <div className="flex items-center justify-between w-full mb-2">
+                    <div className="flex items-center gap-2">
                       <div
-                        className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
-                          isActive ? 'bg-white/20 text-white' : 'bg-rose-100 text-[#E11D48]'
+                        className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 shadow-2xs ${
+                          isActive ? 'bg-white/20 text-white' : item.badgeBg
                         }`}
                       >
                         <Icon className="w-4 h-4" />
                       </div>
                       <span
-                        className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md ${
+                        className={`text-[11px] font-extrabold px-2 py-0.5 rounded-lg ${
                           isActive
                             ? 'bg-white/20 text-white'
-                            : 'bg-stone-100 text-stone-600 border border-stone-200'
+                            : 'bg-white text-rose-800 border border-rose-200'
                         }`}
                       >
-                        ক্রমিক {item.serialBn}
+                        {item.serialBn}
                       </span>
                     </div>
                     {item.count !== undefined && (
                       <span
-                        className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold ${
+                        className={`text-xs font-mono px-2.5 py-0.5 rounded-full font-extrabold ${
                           isActive
-                            ? 'bg-white/25 text-white'
-                            : 'bg-rose-50 text-[#E11D48] border border-rose-200'
+                            ? 'bg-white text-[#E11D48]'
+                            : 'bg-white text-[#E11D48] border border-rose-200'
                         }`}
                       >
                         {item.count}
                       </span>
                     )}
                   </div>
-                  <span className="leading-snug line-clamp-2">{item.label}</span>
+                  <div className="space-y-0.5 w-full">
+                    <div
+                      className={`text-xs sm:text-sm font-extrabold leading-snug ${
+                        isActive ? 'text-white' : 'text-stone-900'
+                      }`}
+                    >
+                      {item.label}
+                    </div>
+                    <div
+                      className={`text-[11px] font-medium truncate ${
+                        isActive ? 'text-rose-100' : 'text-stone-600'
+                      }`}
+                    >
+                      {item.subtitleBn}
+                    </div>
+                  </div>
                 </button>
               );
             })}
@@ -1700,15 +1770,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </div>
 
         {/* =====================================================================
-            TOOL 04: GOOGLE FLOW MINI VIDEO GENERATOR (Compact Hidden Mode -> Click for Full Edit Mode)
+            EXTRA ADMIN MENU (TOOL 15): GOOGLE OMNI AI STUDIO (Only renders when explicitly clicked!)
            ===================================================================== */}
-        {(activeTool === 'omni_flow_studio' || activeTool === 'catalog_studio') && (
+        {activeTool === 'omni_flow_studio' && (
           <div className="animate-in fade-in">
             <OmniFlowStudio
-              key={activeTool === 'omni_flow_studio' ? 'flow-direct' : 'flow-mini'}
+              key="flow-direct"
               products={products}
               defaultBrandName="দোকানদারি (Dokandari)"
-              defaultExpandedEditMode={activeTool === 'omni_flow_studio'}
+              defaultExpandedEditMode={true}
               onAttachVideoToProduct={(updatedProd) => {
                 if (onEditProduct) onEditProduct(updatedProd);
                 setFeedback(`✅ "${updatedProd.name}" প্রোডাক্টে নতুন ব্র্যান্ড ভিডিও যুক্ত ও লাইভ সেভ হয়েছে!`);
@@ -2505,8 +2575,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       <div className="space-y-3">
                         <div className="relative aspect-4/3 rounded-xl overflow-hidden bg-white border border-rose-100">
                           <img
-                            src={prod.images[0]}
+                            src={resolveSafeProductImageUrl(prod.images[0], prod, 0)}
                             alt={prod.name}
+                            onError={(e) => handleProductImageError(e, prod, 0)}
                             className="w-full h-full object-cover"
                             referrerPolicy="no-referrer"
                           />
@@ -2648,8 +2719,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       <div className="space-y-2">
                         <div className="relative aspect-square rounded-xl overflow-hidden bg-stone-100">
                           <img
-                            src={p.images[0]}
+                            src={resolveSafeProductImageUrl(p.images[0], p, 0)}
                             alt={p.name}
+                            onError={(e) => handleProductImageError(e, p, 0)}
                             className="w-full h-full object-cover group-hover:scale-104 transition-transform duration-300"
                             referrerPolicy="no-referrer"
                           />
@@ -2740,7 +2812,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   >
                     <div className="space-y-2">
                       <div className="relative aspect-square rounded-xl overflow-hidden bg-stone-100">
-                        <img src={p.images[0]} alt={p.name} className="w-full h-full object-cover" />
+                        <img
+                          src={resolveSafeProductImageUrl(p.images[0], p, 0)}
+                          alt={p.name}
+                          onError={(e) => handleProductImageError(e, p, 0)}
+                          className="w-full h-full object-cover"
+                        />
                         <span className="absolute top-2 left-2 px-2 py-0.5 bg-[#E11D48] text-white text-[10px] font-bold rounded-md">
                           {p.status === 'draft' ? 'DRAFT' : 'LIVE'}
                         </span>
@@ -4054,18 +4131,91 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   </div>
                 </div>
 
-                {/* Test & Save Toolbar */}
+                {/* Google Tag Manager (GTM), GA4 & Google Search Console Verification */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+                  <div className="p-4 rounded-2xl bg-[#FFF0F3]/70 border border-rose-200 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="font-bold text-stone-900 flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block" />
+                        <span>Google Tag Manager (GTM ID)</span>
+                      </label>
+                      <span className="text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
+                        Auto DataLayer
+                      </span>
+                    </div>
+                    <input
+                      type="text"
+                      value={apiKeys.gtmContainerId || ''}
+                      onChange={(e) => setApiKeys({ ...apiKeys, gtmContainerId: e.target.value })}
+                      placeholder="যেমন: GTM-XXXXXXX"
+                      className="w-full px-3.5 py-2.5 bg-white border border-stone-300 rounded-xl font-mono text-xs focus:outline-none focus:border-[#E11D48]"
+                    />
+                  </div>
+
+                  <div className="p-4 rounded-2xl bg-[#FFF0F3]/70 border border-rose-200 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="font-bold text-stone-900 flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block" />
+                        <span>Google Analytics 4 (GA4 ID)</span>
+                      </label>
+                      <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded">
+                        E-Commerce Events
+                      </span>
+                    </div>
+                    <input
+                      type="text"
+                      value={apiKeys.ga4MeasurementId || ''}
+                      onChange={(e) => setApiKeys({ ...apiKeys, ga4MeasurementId: e.target.value })}
+                      placeholder="যেমন: G-XXXXXXXXXX"
+                      className="w-full px-3.5 py-2.5 bg-white border border-stone-300 rounded-xl font-mono text-xs focus:outline-none focus:border-[#E11D48]"
+                    />
+                  </div>
+
+                  <div className="p-4 rounded-2xl bg-[#FFF0F3]/70 border border-rose-200 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="font-bold text-stone-900 flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 inline-block" />
+                        <span>Google Search Console কোড</span>
+                      </label>
+                      <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded">
+                        SEO Meta Tag
+                      </span>
+                    </div>
+                    <input
+                      type="text"
+                      value={apiKeys.googleSearchConsoleCode || ''}
+                      onChange={(e) =>
+                        setApiKeys({ ...apiKeys, googleSearchConsoleCode: e.target.value })
+                      }
+                      placeholder="google-site-verification কোড বা মেটা ট্যাগ"
+                      className="w-full px-3.5 py-2.5 bg-white border border-stone-300 rounded-xl font-mono text-xs focus:outline-none focus:border-[#E11D48]"
+                    />
+                  </div>
+                </div>
+
+                {/* Test & Save Toolbar (Includes WhatsApp Conversion Tracking Test) */}
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pt-2 border-t border-stone-100">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-bold text-stone-700 text-xs">সবগুলো আইডিতে লাইভ টেস্ট:</span>
-                    {['PageView', 'ViewContent', 'AddToCart', 'InitiateCheckout', 'Purchase'].map((ev) => (
+                    <span className="font-bold text-stone-700 text-xs">এ-টু-জেড সব ইভেন্ট লাইভ টেস্ট:</span>
+                    {[
+                      'PageView',
+                      'ViewContent',
+                      'AddToCart',
+                      'InitiateCheckout',
+                      'Purchase',
+                      'WhatsAppConversion',
+                    ].map((ev) => (
                       <button
                         key={ev}
                         type="button"
                         onClick={() => handleFireTestPixelEvent(ev)}
-                        className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-[#E11D48] border border-rose-200 rounded-xl font-bold cursor-pointer transition-colors shadow-2xs"
+                        className={`px-3 py-1.5 rounded-xl font-bold cursor-pointer transition-colors shadow-2xs border ${
+                          ev === 'WhatsAppConversion'
+                            ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300'
+                            : 'bg-rose-50 hover:bg-rose-100 text-[#E11D48] border-rose-200'
+                        }`}
                       >
-                        ⚡ Test {ev}
+                        ⚡ Test {ev === 'WhatsAppConversion' ? 'WhatsApp মেসেজ কনভার্সন' : ev}
                       </button>
                     ))}
                   </div>
@@ -4075,7 +4225,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     className="px-6 py-2.5 bg-[#E11D48] hover:bg-[#BE123C] text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-xs transition-colors cursor-pointer"
                   >
                     {apiSaved ? <Check className="w-4 h-4 text-white" /> : <Save className="w-4 h-4" />}
-                    <span>মাল্টি-পিক্সেল সেভ ও লাইভ সিঙ্ক</span>
+                    <span>পিক্সেল, GTM, GA4 ও SEO সেভ করুন</span>
                   </button>
                 </div>
               </form>

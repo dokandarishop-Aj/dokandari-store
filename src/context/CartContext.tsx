@@ -33,7 +33,7 @@ const CartContext = createContext<CartContextType | undefined>(undefined);
 
 const FREE_SHIPPING_MIN = 2000;
 const SHIPPING_DHAKA = 70;
-const SHIPPING_OUTSIDE_DHAKA = 130;
+const SHIPPING_OUTSIDE_DHAKA = 120;
 
 export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [items, setItems] = useState<CartItem[]>(() => {
@@ -120,9 +120,9 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const itemCount = items.reduce((sum, item) => sum + item.quantity, 0);
   const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
-  // Free delivery threshold: ৳2,000 or with coupon
+  // Shipping charge: Inside Dhaka ৳70, Outside Dhaka ৳120 (always added unless FREESHIP coupon is applied)
   const baseShipping = deliveryZone === 'dhaka' ? SHIPPING_DHAKA : SHIPPING_OUTSIDE_DHAKA;
-  const isFreeShipping = subtotal >= FREE_SHIPPING_MIN || discountCode === 'FREESHIP';
+  const isFreeShipping = discountCode === 'FREESHIP';
   const shippingFee = items.length === 0 ? 0 : isFreeShipping ? 0 : baseShipping;
 
   const total = Math.max(0, subtotal + shippingFee - discount);

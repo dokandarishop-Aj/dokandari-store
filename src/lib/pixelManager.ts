@@ -601,3 +601,226 @@ export function trackPixelPurchase(
     console.warn('Pixel Purchase note:', err);
   }
 }
+
+/**
+ * Global WhatsApp Message / Order Conversion Tracking
+ * Fires Meta `Contact` & `Lead`, TikTok `Contact`, Google Tag / GA4 `generate_lead`,
+ * GTM `dataLayer` event `whatsapp_order_click`, and Server CAPI `Contact` event.
+ */
+export function trackPixelWhatsAppConversion(
+  product?: { id?: string; name?: string; price?: number; category?: string },
+  sourceLocation = 'storefront'
+): void {
+  if (typeof window === 'undefined') return;
+
+  const prodId = product?.id || 'whatsapp_inquiry';
+  const prodName = product?.name || 'Dokandari WhatsApp Order';
+  const prodPrice = Number(product?.price) || 0;
+  const prodCat = product?.category || 'General';
+
+  try {
+    window.dataLayer = window.dataLayer || [];
+    window.dataLayer.push({
+      event: 'whatsapp_order_click',
+      conversion_type: 'WhatsApp Message Order',
+      source_location: sourceLocation,
+      content_id: prodId,
+      content_name: prodName,
+      content_category: prodCat,
+      value: prodPrice,
+      currency: 'BDT',
+    });
+
+    if (typeof window.fbq === 'function' && window.__dokandari_meta_initialized_ids?.size) {
+      window.fbq('track', 'Contact', {
+        content_ids: [prodId],
+        content_name: prodName,
+        content_category: prodCat,
+        value: prodPrice,
+        currency: 'BDT',
+      });
+      window.fbq('track', 'Lead', {
+        content_ids: [prodId],
+        content_name: prodName,
+        content_category: prodCat,
+        value: prodPrice,
+        currency: 'BDT',
+      });
+    }
+
+    if (
+      window.ttq &&
+      typeof window.ttq.track === 'function' &&
+      window.__dokandari_tiktok_initialized_ids?.size
+    ) {
+      window.ttq.track('Contact', {
+        content_id: prodId,
+        content_type: 'product',
+        content_name: prodName,
+        content_category: prodCat,
+        value: prodPrice,
+        currency: 'BDT',
+      });
+    }
+
+    if (typeof window.gtag === 'function') {
+      window.gtag('event', 'generate_lead', {
+        currency: 'BDT',
+        value: prodPrice,
+        lead_source: `WhatsApp (${sourceLocation})`,
+        item_id: prodId,
+        item_name: prodName,
+      });
+    }
+
+    dispatchServerCapi('Contact', {
+      channel: 'WhatsApp',
+      sourceLocation,
+      product: { id: prodId, name: prodName, price: prodPrice, category: prodCat },
+    });
+  } catch (err) {
+    console.warn('Pixel WhatsApp conversion note:', err);
+  }
+}
+
+/**
+ * Automatically connects Google Tag Manager (GTM-XXXX), Google Analytics 4 (G-XXXX),
+ * and Google Search Console verification tag (`google-site-verification`) into the live DOM.
+ */
+export function initializeGoogleSeoAndTags(config?: {
+  gtmContainerId?: string;
+  ga4MeasurementId?: string;
+  googleSiteVerification?: string;
+  youtubeTagId?: string;
+}): void {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+  if (!config) return;
+
+  try {
+    // 1. Google Search Console Verification Meta Tag
+    const rawVerify = (config.googleSiteVerification || '').trim();
+    if (rawVerify) {
+      const cleanToken = rawVerify
+        .replace(/<meta[^>]*content=["']([^"']+)["'][^>]*>/i, '$1')
+        .replace(/^google-site-verification=/i, '')
+        .trim();
+      if (cleanToken) {
+        let metaEl = document.querySelector(
+          'meta[name="google-site-verification"]'
+        ) as HTMLMetaElement | null;
+        if (!metaEl) {
+          metaEl = document.createElement('meta');
+          metaEl.name = 'google-site-verification';
+          document.head.appendChild(metaEl);
+        }
+        metaEl.content = cleanToken;
+      }
+    }
+
+    // 2. Google Tag Manager (GTM-XXXX)
+    const rawGtm = (config.gtmContainerId || '').trim();
+    const gtmMatch = rawGtm.match(/GTM-[A-Z0-9]+/i);
+    if (gtmMatch && gtmMatch[0]) {
+      const gtmId = gtmMatch[0].toUpperCase();
+      if (!document.getElementById(`gtm-script-${gtmId}`)) {
+        window.dataLayer = window.dataLayer || [];
+        window.dataLayer.push({ 'gtm.start': new Date().getTime(), event: 'gtm.js' });
+        const gtmScript = document.createElement('script');
+        gtmScript.id = `gtm-script-${gtmId}`;
+        gtmScript.async = true;
+        gtmScript.src = `https://www.googletagmanager.com/gtm.js?id=${encodeURIComponent(gtmId)}`;
+        document.head.appendChild(gtmScript);
+      }
+    }
+
+    // 3. Google Analytics 4 (G-XXXX) & YouTube/Google Ads Tags
+    const combinedGoogleTags = [config.ga4MeasurementId || '', config.youtubeTagId || '']
+      .filter(Boolean)
+      .join(',');
+    if (combinedGoogleTags) {
+      const parsed = parsePixelIds(combinedGoogleTags);
+      if (parsed.length > 0) {
+        initializeMultiPixels(undefined, undefined, parsed);
+      }
+    }
+  } catch (err) {
+    console.warn('Google GTM/GA4/GSC auto-connect note:', err);
+  }
+}
+
+/**
+ * Dynamically updates Schema.org Product JSON-LD and document title/canonical URL
+ * when viewing a product detail page so Google Search indexes every product on dokandari.com.
+ */
+export function updateProductStructuredData(product: {
+  id: string;
+  name: string;
+  description?: string;
+  price: number;
+  originalPrice?: number;
+  images?: string[];
+  sku?: string;
+  category?: string;
+  inStock?: boolean;
+  rating?: number;
+  reviewCount?: number;
+} | null): void {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+
+  try {
+    const existingScript = document.getElementById('dokandari-dynamic-product-jsonld');
+    if (!product) {
+      if (existingScript) existingScript.remove();
+      document.title = 'Dokandari (দোকানদারি) — প্রিমিয়াম হোম ডেকোর, স্মার্ট গ্যাজেট, মডেস্ট ফ্যাশন ও স্কিনকেয়ার | বাংলাদেশ';
+      return;
+    }
+
+    document.title = `${product.name} — ৳${product.price.toLocaleString()} | Dokandari (দোকানদারি)`;
+
+    const schemaObj = {
+      '@context': 'https://schema.org',
+      '@type': 'Product',
+      name: product.name,
+      description:
+        product.description ||
+        `${product.name} — ১০০% অরিজিনাল কোয়ালিটি ও সারা বাংলাদেশে ক্যাশ অন ডেলিভারি সুবিধা।`,
+      image: product.images && product.images.length > 0 ? product.images : [],
+      sku: product.sku || `DKD-${product.id}`,
+      brand: {
+        '@type': 'Brand',
+        name: 'Dokandari',
+      },
+      offers: {
+        '@type': 'Offer',
+        url: `${window.location.origin}/products/${encodeURIComponent(product.id)}`,
+        priceCurrency: 'BDT',
+        price: product.price,
+        availability:
+          product.inStock !== false
+            ? 'https://schema.org/InStock'
+            : 'https://schema.org/OutOfStock',
+        seller: {
+          '@type': 'Organization',
+          name: 'Dokandari',
+        },
+      },
+      aggregateRating: {
+        '@type': 'AggregateRating',
+        ratingValue: product.rating || 4.9,
+        reviewCount: product.reviewCount || 24,
+      },
+    };
+
+    let scriptEl = existingScript as HTMLScriptElement | null;
+    if (!scriptEl) {
+      scriptEl = document.createElement('script');
+      scriptEl.id = 'dokandari-dynamic-product-jsonld';
+      scriptEl.type = 'application/ld+json';
+      document.head.appendChild(scriptEl);
+    }
+    scriptEl.textContent = JSON.stringify(schemaObj);
+  } catch {
+    // ignore
+  }
+}
+

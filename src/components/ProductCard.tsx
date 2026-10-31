@@ -8,8 +8,16 @@ import { ShoppingBag, Edit3, Check, Play } from 'lucide-react';
 import { Product } from '../types';
 import { useCart } from '../context/CartContext';
 import { cleanProductTitle, getProductShareUrl } from '../lib/gemini';
-import { OFFICIAL_WHATSAPP_INT } from '../lib/storeSync';
-import { trackPixelAddToCart } from '../lib/pixelManager';
+import {
+  OFFICIAL_WHATSAPP_INT,
+  resolveSafeProductImageUrl,
+  handleProductImageError,
+} from '../lib/storeSync';
+import {
+  trackPixelAddToCart,
+  trackPixelInitiateCheckout,
+  trackPixelWhatsAppConversion,
+} from '../lib/pixelManager';
 import { OfficialWhatsAppIcon } from './OfficialIcons';
 
 interface ProductCardProps {
@@ -42,6 +50,12 @@ export const ProductCard: React.FC<ProductCardProps> = ({
     : 25;
 
   const displayTitle = cleanProductTitle(product.name);
+  const primaryImageUrl = resolveSafeProductImageUrl(product.images?.[0], product, 0);
+  const shareUrl = getProductShareUrl(product.id);
+  const whatsappMessage = encodeURIComponent(
+    `আসসালামু আলাইকুম, আমি Dokandari (dokandari.com) থেকে এই প্রোডাক্টটি অর্ডার করতে চাই:\n\nপণ্য: ${displayTitle}\nমূল্য: ৳${product.price}\nলিংক: ${shareUrl}`
+  );
+  const whatsappHref = `https://wa.me/${OFFICIAL_WHATSAPP_INT}?text=${whatsappMessage}`;
 
   // Add to Cart handler
   const handleQuickAdd = (e: React.MouseEvent) => {
@@ -60,16 +74,6 @@ export const ProductCard: React.FC<ProductCardProps> = ({
     setTimeout(() => setIsAdded(false), 1500);
   };
 
-  // Direct WhatsApp Order handler with Dokandari brand link
-  const handleWhatsApp = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const shareUrl = getProductShareUrl(product.id);
-    const message = encodeURIComponent(
-      `আসসালামু আলাইকুম, আমি Dokandari (dokandari.com) থেকে এই প্রোডাক্টটি অর্ডার করতে চাই:\n\nপণ্য: ${displayTitle}\nমূল্য: ৳${product.price}\nলিংক: ${shareUrl}`
-    );
-    window.open(`https://wa.me/${OFFICIAL_WHATSAPP_INT}?text=${message}`, '_blank');
-  };
-
   return (
     <article
       onClick={() => onOpenDetail(product)}
@@ -78,8 +82,9 @@ export const ProductCard: React.FC<ProductCardProps> = ({
       {/* Square Product Image Area */}
       <div className="relative aspect-square w-full overflow-hidden bg-stone-50">
         <img
-          src={product.images[0]}
-          alt={product.name}
+          src={primaryImageUrl}
+          alt={displayTitle}
+          onError={(e) => handleProductImageError(e, product, 0)}
           loading="lazy"
           decoding="async"
           className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-300"
@@ -172,15 +177,18 @@ export const ProductCard: React.FC<ProductCardProps> = ({
             )}
           </div>
 
-          {/* Action Buttons Layout:
-              Row 1 (Top): Left = Official Green WhatsApp Button | Right = White/Rose Cart Button (zero clipping on narrow mobile)
-              Row 2 (Bottom): Animated Full-Width Crimson "অর্ডার করুন" Button */}
+          {/* Action Buttons Layout */}
           <div className="space-y-1.5 pt-0.5">
             <div className="grid grid-cols-2 gap-1 sm:gap-1.5">
-              {/* Top-Left: Official Green WhatsApp Button */}
-              <button
-                type="button"
-                onClick={handleWhatsApp}
+              {/* Top-Left: Official Green WhatsApp Button with Pixel Conversion Tracking */}
+              <a
+                href={whatsappHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  trackPixelWhatsAppConversion(product, 'product_card');
+                }}
                 title="হোয়াটসঅ্যাপে অর্ডার করুন"
                 className={`${
                   compact
@@ -190,7 +198,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
               >
                 <OfficialWhatsAppIcon className={compact ? 'w-2.5 h-2.5 shrink-0' : 'w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0'} />
                 <span className="tracking-tight">WhatsApp</span>
-              </button>
+              </a>
 
               {/* Top-Right: White/Rose Cart Button */}
               <button
@@ -222,6 +230,10 @@ export const ProductCard: React.FC<ProductCardProps> = ({
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
+                trackPixelInitiateCheckout(
+                  [{ id: product.id, name: product.name, price: product.price, quantity: 1 }],
+                  product.price
+                );
                 onInstantOrder(product);
               }}
               className={`${

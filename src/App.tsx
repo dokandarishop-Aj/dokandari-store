@@ -46,7 +46,11 @@ import {
   saveProductPersisted,
   deleteProductPersisted,
 } from './lib/storeSync';
-import { initializeMultiPixels, trackPixelPageView } from './lib/pixelManager';
+import {
+  initializeMultiPixels,
+  initializeGoogleSeoAndTags,
+  trackPixelPageView,
+} from './lib/pixelManager';
 import { ChevronLeft, ChevronRight, Clock } from 'lucide-react';
 
 // Map legacy category strings to the 11 official category IDs so all products match accurately
@@ -232,6 +236,11 @@ function StoreMain() {
           const tiktokIds = creds?.tiktokPixelId || '';
           const youtubeIds = creds?.youtubeTagId || '';
           initializeMultiPixels(metaIds, tiktokIds, youtubeIds);
+          initializeGoogleSeoAndTags({
+            gtmContainerId: creds?.gtmContainerId,
+            ga4MeasurementId: creds?.ga4MeasurementId || creds?.youtubeTagId,
+            googleSearchConsoleCode: creds?.googleSearchConsoleCode,
+          });
           trackPixelPageView();
         } else {
           const local = localStorage.getItem('dokandari_api_credentials');
@@ -239,6 +248,11 @@ function StoreMain() {
             try {
               const creds = JSON.parse(local);
               initializeMultiPixels(creds?.facebookPixelId, creds?.tiktokPixelId, creds?.youtubeTagId);
+              initializeGoogleSeoAndTags({
+                gtmContainerId: creds?.gtmContainerId,
+                ga4MeasurementId: creds?.ga4MeasurementId || creds?.youtubeTagId,
+                googleSearchConsoleCode: creds?.googleSearchConsoleCode,
+              });
               trackPixelPageView();
             } catch {
               // ignore
