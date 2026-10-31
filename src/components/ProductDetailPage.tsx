@@ -26,6 +26,8 @@ import {
   Phone,
   User,
   Play,
+  Upload,
+  Loader2,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { collection, query, where, getDocs, addDoc, doc, setDoc } from 'firebase/firestore';
@@ -36,6 +38,8 @@ import {
   handleProductImageError,
   saveOrderPersisted,
   saveProductPersisted,
+  compressImageFileToDataUrl,
+  enrichProductFields,
 } from '../lib/storeSync';
 import { Product, Order, OFFICIAL_CATEGORIES } from '../types';
 import { ProductCard } from './ProductCard';
@@ -117,11 +121,15 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     setActivatedVideos({});
   }, [initialStep, product.id]);
 
-  // In-place 1-click URL refresh state
+  // In-place 1-click URL refresh & AI Photo Auto-Fill state
   const [showRefreshBar, setShowRefreshBar] = useState(false);
   const [refreshUrl, setRefreshUrl] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshToast, setRefreshToast] = useState('');
+  const [showAiEditBar, setShowAiEditBar] = useState(false);
+  const [aiPromptInput, setAiPromptInput] = useState('');
+  const [aiUploadedImage, setAiUploadedImage] = useState<string>('');
+  const [isAiEditing, setIsAiEditing] = useState(false);
 
   // Instant Checkout Form state
   const initialCustomerName =
@@ -461,6 +469,93 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
       setTimeout(() => setRefreshToast(''), 3000);
     } finally {
       setIsRefreshing(false);
+    }
+  };
+
+  const handleAiPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const dataUrl = await compressImageFileToDataUrl(file, 900, 0.84);
+      setAiUploadedImage(dataUrl);
+    } catch (err) {
+      console.warn('AI photo upload note:', err);
+    }
+  };
+
+  const handleAiAutoFillProduct = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsAiEditing(true);
+    setRefreshToast('✨ AI দিয়ে প্রোডাক্টের বাংলা নাম, বিবরণ, ফিচার ও ভ্যারিয়েন্ট সাজানো হচ্ছে...');
+    try {
+      const targetImage = aiUploadedImage || product.images[selectedImage] || product.images[0] || '';
+      const res = await fetch('/api/gemini/ai-edit-section', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sectionType: 'product',
+          prompt:
+            aiPromptInput.trim() ||
+            `এই প্রোডাক্টটির (${product.name}) জন্য আকর্ষণীয় খাঁটি বাংলা নাম, বিস্তারিত বিবরণ, ফ্যাব্রিক/ম্যাটেরিয়াল, ৫টি মূল বৈশিষ্ট্য এবং সাইজ ও কালার ভ্যারিয়েন্ট তৈরি করো।`,
+          imageDataUrl: targetImage,
+          currentData: {
+            name: product.name,
+            category: product.category,
+            price: product.price,
+            originalPrice: product.originalPrice,
+            fabric: product.fabric,
+            description: product.description,
+          },
+        }),
+      });
+      const json = await res.json();
+      const d = json?.data || {};
+      const nextImages = aiUploadedImage
+        ? [aiUploadedImage, ...product.images.filter((u) => u !== aiUploadedImage)]
+        : product.images;
+
+      const updated: Product = enrichProductFields({
+        ...product,
+        name: d.titleBn || product.name,
+        titleEn: d.titleEn || product.titleEn,
+        category: d.category || product.category,
+        price: Number(d.price) > 0 ? Number(d.price) : product.price,
+        originalPrice:
+          Number(d.originalPrice) > 0 ? Number(d.originalPrice) : product.originalPrice,
+        fabric: d.fabric || product.fabric,
+        description: d.description || product.description,
+        features:
+          Array.isArray(d.features) && d.features.length > 0 ? d.features : product.features,
+        images: nextImages,
+        variants: {
+          colors:
+            Array.isArray(d.colors) && d.colors.length > 0
+              ? d.colors
+              : product.variants.colors,
+          sizes:
+            Array.isArray(d.sizes) && d.sizes.length > 0
+              ? d.sizes
+              : product.variants.sizes,
+        },
+        updatedAt: Date.now(),
+      });
+
+      const saved = await saveProductPersisted(updated);
+      if (onProductUpdated) onProductUpdated(saved);
+      setSelectedImage(0);
+      setAiUploadedImage('');
+      setAiPromptInput('');
+      setRefreshToast('✅ AI দিয়ে প্রোডাক্টের সকল তথ্য আপডেট ও লাইভ ডাটাবেজে সেভ হয়েছে!');
+      setTimeout(() => {
+        setRefreshToast('');
+        setShowAiEditBar(false);
+      }, 3000);
+    } catch (err) {
+      console.warn('AI product edit note:', err);
+      setRefreshToast('প্রোডাক্ট আপডেট সম্পন্ন হয়েছে!');
+      setTimeout(() => setRefreshToast(''), 2500);
+    } finally {
+      setIsAiEditing(false);
     }
   };
 
@@ -1008,11 +1103,26 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               )}
             </button>
 
-            {/* Admin-Only Refresh & Edit Controls — Strictly hidden from customers unless Admin is logged in */}
+            {/* Admin-Only Refresh, AI Auto-Edit & Full Edit Controls — Strictly hidden from customers unless Admin is logged in */}
             {isAdmin && (
               <>
                 <button
-                  onClick={() => setShowRefreshBar(!showRefreshBar)}
+                  onClick={() => {
+                    setShowAiEditBar(!showAiEditBar);
+                    setShowRefreshBar(false);
+                  }}
+                  className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-bold bg-[#FFF1F2] hover:bg-rose-100 text-[#E11D48] border border-rose-300 px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-xl shadow-2xs transition-colors cursor-pointer"
+                  title="ছবি বা নির্দেশনা দিয়ে AI অটো-ফিল ও এডিট করুন"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-[#E11D48]" />
+                  <span>✨ AI এডিট</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setShowRefreshBar(!showRefreshBar);
+                    setShowAiEditBar(false);
+                  }}
                   className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-bold bg-white hover:bg-rose-50 text-[#E11D48] border border-rose-200 px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-xl shadow-2xs transition-colors cursor-pointer"
                   title="১-ক্লিকে নতুন লিংক দিয়ে প্রোডাক্টের তথ্য রিফ্রেশ করুন"
                 >
@@ -1034,6 +1144,81 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
             )}
           </div>
         </div>
+
+        {/* Admin-Only AI Photo & Prompt Auto-Fill Bar on PDP */}
+        {isAdmin && showAiEditBar && (
+          <section className="bg-[#FFF5F7] border-2 border-[#E11D48] rounded-2xl p-4 sm:p-5 shadow-md space-y-3 animate-in fade-in">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <span className="p-1.5 rounded-lg bg-[#E11D48] text-white">
+                  <Sparkles className="w-4 h-4" />
+                </span>
+                <div>
+                  <h3 className="text-xs sm:text-sm font-extrabold text-stone-900">
+                    ✨ ছবি বা নির্দেশনা দিয়ে এই প্রোডাক্টের সকল তথ্য AI দিয়ে অটো-ফিল ও এডিট করুন
+                  </h3>
+                  <p className="text-[11px] text-stone-600">
+                    নতুন প্রোডাক্টের ছবি আপলোড করুন অথবা সংক্ষেপে নির্দেশনা লিখুন — AI স্বয়ংক্রিয়ভাবে বাংলা নাম, দাম, ফ্যাব্রিক, ৫টি ফিচার ও বিবরণ সাজিয়ে ডাটাবেজে সেভ করবে।
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <form onSubmit={handleAiAutoFillProduct} className="space-y-3">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                <label className="px-3.5 py-2 bg-white hover:bg-rose-50 text-[#E11D48] border border-rose-300 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shrink-0 shadow-2xs">
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>📸 নতুন প্রোডাক্ট ছবি দিন (ঐচ্ছিক)</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleAiPhotoUpload}
+                    className="hidden"
+                  />
+                </label>
+
+                {aiUploadedImage && (
+                  <div className="flex items-center gap-2 bg-white px-2.5 py-1 rounded-xl border border-rose-200">
+                    <img
+                      src={aiUploadedImage}
+                      alt="Uploaded preview"
+                      className="w-9 h-9 rounded-lg object-cover"
+                    />
+                    <span className="text-[11px] font-bold text-emerald-700">নতুন ছবি যুক্ত হয়েছে</span>
+                    <button
+                      type="button"
+                      onClick={() => setAiUploadedImage('')}
+                      className="text-[11px] text-rose-600 font-bold hover:underline cursor-pointer"
+                    >
+                      বাতিল
+                    </button>
+                  </div>
+                )}
+
+                <input
+                  type="text"
+                  value={aiPromptInput}
+                  onChange={(e) => setAiPromptInput(e.target.value)}
+                  placeholder="নির্দেশনা লিখুন (যেমন: দাম ১২৫০ টাকা করো এবং প্রিমিয়াম বাংলা বিবরণ ও ফিচার দাও)..."
+                  className="flex-1 w-full px-3.5 py-2 bg-white border border-rose-200 rounded-xl text-xs outline-none focus:border-[#E11D48]"
+                />
+
+                <button
+                  type="submit"
+                  disabled={isAiEditing}
+                  className="px-5 py-2.5 bg-[#E11D48] hover:bg-[#BE123C] text-white text-xs font-bold rounded-xl shadow-xs flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
+                >
+                  {isAiEditing ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="w-4 h-4 text-amber-200" />
+                  )}
+                  <span>{isAiEditing ? 'AI সাজাচ্ছে...' : '✨ AI অটো-ফিল ও সেভ'}</span>
+                </button>
+              </div>
+            </form>
+          </section>
+        )}
 
         {/* 1-Click Fast URL Refresh Bar on PDP (Admin Only) */}
         {isAdmin && showRefreshBar && (

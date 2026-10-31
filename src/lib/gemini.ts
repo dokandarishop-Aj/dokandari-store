@@ -4,6 +4,7 @@
  */
 
 import { Product } from '../types';
+import { isBlockedOrErrorProductImageUrl, resolveSafeProductImageUrl } from './storeSync';
 
 export interface AIProductAnalysis {
   titleBn: string;
@@ -37,53 +38,47 @@ export interface AICampaignOutput {
 // Curated authentic product galleries for all 11 official categories
 export const VERIFIED_IMAGE_GALLERIES: Record<string, string[]> = {
   home_decor: [
-    'https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1583847268964-b28dc8f51f92?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1616486338812-3dadae4b4ace?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1616046229478-9901c5536a45?auto=format&fit=crop&w=1200&q=80',
+    '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg',
+    '/uploads/product/He1e7d0e527634b5196f9d7cd961eb694M.jpg',
+    '/uploads/product/H25ea4841afd5463591250f1d029873acN.jpg',
+    '/uploads/product/1792322414-gemini_generated_image_b9teg6b9teg6b9te.jpg',
+    '/uploads/product/1792322524-gemini_generated_image_6tydck6tydck6tyd.jpg',
   ],
   gadgets_electronics: [
-    'https://images.unsplash.com/photo-1590658268037-6bf12165a8df?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1546868871-7041f2a55e12?auto=format&fit=crop&w=1200&q=80',
+    '/uploads/product/1789984768-HJ-5060-Rechargeable-LED-Desk-Lamp-with-Smart-Display-Pen-Holder.webp',
+    '/uploads/product/1789984733-JOY-SUPER-B10-Rechargeable-Emergency-Bulb-15W.webp',
+    '/uploads/product/1789984688-Colmi-KW77-Smart-Watch-2-Straps.webp',
   ],
   fashion_clothing: [
-    'https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1583391733956-3750e0ff4e8b?auto=format&fit=crop&w=1200&q=80',
+    '/uploads/product/1789984712-Livo-Instant-Hair-Color-Shampoo-3-in-1.webp',
   ],
   beauty_personal_care: [
-    'https://images.unsplash.com/photo-1608248597359-05f30325493b?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1620916566398-39f1143ab7be?auto=format&fit=crop&w=1200&q=80',
+    '/uploads/product/1789984863-Dear-Hair-Tonic-Cleanser-1.jpg',
+    '/uploads/product/1789984852-Lafz-10-in-1-Advanced-Essential-Hair-Oil.webp',
+    '/uploads/product/1789984839-Skin-Cafe-Silky-Tresses-Moisturizing-Conditioner-120ml.webp',
   ],
   home_kitchen: [
-    'https://images.unsplash.com/photo-1556911220-e15b29be8c8f?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1584269600519-112d071b35e6?auto=format&fit=crop&w=1200&q=80',
+    '/uploads/product/1789984677-Mini-Multifunctional-Household-Electric-Sewing-Machine.webp',
+    '/uploads/product/1789984665-Food-Safety-7-Plus-Combo-Pack.webp',
   ],
   mobile_accessories: [
-    'https://images.unsplash.com/photo-1584438784894-089d6a62b8fa?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1609081219090-a6d81d3085bf?auto=format&fit=crop&w=1200&q=80',
+    '/uploads/product/1789984745-M11-TWS-True-Wireless-Earbuds-with-Power-Bank-LED-Display.webp',
+    '/uploads/product/1789984699-Hoco-EQ2-True-Wireless-BT-Headset.webp',
   ],
   lifestyle: [
-    'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1517256064527-09c73fc73e38?auto=format&fit=crop&w=1200&q=80',
+    '/uploads/product/1789984781-Portable-Handheld-Cooling-Fan-with-Night-Light.webp',
   ],
   travel_outdoor: [
-    'https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1553062407-98eeb64c6a62?auto=format&fit=crop&w=1200&q=80',
+    '/uploads/product/1789984722-Thunder-2-in-1-Rechargeable-LED-Emergency-Light-XST-836.webp',
   ],
   health_fitness: [
-    'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1540497077202-7c8a3999166f?auto=format&fit=crop&w=1200&q=80',
+    '/uploads/product/1789984665-Food-Safety-7-Plus-Combo-Pack.webp',
   ],
   kids_baby: [
-    'https://images.unsplash.com/photo-1515488042361-ee00e0ddd4e4?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1596461404969-9ae70f2830c1?auto=format&fit=crop&w=1200&q=80',
+    '/uploads/product/1792322524-gemini_generated_image_6tydck6tydck6tyd.jpg',
   ],
   office_essentials: [
-    'https://images.unsplash.com/photo-1497215728101-856f4ea42174?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1587829741301-dc798b83add3?auto=format&fit=crop&w=1200&q=80',
+    '/uploads/product/1789984768-HJ-5060-Rechargeable-LED-Desk-Lamp-with-Smart-Display-Pen-Holder.webp',
   ],
 };
 
@@ -94,7 +89,7 @@ function extractDirectImages(input: string): string[] {
   const images: string[] = [];
   const urlMatches = input.match(/https?:\/\/[^\s"'<>]+\.(?:jpg|jpeg|png|webp|avif)(?:\?[^\s"'<>]*)?/gi);
   if (urlMatches) {
-    images.push(...urlMatches);
+    images.push(...urlMatches.filter((u) => !isBlockedOrErrorProductImageUrl(u)));
   }
   return images;
 }
@@ -320,7 +315,7 @@ export async function smartImportOrAnalyzeProduct(
 
     const combinedImages = Array.from(
       new Set([...directImages, ...(Array.isArray(data.scrapedImages) ? data.scrapedImages : [])])
-    );
+    ).filter((u) => !isBlockedOrErrorProductImageUrl(u));
     const combinedVideos = Array.from(
       new Set([...directVideos, ...(Array.isArray(data.scrapedVideos) ? data.scrapedVideos : [])])
     );
@@ -367,16 +362,27 @@ export async function smartImportOrAnalyzeProduct(
 
     const lower = input.toLowerCase();
     let cat = 'home_decor';
-    let basePrice = 1999;
+    let basePrice = 1650;
     let titleBn = 'মডার্ন ফ্রেমলেস ফুল লেন্থ ওয়াল মিরর - ঘরের সৌন্দর্য বাড়াতে প্রিমিয়াম চয়েস';
     let titleEn = 'Modern Frameless Full Length Wall Mirror';
     let fabric = 'HD ক্লিয়ার ফ্লোট গ্লাস উইথ অ্যান্টি-শাটার কোটিং';
     let colors = ['Beveled Edges (মায়াবী ফ্রেমলেস)', 'Arch Curve (খিলান কাট)'];
     let sizes = ['Standard Size (24x60 ইঞ্চি)', '20x35 Inch'];
 
-    if (lower.includes('sticker') || lower.includes('decal') || lower.includes('vinyl') || lower.includes('3d wall')) {
+    if (
+      (lower.includes('arch') || lower.includes('unbreakable')) &&
+      (lower.includes('mirror') || lower.includes('espejo') || lower.includes('decor'))
+    ) {
       cat = 'home_decor';
-      basePrice = 650;
+      basePrice = 1650;
+      titleBn = 'খিলান আকৃতির আনব্রেকেবল সেলফ-অ্যাডহেসিভ অ্যাক্রিলিক ওয়াল মিরর - হোম ডেকোর';
+      titleEn = 'Arch Unbreakable Mirror Home Wall Decor Self-Adhesive Acrylic Mirror';
+      fabric = 'HD আনব্রেকেবল অ্যাক্রিলিক মিরর ও ওয়াটারপ্রুফ ব্যাক অ্যাডহেসিভ';
+      colors = ['Frameless HD Silver (ফ্রেমলেস সিলভার)', 'Warm Gold Border'];
+      sizes = ['20x60 cm (Standard Arch)', '30x90 cm (Medium Arch)', '40x120 cm (Full Length)'];
+    } else if (lower.includes('sticker') || lower.includes('decal') || lower.includes('vinyl') || lower.includes('3d wall')) {
+      cat = 'home_decor';
+      basePrice = 1650;
       titleBn = '৩ডি ওয়াটারপ্রুফ অ্যাক্রিলিক ডেকোরেটিভ ওয়াল স্টিকার সেট';
       titleEn = '3D Waterproof Acrylic Decorative Wall Sticker Art';
       fabric = 'ওয়াটারপ্রুফ প্রিমিয়াম অ্যাক্রিলিক শিট';
@@ -394,7 +400,7 @@ export async function smartImportOrAnalyzeProduct(
       lower.includes('clock')
     ) {
       cat = 'home_decor';
-      basePrice = 1999;
+      basePrice = 1650;
       titleBn = 'লাক্সারি রাউন্ড ডেকোরেটিভ ওয়াল মিরর - বেভেলড এজ এইচডি রিফ্লেকশন';
       titleEn = 'Modern Frameless Decorative Wall Mirror';
       fabric = 'HD ক্লিয়ার ফ্লোট গ্লাস উইথ অ্যান্টি-শাটার কোটিং';
@@ -670,14 +676,24 @@ export async function askAiShoppingAssistant(
  */
 export function convertAnalysisToProduct(analysis: AIProductAnalysis, inputUrl?: string): Product {
   const catKey = (analysis.category in VERIFIED_IMAGE_GALLERIES ? analysis.category : 'home_decor') as string;
-  const imgs =
+  const prodName = cleanProductTitle(analysis.titleBn);
+  const rawImgs =
     analysis.images && analysis.images.length > 0
-      ? analysis.images
+      ? analysis.images.filter((u) => !isBlockedOrErrorProductImageUrl(u))
+      : [];
+  const baseImgs =
+    rawImgs.length > 0
+      ? rawImgs
       : VERIFIED_IMAGE_GALLERIES[catKey] || VERIFIED_IMAGE_GALLERIES.home_decor;
 
+  const prodId = `dkd-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
+  const safeImgs = baseImgs.map((u, idx) =>
+    resolveSafeProductImageUrl(u, { id: prodId, name: prodName, titleEn: analysis.titleEn, category: catKey }, idx)
+  );
+
   return {
-    id: `dkd-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`,
-    name: cleanProductTitle(analysis.titleBn),
+    id: prodId,
+    name: prodName,
     titleEn: analysis.titleEn,
     category: analysis.category || 'home_decor',
     price: Number(analysis.price),
@@ -696,7 +712,7 @@ export function convertAnalysisToProduct(analysis: AIProductAnalysis, inputUrl?:
       colors: analysis.colors,
       sizes: analysis.sizes,
     },
-    images: imgs,
+    images: safeImgs,
     videos: analysis.videos || [],
     status: 'published',
     sourceUrl: inputUrl,

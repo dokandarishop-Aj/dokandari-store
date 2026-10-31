@@ -17,10 +17,14 @@ import {
   Edit3,
   Save,
   X,
+  Trash2,
+  Sparkles,
+  Loader2,
 } from 'lucide-react';
-import { doc, setDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
-import { DEFAULT_STORE_CONTENT } from '../lib/storeSync';
+import {
+  DEFAULT_STORE_CONTENT,
+  saveStoreContentPersisted,
+} from '../lib/storeSync';
 import { FounderData } from './FounderSection';
 
 interface AboutPageProps {
@@ -30,6 +34,7 @@ interface AboutPageProps {
   onBackToHome: () => void;
   onOpenStoreProducts?: () => void;
   onEditFounder?: () => void;
+  onRemoveFounderPhoto?: () => void;
 }
 
 export const AboutPage: React.FC<AboutPageProps> = ({
@@ -39,9 +44,12 @@ export const AboutPage: React.FC<AboutPageProps> = ({
   onBackToHome,
   onOpenStoreProducts,
   onEditFounder,
+  onRemoveFounderPhoto,
 }) => {
   const [isEditingPage, setIsEditingPage] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState('');
   const [localPage, setLocalPage] = useState(
     pageContent || DEFAULT_STORE_CONTENT.pageContent!
   );
@@ -52,15 +60,57 @@ export const AboutPage: React.FC<AboutPageProps> = ({
     }
   }, [pageContent]);
 
+  const handleAiPolishPage = async () => {
+    setAiLoading(true);
+    try {
+      const res = await fetch('/api/gemini/ai-edit-section', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sectionType: 'founder_brand',
+          prompt:
+            aiPrompt.trim() ||
+            'Dokandari ব্র্যান্ড পরিচিতি, প্রতিষ্ঠাতা পরিচিতি এবং অফিসের ঠিকানা সুন্দর ও প্রফেশনাল বাংলায় সাজিয়ে দাও।',
+          currentData: {
+            aboutHeadline: localPage.aboutHeadline,
+            aboutSubtitle: localPage.aboutSubtitle,
+            warehouseAddress:
+              localPage.warehouseAddress || 'বি-৬১/১৪, জলেশ্বর, সাভার - ১৩৪০, ঢাকা (১ম তলা)',
+            corporateAddress:
+              localPage.corporateAddress || 'সাভার বাস স্ট্যান্ড, শহীদ প্লাজা, দ্বিতীয় তলা',
+          },
+        }),
+      });
+      const json = await res.json();
+      if (json?.data) {
+        setLocalPage((prev) => ({
+          ...prev,
+          aboutHeadline: json.data.aboutHeadline || prev.aboutHeadline,
+          aboutSubtitle: json.data.aboutSubtitle || prev.aboutSubtitle,
+          warehouseAddress:
+            json.data.warehouseAddress ||
+            prev.warehouseAddress ||
+            'বি-৬১/১৪, জলেশ্বর, সাভার - ১৩৪০, ঢাকা (১ম তলা)',
+          corporateAddress:
+            json.data.corporateAddress ||
+            prev.corporateAddress ||
+            'সাভার বাস স্ট্যান্ড, শহীদ প্লাজা, দ্বিতীয় তলা',
+        }));
+      }
+    } catch (err) {
+      console.warn('AI polish about page note:', err);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
   const handleSaveAboutContent = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     try {
-      await setDoc(
-        doc(db, 'settings', 'store_content'),
-        { pageContent: localPage },
-        { merge: true }
-      );
+      await saveStoreContentPersisted({
+        pageContent: localPage,
+      });
       setIsEditingPage(false);
     } catch (err) {
       console.warn('Save about page error:', err);
@@ -68,6 +118,8 @@ export const AboutPage: React.FC<AboutPageProps> = ({
       setSaving(false);
     }
   };
+
+  const hasPhoto = Boolean(founderData.photo && founderData.photo.trim());
 
   return (
     <div className="bg-[#FAF9F6] min-h-screen pb-16 animate-in fade-in">
@@ -84,18 +136,29 @@ export const AboutPage: React.FC<AboutPageProps> = ({
             </button>
 
             {isAdmin && (
-              <button
-                onClick={() => setIsEditingPage(!isEditingPage)}
-                className="inline-flex items-center gap-1.5 text-xs font-bold bg-[#E11D48] hover:bg-[#BE123C] text-white px-4 py-1.5 rounded-xl shadow-sm cursor-pointer transition-colors"
-              >
-                <Edit3 className="w-3.5 h-3.5" />
-                <span>{isEditingPage ? 'এডিট বন্ধ করুন' : 'এই পেইজের লেখা লাইভ এডিট করুন'}</span>
-              </button>
+              <div className="flex items-center gap-2 flex-wrap">
+                {onEditFounder && (
+                  <button
+                    onClick={onEditFounder}
+                    className="inline-flex items-center gap-1.5 text-xs font-bold bg-white/15 hover:bg-white/25 text-white px-3.5 py-1.5 rounded-xl border border-white/20 cursor-pointer transition-colors"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                    <span>ফাউন্ডার ছবি ও প্রোফাইল এডিট</span>
+                  </button>
+                )}
+                <button
+                  onClick={() => setIsEditingPage(!isEditingPage)}
+                  className="inline-flex items-center gap-1.5 text-xs font-bold bg-[#E11D48] hover:bg-[#BE123C] text-white px-4 py-1.5 rounded-xl shadow-sm cursor-pointer transition-colors"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  <span>{isEditingPage ? 'এডিট বন্ধ করুন' : '✨ AI ও পেইজ এডিট করুন'}</span>
+                </button>
+              </div>
             )}
           </div>
 
           <div className="inline-block px-3 py-1 rounded-md bg-[#E11D48] text-white text-xs font-bold tracking-wider uppercase">
-            BRAND STORY & HERITAGE
+            BRAND STORY &amp; HERITAGE
           </div>
 
           <h1 className="text-2xl sm:text-4xl font-black tracking-tight leading-tight">
@@ -117,7 +180,7 @@ export const AboutPage: React.FC<AboutPageProps> = ({
             <div className="flex items-center justify-between pb-3 border-b border-rose-100">
               <h3 className="text-sm font-extrabold text-[#E11D48] flex items-center gap-2">
                 <Edit3 className="w-4 h-4" />
-                <span>ব্র্যান্ড পরিচিতি পেইজ লাইভ এডিটর (ফায়ারস্টোর অটো-সিঙ্ক)</span>
+                <span>ব্র্যান্ড পরিচিতি ও অফিস ঠিকানা লাইভ এডিটর (ফায়ারস্টোর অটো-সিঙ্ক)</span>
               </h3>
               <button
                 type="button"
@@ -125,6 +188,30 @@ export const AboutPage: React.FC<AboutPageProps> = ({
                 className="p-1 text-stone-400 hover:text-stone-700 cursor-pointer"
               >
                 <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* AI Auto-Fill Bar */}
+            <div className="bg-[#FFF5F7] p-3 rounded-2xl border border-rose-200 flex flex-col sm:flex-row gap-2">
+              <input
+                type="text"
+                value={aiPrompt}
+                onChange={(e) => setAiPrompt(e.target.value)}
+                placeholder="AI নির্দেশনা লিখুন (যেমন: প্রিমিয়াম ব্র্যান্ড স্টোরি ও ঠিকানা সাজিয়ে দাও)..."
+                className="flex-1 px-3 py-2 bg-white border border-rose-200 rounded-xl text-xs"
+              />
+              <button
+                type="button"
+                onClick={handleAiPolishPage}
+                disabled={aiLoading}
+                className="px-4 py-2 bg-[#E11D48] hover:bg-[#BE123C] text-white font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
+              >
+                {aiLoading ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Sparkles className="w-3.5 h-3.5" />
+                )}
+                <span>{aiLoading ? 'AI সাজাচ্ছে...' : '✨ AI দিয়ে সাজান'}</span>
               </button>
             </div>
 
@@ -147,14 +234,32 @@ export const AboutPage: React.FC<AboutPageProps> = ({
                   className="w-full px-3.5 py-2 bg-stone-50 border border-stone-300 rounded-xl"
                 />
               </div>
-              <div>
-                <label className="block font-bold text-stone-700 mb-1">অফিস ও ওয়্যারহাউজ ঠিকানা</label>
-                <input
-                  type="text"
-                  value={localPage.warehouseAddress}
-                  onChange={(e) => setLocalPage({ ...localPage, warehouseAddress: e.target.value })}
-                  className="w-full px-3.5 py-2 bg-stone-50 border border-stone-300 rounded-xl"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-stone-700 mb-1">
+                    ঠিকানা ১ (উপরের ঠিকানা — শোরুম ও ওয়্যারহাউজ)
+                  </label>
+                  <input
+                    type="text"
+                    value={localPage.warehouseAddress}
+                    onChange={(e) => setLocalPage({ ...localPage, warehouseAddress: e.target.value })}
+                    className="w-full px-3.5 py-2 bg-stone-50 border border-stone-300 rounded-xl"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-stone-700 mb-1">
+                    ঠিকানা ২ (নিচের ঠিকানা — কর্পোরেট অফিস)
+                  </label>
+                  <input
+                    type="text"
+                    value={
+                      localPage.corporateAddress ||
+                      'সাভার বাস স্ট্যান্ড, শহীদ প্লাজা, দ্বিতীয় তলা'
+                    }
+                    onChange={(e) => setLocalPage({ ...localPage, corporateAddress: e.target.value })}
+                    className="w-full px-3.5 py-2 bg-stone-50 border border-stone-300 rounded-xl"
+                  />
+                </div>
               </div>
             </div>
 
@@ -173,15 +278,27 @@ export const AboutPage: React.FC<AboutPageProps> = ({
 
         {/* Founder Card Spotlight */}
         <div className="bg-white rounded-3xl border border-rose-200 p-6 sm:p-10 shadow-lg flex flex-col md:flex-row items-center gap-8">
-          <div className="relative w-44 h-44 sm:w-56 sm:h-56 rounded-3xl overflow-hidden border-4 border-rose-100 shadow-md shrink-0">
-            <img
-              src={founderData.photo || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=600&q=80'}
-              alt={founderData.name}
-              loading="lazy"
-              decoding="async"
-              className="w-full h-full object-cover"
-              referrerPolicy="no-referrer"
-            />
+          <div className="relative w-44 h-44 sm:w-56 sm:h-56 rounded-3xl overflow-hidden border-4 border-rose-100 shadow-md shrink-0 bg-gradient-to-br from-[#FFF1F2] via-rose-100 to-rose-200 flex items-center justify-center">
+            {hasPhoto ? (
+              <img
+                src={founderData.photo}
+                alt={founderData.name}
+                loading="lazy"
+                decoding="async"
+                className="w-full h-full object-cover"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center text-center p-4">
+                <ShieldCheck className="w-14 h-14 text-[#E11D48] mb-2" />
+                <span className="text-sm font-black text-[#9F1239] tracking-wide">
+                  DOKANDARI
+                </span>
+                <span className="text-[11px] font-bold text-[#E11D48] mt-0.5">
+                  VERIFIED FOUNDER
+                </span>
+              </div>
+            )}
             <div className="absolute bottom-2 left-2 right-2 bg-stone-900/85 backdrop-blur-xs text-white text-[10px] text-center font-bold py-1 rounded-lg">
               {founderData.title || 'Founder & CEO'}
             </div>
@@ -190,7 +307,7 @@ export const AboutPage: React.FC<AboutPageProps> = ({
           <div className="space-y-4 flex-1 text-center md:text-left">
             <div>
               <span className="text-xs font-bold uppercase tracking-wider text-[#E11D48]">
-                ফাউন্ডার ও সিইও-এর বার্তা
+                প্রতিষ্ঠাতা ও সিইও পরিচিতি (Founder &amp; CEO Profile)
               </span>
               <h2 className="text-2xl sm:text-3xl font-extrabold text-stone-900 mt-1">
                 {founderData.name}
@@ -204,7 +321,32 @@ export const AboutPage: React.FC<AboutPageProps> = ({
               "{founderData.bio || 'আমাদের লক্ষ্য প্রতিটি গ্রাহককে সততা, সর্বোচ্চ কোয়ালিটি এবং ঝামেলামুক্ত ক্যাশ অন ডেলিভারি সেবা প্রদান করা।'}"
             </p>
 
-            <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 pt-2">
+            {/* Founder Direct Details Summary */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-left bg-stone-50 p-3.5 rounded-2xl border border-stone-200 text-xs">
+              <div className="flex items-start gap-2">
+                <MapPin className="w-4 h-4 text-[#E11D48] shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold text-stone-900 block">ঠিকানা ১ (ওয়্যারহাউজ ও শোরুম):</span>
+                  <span className="text-stone-600">
+                    {localPage.warehouseAddress ||
+                      founderData.address ||
+                      'বি-৬১/১৪, জলেশ্বর, সাভার - ১৩৪০, ঢাকা (১ম তলা)'}
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-start gap-2">
+                <MapPin className="w-4 h-4 text-[#E11D48] shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold text-stone-900 block">ঠিকানা ২ (কর্পোরেট অফিস):</span>
+                  <span className="text-stone-600">
+                    {localPage.corporateAddress ||
+                      'সাভার বাস স্ট্যান্ড, শহীদ প্লাজা, দ্বিতীয় তলা'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-center md:justify-start gap-2.5 pt-2">
               <button
                 onClick={onOpenStoreProducts || onBackToHome}
                 className="px-5 py-2.5 bg-[#E11D48] hover:bg-[#BE123C] text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer"
@@ -214,9 +356,19 @@ export const AboutPage: React.FC<AboutPageProps> = ({
               {isAdmin && onEditFounder && (
                 <button
                   onClick={onEditFounder}
-                  className="px-4 py-2.5 bg-rose-50 hover:bg-rose-100 text-[#E11D48] border border-rose-200 text-xs font-bold rounded-xl transition-colors cursor-pointer"
+                  className="px-4 py-2.5 bg-rose-50 hover:bg-rose-100 text-[#E11D48] border border-rose-200 text-xs font-bold rounded-xl transition-colors cursor-pointer flex items-center gap-1.5"
                 >
-                  ✎ ফাউন্ডার প্রোফাইল এডিট করুন
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>✎ ফাউন্ডার ছবি ও প্রোফাইল এডিট</span>
+                </button>
+              )}
+              {isAdmin && hasPhoto && onRemoveFounderPhoto && (
+                <button
+                  onClick={onRemoveFounderPhoto}
+                  className="px-3.5 py-2.5 bg-white hover:bg-rose-50 text-[#E11D48] border border-rose-200 text-xs font-bold rounded-xl transition-colors cursor-pointer flex items-center gap-1"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>ছবি রিমুভ করুন</span>
                 </button>
               )}
               <a
@@ -277,18 +429,43 @@ export const AboutPage: React.FC<AboutPageProps> = ({
 
         {/* Contact and Warehouse details */}
         <div className="bg-white rounded-3xl border border-rose-200 p-6 sm:p-8 shadow-xs space-y-6">
-          <div className="border-b border-rose-100 pb-4">
-            <h3 className="text-lg font-bold text-stone-900">আমাদের অফিস ও ওয়্যারহাউস ঠিকানা</h3>
-            <p className="text-xs text-stone-500 mt-0.5">যেকোনো প্রশ্ন বা অর্ডারের সহায়তায় সরাসরি যোগাযোগ করুন</p>
+          <div className="border-b border-rose-100 pb-4 flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <h3 className="text-lg font-bold text-stone-900">আমাদের অফিস ও ওয়্যারহাউস ঠিকানা</h3>
+              <p className="text-xs text-stone-500 mt-0.5">যেকোনো প্রশ্ন বা অর্ডারের সহায়তায় সরাসরি যোগাযোগ করুন</p>
+            </div>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => setIsEditingPage(true)}
+                className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-[#E11D48] border border-rose-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+              >
+                <Edit3 className="w-3.5 h-3.5" />
+                <span>ঠিকানা এডিট করুন</span>
+              </button>
+            )}
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 text-xs text-stone-700">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 text-xs text-stone-700">
             <div className="flex items-start gap-3">
               <MapPin className="w-5 h-5 text-[#E11D48] shrink-0 mt-0.5" />
               <div>
-                <span className="font-bold block text-stone-900">হেড অফিস ও ওয়্যারহাউজ</span>
+                <span className="font-bold block text-stone-900">ঠিকানা ১ (শোরুম ও ওয়্যারহাউজ)</span>
                 <span className="text-stone-600">
-                  {localPage.warehouseAddress || founderData.address || 'বাইপাইল, আশুলিয়া, সাভার, ঢাকা'}
+                  {localPage.warehouseAddress ||
+                    founderData.address ||
+                    'বি-৬১/১৪, জলেশ্বর, সাভার - ১৩৪০, ঢাকা (১ম তলা)'}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-3">
+              <MapPin className="w-5 h-5 text-[#E11D48] shrink-0 mt-0.5" />
+              <div>
+                <span className="font-bold block text-stone-900">ঠিকানা ২ (কর্পোরেট ও ট্রেনিং অফিস)</span>
+                <span className="text-stone-600">
+                  {localPage.corporateAddress ||
+                    'সাভার বাস স্ট্যান্ড, শহীদ প্লাজা, দ্বিতীয় তলা'}
                 </span>
               </div>
             </div>
@@ -297,8 +474,8 @@ export const AboutPage: React.FC<AboutPageProps> = ({
               <Phone className="w-5 h-5 text-[#E11D48] shrink-0 mt-0.5" />
               <div>
                 <span className="font-bold block text-stone-900">হটলাইন ও কাস্টমার কেয়ার</span>
-                <a href={`tel:${founderData.phone || '+8801885533437'}`} className="font-mono text-stone-600 hover:text-[#E11D48] block">
-                  {founderData.phone || '+880 1885-533437'}
+                <a href={`tel:${founderData.phone || '+8809638757282'}`} className="font-mono text-stone-600 hover:text-[#E11D48] block">
+                  {founderData.phone || '+8809638757282'}
                 </a>
                 <span className="text-[10px] text-stone-400">সকাল ১০টা থেকে রাত ১০টা (প্রতিদিন)</span>
               </div>
@@ -320,3 +497,4 @@ export const AboutPage: React.FC<AboutPageProps> = ({
     </div>
   );
 };
+

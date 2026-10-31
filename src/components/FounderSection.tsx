@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import { Check, MapPin, Phone, Truck, ShieldCheck, RefreshCw, MessageCircle, Edit3 } from 'lucide-react';
+import { Check, MapPin, Phone, Truck, ShieldCheck, RefreshCw, MessageCircle, Edit3, Trash2, Sparkles } from 'lucide-react';
 
 export interface FounderData {
   name: string;
@@ -18,46 +18,80 @@ export interface FounderData {
 interface FounderSectionProps {
   founderData?: FounderData;
   onEdit?: () => void;
+  onRemovePhoto?: () => void;
 }
 
-export const FounderSection: React.FC<FounderSectionProps> = ({ founderData, onEdit }) => {
+export const FounderSection: React.FC<FounderSectionProps> = ({
+  founderData,
+  onEdit,
+  onRemovePhoto,
+}) => {
   const data = founderData || {
     name: 'মোঃ জান্নাতুল ইসলাম (জে. আই. রনি)',
     title: 'Founder & CEO, Dokandari',
     photo: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=400&q=80',
     bio: 'Dokandari বাংলাদেশের অন্যতম বিশ্বস্ত ই-কমার্স ও প্রিমিয়াম লাইফস্টাইল ব্র্যান্ড। আমাদের প্রতিটি প্রোডাক্ট সরাসরি নিজস্ব তত্ত্বাবধানে বাছাইকৃত এবং ১০০% কোয়ালিটি গ্যারান্টিযুক্ত।',
-    address: 'প্রধান কার্যালয়: বাইপাইল, আশুলিয়া, সাভার, ঢাকা',
+    address: 'বি-৬১/১৪, জলেশ্বর, সাভার - ১৩৪০, ঢাকা (১ম তলা)',
     phone: '+8809638757282',
   };
+
+  const hasPhoto = Boolean(data.photo && data.photo.trim());
 
   return (
     <section className="bg-[#FFF8F9] border-t border-rose-100 py-12">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-10">
         
-        {/* Founder & CEO Card (Exact replica from user's attached screenshot image_af94ab88.png) */}
+        {/* Founder & CEO Card */}
         <div className="relative bg-white rounded-3xl border border-rose-200/80 p-6 sm:p-8 shadow-xs max-w-5xl mx-auto">
           {onEdit && (
-            <button
-              onClick={onEdit}
-              className="absolute top-4 right-4 z-10 px-3 py-1.5 bg-white hover:bg-rose-50 text-[#E11D48] border border-rose-200 text-xs font-bold rounded-lg shadow-2xs flex items-center gap-1 cursor-pointer transition-colors"
-              title="Edit Founder Details"
-            >
-              <Edit3 className="w-3.5 h-3.5 text-[#E11D48]" />
-              <span>এডিট করুন</span>
-            </button>
+            <div className="flex flex-wrap items-center gap-2 sm:absolute sm:top-4 sm:right-4 z-10 mb-4 sm:mb-0 justify-end">
+              {hasPhoto && onRemovePhoto && (
+                <button
+                  type="button"
+                  onClick={onRemovePhoto}
+                  className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-[#E11D48] border border-rose-200 text-[11px] font-bold rounded-lg shadow-2xs flex items-center gap-1 cursor-pointer transition-colors"
+                  title="ফাউন্ডার ছবি রিমুভ করুন"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-[#E11D48]" />
+                  <span>ছবি রিমুভ</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={onEdit}
+                className="px-3 py-1.5 bg-[#E11D48] hover:bg-[#BE123C] text-white text-xs font-bold rounded-lg shadow-2xs flex items-center gap-1.5 cursor-pointer transition-colors"
+                title="Edit Founder Details & AI Bio"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-200" />
+                <Edit3 className="w-3.5 h-3.5 text-white" />
+                <span>AI ও প্রোফাইল এডিট</span>
+              </button>
+            </div>
           )}
 
           <div className="flex flex-col md:flex-row items-center md:items-start gap-6">
             
-            {/* Founder Avatar with Verified Badge */}
+            {/* Founder Avatar with Verified Badge (or Luxury Monogram when photo is removed) */}
             <div className="flex flex-col items-center shrink-0">
-              <div className="relative w-28 h-28 sm:w-32 sm:h-32 rounded-2xl overflow-hidden border-2 border-rose-200 shadow-sm bg-rose-50">
-                <img
-                  src={data.photo}
-                  alt={`${data.name} - Dokandari Founder & CEO`}
-                  className="w-full h-full object-cover object-top"
-                  referrerPolicy="no-referrer"
-                />
+              <div className="relative w-28 h-28 sm:w-32 sm:h-32 rounded-2xl overflow-hidden border-2 border-rose-200 shadow-sm bg-gradient-to-br from-[#FFF1F2] via-rose-100 to-rose-200 flex items-center justify-center">
+                {hasPhoto ? (
+                  <img
+                    src={data.photo}
+                    alt={`${data.name} - Dokandari Founder & CEO`}
+                    className="w-full h-full object-cover object-top"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <div className="flex flex-col items-center justify-center text-center p-2">
+                    <ShieldCheck className="w-10 h-10 text-[#E11D48] mb-1" />
+                    <span className="text-[11px] font-extrabold text-[#9F1239] leading-tight">
+                      DOKANDARI
+                    </span>
+                    <span className="text-[9px] font-bold text-[#E11D48]">
+                      FOUNDER & CEO
+                    </span>
+                  </div>
+                )}
               </div>
               <div className="-mt-3 z-10 bg-[#E11D48] text-white text-[11px] font-bold px-3 py-1 rounded-full flex items-center gap-1 shadow-xs">
                 <Check className="w-3 h-3 stroke-3" />
@@ -82,7 +116,7 @@ export const FounderSection: React.FC<FounderSectionProps> = ({ founderData, onE
               <div className="pt-2 flex flex-col sm:flex-row items-center gap-4 text-xs text-stone-600 font-medium">
                 <div className="flex items-center gap-1.5 text-stone-700">
                   <MapPin className="w-4 h-4 text-[#E11D48] shrink-0" />
-                  <span>{data.address}</span>
+                  <span>{data.address || 'বি-৬১/১৪, জলেশ্বর, সাভার - ১৩৪০, ঢাকা (১ম তলা)'}</span>
                 </div>
                 <span className="hidden sm:inline text-rose-200">|</span>
                 <div className="flex items-center gap-1.5 text-stone-700">

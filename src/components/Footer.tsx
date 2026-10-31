@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from 'react';
-import { Phone, Mail, MapPin, ExternalLink, Sparkles, User, Lock, LayoutDashboard } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Phone, Mail, MapPin, ExternalLink, Sparkles, User, Lock, LayoutDashboard, Edit3, Save, X, Check } from 'lucide-react';
 import { ProductCategory, OFFICIAL_CATEGORIES } from '../types';
 import {
   OfficialWhatsAppIcon,
@@ -17,6 +17,8 @@ import {
   DEFAULT_STORE_CONTENT,
   formatDokandariSocialUrl,
   OFFICIAL_WHATSAPP,
+  saveStoreContentPersisted,
+  StoreContent,
 } from '../lib/storeSync';
 
 interface FooterProps {
@@ -44,6 +46,7 @@ interface FooterProps {
     googleMapUrl?: string;
   };
   founderAddress?: string;
+  onUpdateStoreContent?: (updated: StoreContent) => void;
 }
 
 export const Footer: React.FC<FooterProps> = ({
@@ -61,6 +64,7 @@ export const Footer: React.FC<FooterProps> = ({
   officialEmail,
   pageContent,
   founderAddress,
+  onUpdateStoreContent,
 }) => {
   const brandLogoUrl = '/assets/aistudio/Gemini_Generated_Image_4bi49x4bi49x4bi4_b4aaa34e.jpg';
   const activeSocials = socialLinks || DEFAULT_STORE_CONTENT.socialLinks!;
@@ -79,20 +83,262 @@ export const Footer: React.FC<FooterProps> = ({
     pageContent?.warehouseAddress ||
     founderAddress ||
     DEFAULT_STORE_CONTENT.pageContent?.warehouseAddress ||
-    'প্রবাসীর পল্লী, ডিইপিজেড (DEPZ) রোড, আশুলিয়া, সাভার, ঢাকা - ১৩৪৯';
+    'বি-৬১/১৪, জলেশ্বর, সাভার - ১৩৪০, ঢাকা (১ম তলা)';
 
   const address2 =
     pageContent?.corporateAddress ||
     DEFAULT_STORE_CONTENT.pageContent?.corporateAddress ||
-    'বাড়ি ৫/এ, রোড ১২, সেক্টর ১০, উত্তরা মডেল টাউন, ঢাকা - ১২৩০';
+    'সাভার বাস স্ট্যান্ড, শহীদ প্লাজা, দ্বিতীয় তলা';
 
   const mapUrl =
     pageContent?.googleMapUrl ||
     DEFAULT_STORE_CONTENT.pageContent?.googleMapUrl ||
     `https://maps.google.com/?q=${encodeURIComponent(address1)}`;
 
+  // Admin-Only Social Links & Official Address Editor Modal State
+  const [isEditingFooter, setIsEditingFooter] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editSaved, setEditSaved] = useState(false);
+  const [formWhatsapp, setFormWhatsapp] = useState(activeSocials.whatsapp);
+  const [formFacebook, setFormFacebook] = useState(activeSocials.facebook);
+  const [formInstagram, setFormInstagram] = useState(activeSocials.instagram);
+  const [formTiktok, setFormTiktok] = useState(activeSocials.tiktok);
+  const [formYoutube, setFormYoutube] = useState(activeSocials.youtube);
+  const [formHotline, setFormHotline] = useState(displayHotline);
+  const [formEmail, setFormEmail] = useState(displayEmail || 'dokandari.shop@gmail.com');
+  const [formAddr1, setFormAddr1] = useState(address1);
+  const [formAddr2, setFormAddr2] = useState(address2);
+
+  useEffect(() => {
+    setFormWhatsapp(activeSocials.whatsapp);
+    setFormFacebook(activeSocials.facebook);
+    setFormInstagram(activeSocials.instagram);
+    setFormTiktok(activeSocials.tiktok);
+    setFormYoutube(activeSocials.youtube);
+    setFormHotline(displayHotline);
+    setFormEmail(displayEmail || 'dokandari.shop@gmail.com');
+    setFormAddr1(address1);
+    setFormAddr2(address2);
+  }, [
+    activeSocials.whatsapp,
+    activeSocials.facebook,
+    activeSocials.instagram,
+    activeSocials.tiktok,
+    activeSocials.youtube,
+    displayHotline,
+    displayEmail,
+    address1,
+    address2,
+  ]);
+
+  const handleSaveFooterConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setEditSaving(true);
+    try {
+      const updated = await saveStoreContentPersisted({
+        socialLinks: {
+          whatsapp: formWhatsapp.trim(),
+          facebook: formFacebook.trim(),
+          instagram: formInstagram.trim(),
+          tiktok: formTiktok.trim(),
+          youtube: formYoutube.trim(),
+        },
+        hotlineNumber: formHotline.trim(),
+        officialEmail: formEmail.trim(),
+        pageContent: {
+          ...(pageContent as any),
+          warehouseAddress: formAddr1.trim(),
+          corporateAddress: formAddr2.trim(),
+        },
+      });
+      if (onUpdateStoreContent) {
+        onUpdateStoreContent(updated);
+      }
+      setEditSaved(true);
+      setTimeout(() => {
+        setEditSaved(false);
+        setIsEditingFooter(false);
+      }, 700);
+    } catch (err) {
+      console.warn('Footer config save note:', err);
+      setIsEditingFooter(false);
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
   return (
-    <footer className="bg-white border-t border-stone-200 text-stone-700 pt-12 pb-8">
+    <footer className="bg-white border-t border-stone-200 text-stone-700 pt-12 pb-8 relative">
+      {/* Admin-Only Quick Edit Bar in Footer */}
+      {isAdmin && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-6">
+          <div className="bg-[#FFF5F7] border border-rose-200 rounded-2xl p-3 sm:p-4 flex items-center justify-between flex-wrap gap-2 shadow-2xs">
+            <div className="text-xs">
+              <span className="font-extrabold text-[#E11D48] block">
+                অ্যাডমিন কুইক কন্ট্রোল: সোশ্যাল মিডিয়া লিংক ও অফিসিয়াল ঠিকানা (শুধুমাত্র অ্যাডমিন দেখতে পাচ্ছেন)
+              </span>
+              <span className="text-[11px] text-stone-500">
+                কাস্টমার ভিউতে এই এডিট বারটি সম্পূর্ণ লুকানো থাকে
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsEditingFooter(true)}
+              className="px-3.5 py-2 bg-[#E11D48] hover:bg-[#BE123C] text-white text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer shadow-2xs"
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+              <span>✏️ সোশ্যাল লিংক ও ঠিকানা এডিট করুন</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Admin-Only Modal for Editing Social Media Links & Official Addresses */}
+      {isAdmin && isEditingFooter && (
+        <div className="fixed inset-0 z-50 bg-stone-950/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-xl w-full p-5 sm:p-6 shadow-2xl border border-rose-200 text-xs space-y-4 my-auto max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-rose-100">
+              <div>
+                <h3 className="text-sm font-extrabold text-stone-900">
+                  অফিসিয়াল ঠিকানা ও সোশ্যাল মিডিয়া লিংক এডিট করুন
+                </h3>
+                <p className="text-[11px] text-stone-500">
+                  সেভ করলে সরাসরি ফায়ারস্টোর ডাটাবেজে ও লাইভ ডোমেইনে আপডেট হয়ে যাবে
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsEditingFooter(false)}
+                className="p-1 text-stone-400 hover:text-stone-700 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveFooterConfig} className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-stone-700 mb-1">
+                    ঠিকানা ১ (উপরের ঠিকানা — শোরুম ও ওয়্যারহাউজ)
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={formAddr1}
+                    onChange={(e) => setFormAddr1(e.target.value)}
+                    className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-stone-700 mb-1">
+                    ঠিকানা ২ (নিচের ঠিকানা — কর্পোরেট অফিস)
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={formAddr2}
+                    onChange={(e) => setFormAddr2(e.target.value)}
+                    className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-stone-700 mb-1">হটলাইন নম্বর</label>
+                  <input
+                    type="text"
+                    value={formHotline}
+                    onChange={(e) => setFormHotline(e.target.value)}
+                    className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-stone-700 mb-1">অফিসিয়াল ইমেইল</label>
+                  <input
+                    type="email"
+                    value={formEmail}
+                    onChange={(e) => setFormEmail(e.target.value)}
+                    className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-stone-200 space-y-2.5">
+                <span className="font-extrabold text-[#E11D48] block">
+                  সোশ্যাল মিডিয়া পেজ ও চ্যানেল লিংকসমূহ:
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block font-bold text-stone-700 mb-1">WhatsApp Link / Number</label>
+                    <input
+                      type="text"
+                      value={formWhatsapp}
+                      onChange={(e) => setFormWhatsapp(e.target.value)}
+                      className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-stone-700 mb-1">Facebook Page URL</label>
+                    <input
+                      type="text"
+                      value={formFacebook}
+                      onChange={(e) => setFormFacebook(e.target.value)}
+                      className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-stone-700 mb-1">Instagram Profile URL</label>
+                    <input
+                      type="text"
+                      value={formInstagram}
+                      onChange={(e) => setFormInstagram(e.target.value)}
+                      className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-stone-700 mb-1">TikTok Profile URL</label>
+                    <input
+                      type="text"
+                      value={formTiktok}
+                      onChange={(e) => setFormTiktok(e.target.value)}
+                      className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block font-bold text-stone-700 mb-1">YouTube Channel URL</label>
+                    <input
+                      type="text"
+                      value={formYoutube}
+                      onChange={(e) => setFormYoutube(e.target.value)}
+                      className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-stone-200">
+                <button
+                  type="button"
+                  onClick={() => setIsEditingFooter(false)}
+                  className="px-4 py-2 border border-stone-300 rounded-xl text-stone-700 hover:bg-stone-50 cursor-pointer"
+                >
+                  বাতিল
+                </button>
+                <button
+                  type="submit"
+                  disabled={editSaving}
+                  className="px-5 py-2 bg-[#E11D48] hover:bg-[#BE123C] text-white rounded-xl font-bold flex items-center gap-1.5 cursor-pointer"
+                >
+                  {editSaved ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
+                  <span>{editSaving ? 'সেভ হচ্ছে...' : editSaved ? 'সেভ হয়েছে!' : 'ডাটাবেজে সেভ করুন'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-10">
         {/* Main 4-Column Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">

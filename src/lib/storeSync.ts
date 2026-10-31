@@ -81,14 +81,14 @@ export const DEFAULT_CATEGORY_HEROES: Record<string, CategoryHeroConfig> = {
   home_decor: {
     title: 'প্রিমিয়াম হোম ডেকোর ও আনব্রেকেবল মিরর কালেকশন',
     subtitle: 'ভাঙার ভয় ছাড়া আপনার ঘর, ড্রয়িং রুম ও বেডরুমকে দিন রাজকীয় ও নান্দনিক লুক — ১০০% অরিজিনাল ইমপোর্টেড ডেকোর আইটেম।',
-    image: 'https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?auto=format&fit=crop&w=1600&q=80',
+    image: '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg',
     tag: 'হোম ডেকোর স্পেশাল',
     ctaText: 'কালেকশন দেখুন',
   },
   gadgets_electronics: {
     title: 'অরিজিনাল স্মার্ট গ্যাজেটস ও ইলেকট্রনিক্স কালেকশন',
     subtitle: 'টিডব্লিউএস ইয়ারবাডস, স্মার্টওয়াচ, পোর্টেবল মিনি ফ্যান ও আধুনিক টেক গ্যাজেটস এখন আকর্ষণীয় ডিসকাউন্টে।',
-    image: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=1600&q=80',
+    image: '/uploads/product/1789984768-HJ-5060-Rechargeable-LED-Desk-Lamp-with-Smart-Display-Pen-Holder.webp',
     tag: 'স্মার্ট গ্যাজেটস ও টেক',
     ctaText: 'গ্যাজেটস দেখুন',
   },
@@ -102,7 +102,7 @@ export const DEFAULT_CATEGORY_HEROES: Record<string, CategoryHeroConfig> = {
   beauty_personal_care: {
     title: 'অথেনটিক বিউটি ও পার্সোনাল কেয়ার কালেকশন',
     subtitle: 'ত্বক ও চুলের যত্নে ১০০% অরিজিনাল স্কিনকেয়ার, অর্গানাইজার ও গ্রুমিং এসেনশিয়ালস।',
-    image: 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&w=1600&q=80',
+    image: '/uploads/product/1789984863-Dear-Hair-Tonic-Cleanser-1.jpg',
     tag: 'বিউটি ও স্কিনকেয়ার',
     ctaText: 'বিউটি প্রোডাক্টস',
   },
@@ -174,9 +174,9 @@ export const DEFAULT_STORE_CONTENT: StoreContent = {
     aboutHeadline: 'Dokandari — আপনার সৌন্দর্য, আমাদের ঐতিহ্য',
     aboutSubtitle:
       'আন্তর্জাতিক মানের প্রিমিয়াম হোম ডেকোর, ফ্যাশন ও গ্যাজেটস কালেকশন সরাসরি বিশ্বস্ত প্রস্তুতকারক থেকে আপনার দ্বারে পৌঁছে দিতে আমরা দায়বদ্ধ।',
-    warehouseAddress: 'প্রবাসীর পল্লী, ডিইপিজেড (DEPZ) রোড, আশুলিয়া, সাভার, ঢাকা - ১৩৪৯',
-    corporateAddress: 'বাড়ি ৫/এ, রোড ১২, সেক্টর ১০, উত্তরা মডেল টাউন, ঢাকা - ১২৩০',
-    googleMapUrl: 'https://maps.google.com/?q=DEPZ+Ashulia+Savar+Dhaka',
+    warehouseAddress: 'বি-৬১/১৪, জলেশ্বর, সাভার - ১৩৪০, ঢাকা (১ম তলা)',
+    corporateAddress: 'সাভার বাস স্ট্যান্ড, শহীদ প্লাজা, দ্বিতীয় তলা',
+    googleMapUrl: 'https://maps.google.com/?q=Jaleshwar+Savar+1340+Dhaka',
     policyHeadline: 'গোপনীয়তা, রিটার্ন ও রিফান্ড পলিসি',
     policySubtitle:
       'Dokandari এর সাথে আপনার প্রতিটি কেনাকাটা শতভাগ নিরাপদ — ৭ দিনের ফ্রি রিটার্ন ও এক্সচেঞ্জ গ্যারান্টি (0 BDT Return Cost)। ডেলিভারি ম্যানের সামনে পার্সেল খুলে যাচাই করে নেওয়ার পূর্ণ সুবিধা।',
@@ -192,7 +192,7 @@ export const DEFAULT_STORE_CONTENT: StoreContent = {
     title: 'Founder & CEO, Dokandari',
     photo: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=400&q=80',
     bio: 'Dokandari বাংলাদেশের অন্যতম শীর্ষস্থানীয় আন্তর্জাতিক মানের মাল্টি-ক্যাটাগরি ই-কমার্স প্ল্যাটফর্ম। হোম ডেকোর, স্মার্ট গ্যাজেটস, লাইফস্টাইল ও দৈনন্দিন পণ্যে ১০০% অরিজিনাল কোয়ালিটি নিশ্চয়তা।',
-    address: 'প্রবাসীর পল্লী, ডিইপিজেড (DEPZ) রোড, আশুলিয়া, সাভার, ঢাকা - ১৩৪৯',
+    address: 'বি-৬১/১৪, জলেশ্বর, সাভার - ১৩৪০, ঢাকা (১ম তলা)',
     phone: '+8809638757282',
   },
   heroSlides: [
@@ -200,7 +200,7 @@ export const DEFAULT_STORE_CONTENT: StoreContent = {
       id: 'slide-1',
       title: 'প্রিমিয়াম হোম ডেকোর ও আনব্রেকেবল মিরর কালেকশন',
       subtitle: 'ভাঙার ভয় ছাড়া আপনার ঘরের সৌন্দর্য নিমিষেই দ্বিগুণ করুন',
-      image: 'https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?auto=format&fit=crop&w=1600&q=80',
+      image: '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg',
       tag: 'হোম ডেকোর স্পেশাল',
       ctaText: 'কালেকশন দেখুন',
       ctaLink: '#products-section',
@@ -209,23 +209,74 @@ export const DEFAULT_STORE_CONTENT: StoreContent = {
       id: 'slide-2',
       title: 'অরিজিনাল স্মার্ট গ্যাজেটস ও ওয়্যারলেস অ্যাক্সেসরিজ',
       subtitle: 'আন্তর্জাতিক ব্র্যান্ডের লেটেস্ট টেকনোলজি এখন আপনার হাতের মুঠোয়',
-      image: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=1600&q=80',
+      image: '/uploads/product/1789984768-HJ-5060-Rechargeable-LED-Desk-Lamp-with-Smart-Display-Pen-Holder.webp',
       tag: 'স্মার্ট গ্যাজেটস',
       ctaText: 'গ্যাজেট দেখুন',
       ctaLink: '#products-section',
     },
     {
       id: 'slide-3',
-      title: 'আন্তর্জাতিক কোয়ালিটি লাইফস্টাইল ও ফ্যাশন ট্রেন্ডস',
-      subtitle: 'সব জেন্ডার ও বয়সের জন্য আধুনিক লাইফস্টাইল ও নিত্যপ্রয়োজনীয় পণ্য',
-      image: 'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?auto=format&fit=crop&w=1600&q=80',
-      tag: 'লাইফস্টাইল এসেনশিয়ালস',
+      title: 'আন্তর্জাতিক কোয়ালিটি স্কিনকেয়ার ও হেয়ার কেয়ার কালেকশন',
+      subtitle: '১০০% অথেনটিক হেয়ার টনিক, সিরাম ও নিত্যপ্রয়োজনীয় বিউটি পণ্য',
+      image: '/uploads/product/1789984863-Dear-Hair-Tonic-Cleanser-1.jpg',
+      tag: 'বিউটি ও লাইফস্টাইল',
       ctaText: 'অর্ডার করুন',
       ctaLink: '#products-section',
     },
   ],
   categoryHeroes: DEFAULT_CATEGORY_HEROES,
 };
+
+/**
+ * Normalizes legacy English/Uttara addresses to the official Bengali Savar addresses
+ * unless the admin has entered a custom new address.
+ */
+function normalizeOfficialAddresses(content: StoreContent): StoreContent {
+  const wh = (content.pageContent?.warehouseAddress || '').trim();
+  const corp = (content.pageContent?.corporateAddress || '').trim();
+  const fAddr = (content.founder?.address || '').trim();
+
+  const isLegacyWarehouse =
+    !wh ||
+    wh.toLowerCase().includes('b-61/14') ||
+    wh.toLowerCase().includes('jaleshwar') ||
+    wh.includes('প্রবাসীর পল্লী') ||
+    wh.includes('ডিইপিজেড');
+
+  const isLegacyCorporate =
+    !corp ||
+    corp.includes('উত্তরা মডেল টাউন') ||
+    corp.includes('বাড়ি ৫/এ') ||
+    corp.includes('সেক্টর ১০');
+
+  const isLegacyFounderAddr =
+    !fAddr ||
+    fAddr.toLowerCase().includes('b-61/14') ||
+    fAddr.toLowerCase().includes('jaleshwar') ||
+    fAddr.includes('প্রবাসীর পল্লী') ||
+    fAddr.includes('ডিইপিজেড');
+
+  return {
+    ...content,
+    pageContent: {
+      ...DEFAULT_STORE_CONTENT.pageContent!,
+      ...(content.pageContent || {}),
+      warehouseAddress: isLegacyWarehouse
+        ? 'বি-৬১/১৪, জলেশ্বর, সাভার - ১৩৪০, ঢাকা (১ম তলা)'
+        : wh,
+      corporateAddress: isLegacyCorporate
+        ? 'সাভার বাস স্ট্যান্ড, শহীদ প্লাজা, দ্বিতীয় তলা'
+        : corp,
+    },
+    founder: {
+      ...DEFAULT_STORE_CONTENT.founder,
+      ...(content.founder || {}),
+      address: isLegacyFounderAddr
+        ? 'বি-৬১/১৪, জলেশ্বর, সাভার - ১৩৪০, ঢাকা (১ম তলা)'
+        : fAddr,
+    },
+  };
+}
 
 /**
  * Recursively strips `undefined` values so Firestore `setDoc` never rejects an object.
@@ -265,9 +316,9 @@ export function mergeStoreContent(
   baseOrIncoming: Partial<StoreContent>,
   incomingArg?: Partial<StoreContent>
 ): StoreContent {
-  const base: StoreContent = incomingArg ? (baseOrIncoming as StoreContent) : getInitialStoreContent();
+  const base: StoreContent = incomingArg ? (baseOrIncoming as StoreContent) : DEFAULT_STORE_CONTENT;
   const incoming: Partial<StoreContent> = incomingArg ? incomingArg : baseOrIncoming;
-  return {
+  const merged: StoreContent = {
     ...DEFAULT_STORE_CONTENT,
     ...base,
     ...incoming,
@@ -285,6 +336,13 @@ export function mergeStoreContent(
       ...DEFAULT_STORE_CONTENT.founder,
       ...(base.founder || {}),
       ...(incoming.founder || {}),
+      // Preserve explicit empty string if admin removed founder photo
+      photo:
+        incoming.founder && typeof incoming.founder.photo === 'string'
+          ? incoming.founder.photo
+          : base.founder && typeof base.founder.photo === 'string'
+          ? base.founder.photo
+          : DEFAULT_STORE_CONTENT.founder.photo,
     },
     heroSlides:
       incoming.heroSlides && incoming.heroSlides.length > 0
@@ -296,6 +354,7 @@ export function mergeStoreContent(
       ...(incoming.categoryHeroes || {}),
     },
   };
+  return normalizeOfficialAddresses(merged);
 }
 
 /**
@@ -304,7 +363,8 @@ export function mergeStoreContent(
 export async function saveStoreContentPersisted(
   contentUpdate: Partial<StoreContent>
 ): Promise<StoreContent> {
-  const merged = mergeStoreContent(getInitialStoreContent(), contentUpdate);
+  const current = getInitialStoreContent();
+  const merged = mergeStoreContent(current, contentUpdate);
   const clean = sanitizeForFirestore(merged);
   try {
     localStorage.setItem(LS_STORE_CONTENT_KEY, JSON.stringify(clean));
@@ -361,185 +421,180 @@ export function getFallbackProductImage(
   product?: { id?: string; name?: string; titleEn?: string; category?: string },
   index = 0
 ): string {
-  const text = `${product?.name || ''} ${product?.titleEn || ''} ${product?.category || ''}`.toLowerCase();
+  const id = (product?.id || '').toLowerCase();
+  const text = `${id} ${product?.name || ''} ${product?.titleEn || ''} ${product?.category || ''}`.toLowerCase();
   const seed = hashProductSeed(`${product?.id || ''}-${product?.name || ''}`);
   const offset = seed + index;
 
-  // 1. Cat Bookshelf / Wall Shelf / Showcase
+  // Exact match for real Dokandari products
+  if (text.includes('arch') || text.includes('খিলান')) {
+    const archGallery = [
+      '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg',
+      '/uploads/product/He1e7d0e527634b5196f9d7cd961eb694M.jpg',
+      '/uploads/product/H25ea4841afd5463591250f1d029873acN.jpg',
+      '/uploads/product/H29cc3664a9fa41368666c15926e0d2b5S.jpg',
+      '/uploads/product/H6a326173d1a54849a898cf5017343e7ah.jpg',
+      '/uploads/product/H952cd307db5c46eea7a3728480fb7c42j.jpg',
+    ];
+    return archGallery[index % archGallery.length];
+  }
+
+  if (text.includes('হার্ট') || text.includes('heart')) {
+    const heartGallery = [
+      '/uploads/product/1792322414-gemini_generated_image_b9teg6b9teg6b9te.jpg',
+      '/uploads/product/heart-mirror-sticker.jpg',
+    ];
+    return heartGallery[index % heartGallery.length];
+  }
+
   if (
     text.includes('বেড়াল') ||
+    text.includes('বিড়াল') ||
     text.includes('বুকশেল্ফ') ||
     text.includes('বুকসেল্ফ') ||
     text.includes('শোকেস') ||
+    text.includes('cat') ||
     text.includes('shelf') ||
     text.includes('bookshelf')
   ) {
-    const shelves = [
-      'https://images.unsplash.com/photo-1594620302200-9a762244a156?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1583847268964-b28dc8f51f92?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1616046229478-9901c5536a45?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1513694203232-719a280e022f?auto=format&fit=crop&w=900&q=80',
+    const catGallery = [
+      '/uploads/product/1792322524-gemini_generated_image_6tydck6tydck6tyd.jpg',
+      '/uploads/product/cat-led-bookshelf.jpg',
     ];
-    return shelves[offset % shelves.length];
+    return catGallery[index % catGallery.length];
   }
 
-  // 2. Mirrors & Wall Stickers (Heart mirror, Round mirror, 3D Acrylic mirror)
-  if (
-    text.includes('মিরর') ||
-    text.includes('আয়না') ||
-    text.includes('mirror') ||
-    text.includes('স্টিকার') ||
-    text.includes('হোম ডেকোর') ||
-    text.includes('ডেকোরেটিভ')
-  ) {
-    const mirrors = [
-      'https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1616486338812-3dadae4b4ace?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1583847268964-b28dc8f51f92?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1615873968403-89e068629265?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1616046229478-9901c5536a45?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1513694203232-719a280e022f?auto=format&fit=crop&w=900&q=80',
+  if (text.includes('প্রজাপতি') || text.includes('butterfly') || text.includes('৩ডি') || text.includes('3d')) {
+    const bflyGallery = [
+      '/uploads/product/1792218499-h2d83f5b4372f4cf69c8441815d239ae5j.jpg',
+      '/uploads/product/3d-butterfly-mirror.jpg',
     ];
-    return mirrors[offset % mirrors.length];
+    return bflyGallery[index % bflyGallery.length];
   }
 
-  // 3. Hair Tonic / Hair Oil / Conditioner / Shampoo
-  if (
-    text.includes('হেয়ার') ||
-    text.includes('টনিক') ||
-    text.includes('অয়েল') ||
-    text.includes('তেল') ||
-    text.includes('কন্ডিশনার') ||
-    text.includes('শ্যাম্পু') ||
-    text.includes('hair') ||
-    text.includes('shampoo')
-  ) {
-    const hairCare = [
-      'https://images.unsplash.com/photo-1608248597359-05f30325493b?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1535585209827-a15fcdbc4c2d?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1598440947619-2c35fc9aa908?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1629198688000-71f23e745b6e?auto=format&fit=crop&w=900&q=80',
+  if (text.includes('গোল') || text.includes('বাথরুম') || text.includes('ভ্যানিটি') || text.includes('round') || text.includes('vanity')) {
+    const roundGallery = [
+      '/uploads/product/1792218995-hb38f48c0a8b7454ebad69790a214b4f5s.jpg',
+      '/uploads/product/round-vanity-mirror.jpg',
     ];
-    return hairCare[offset % hairCare.length];
+    return roundGallery[index % roundGallery.length];
   }
 
-  // 4. Serums, Moisturizers, Soap, Skincare & Beauty
-  if (
-    text.includes('সিরাম') ||
-    text.includes('ময়েশ্চারাইজার') ||
-    text.includes('স্কিন') ||
-    text.includes('ফেইস') ||
-    text.includes('ক্রিম') ||
-    text.includes('লোশন') ||
-    text.includes('সোপ') ||
-    text.includes('সাবান') ||
-    text.includes('serum') ||
-    text.includes('beauty') ||
-    text.includes('skin')
-  ) {
-    const skincare = [
-      'https://images.unsplash.com/photo-1620916566398-39f1143ab7be?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1570172619644-dfd03ed5d881?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1611930022073-b7a4ba5fcccd?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1601049541289-9b1b7bbbfe19?auto=format&fit=crop&w=900&q=80',
+  if (text.includes('ফ্লেক্সিবল') || text.includes('সেলফ-আঠালো') || text.includes('flexible') || text.includes('sheet')) {
+    const flexGallery = [
+      '/uploads/product/1792219337-ha7e0aa8d05a44d73b82d68816420d174s.jpg',
+      '/uploads/product/flexible-mirror-sheet.jpg',
     ];
-    return skincare[offset % skincare.length];
+    return flexGallery[index % flexGallery.length];
   }
 
-  // 5. Portable Fan / Cooling Fan
+  if (text.includes('ডিয়ার') || text.includes('dear')) {
+    const dearGallery = [
+      '/uploads/product/1789984863-Dear-Hair-Tonic-Cleanser-1.jpg',
+      '/uploads/product/dear-hair-tonic.jpg',
+    ];
+    return dearGallery[index % dearGallery.length];
+  }
+
+  if (text.includes('লাফজ') || text.includes('lafz')) {
+    return '/uploads/product/1789984852-Lafz-10-in-1-Advanced-Essential-Hair-Oil.webp';
+  }
+  if (text.includes('স্কিন ক্যাফে') || text.includes('skin cafe')) {
+    return '/uploads/product/1789984839-Skin-Cafe-Silky-Tresses-Moisturizing-Conditioner-120ml.webp';
+  }
+  if (text.includes('সেন্ট আইভস') || text.includes('st. ives') || text.includes('st ives')) {
+    return '/uploads/product/1789984829-St.-Ives-Glowing-Oil-Free-Face-Moisturizer-Watermelon.webp';
+  }
+  if (text.includes('সিম্পল') || text.includes('simple')) {
+    return '/uploads/product/1789984817-Simple-10-Vitamin-CEF-Booster-Serum-30ml.webp';
+  }
+  if (text.includes('হাওয়া') || text.includes('hawa')) {
+    return '/uploads/product/1789984805-Hawa-Hair-Fall-Avenger-Oil-100ml.webp';
+  }
+  if (text.includes('মুশট্যাক') || text.includes('muuchstac')) {
+    return '/uploads/product/1789984794-Muuchstac-Ocean-Face-Wash-Herbal-Skin-Lightning-Oil-Combo.webp';
+  }
   if (text.includes('ফ্যান') || text.includes('কুলিং') || text.includes('fan')) {
-    const fans = [
-      'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1527443224154-c4a3942d3acf?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1585338107529-13afc5f02586?auto=format&fit=crop&w=900&q=80',
-    ];
-    return fans[offset % fans.length];
+    return '/uploads/product/1789984781-Portable-Handheld-Cooling-Fan-with-Night-Light.webp';
+  }
+  if (text.includes('hj-5060') || text.includes('ডেস্ক ল্যাম্প') || text.includes('desk lamp')) {
+    return '/uploads/product/1789984768-HJ-5060-Rechargeable-LED-Desk-Lamp-with-Smart-Display-Pen-Holder.webp';
+  }
+  if (text.includes('m11')) {
+    return '/uploads/product/1789984745-M11-TWS-True-Wireless-Earbuds-with-Power-Bank-LED-Display.webp';
+  }
+  if (text.includes('জয় সুপার') || text.includes('joy-super') || text.includes('b10')) {
+    return '/uploads/product/1789984733-JOY-SUPER-B10-Rechargeable-Emergency-Bulb-15W.webp';
+  }
+  if (text.includes('থান্ডার') || text.includes('thunder') || text.includes('xst-836')) {
+    return '/uploads/product/1789984722-Thunder-2-in-1-Rechargeable-LED-Emergency-Light-XST-836.webp';
+  }
+  if (text.includes('লিভো') || text.includes('livo')) {
+    return '/uploads/product/1789984712-Livo-Instant-Hair-Color-Shampoo-3-in-1.webp';
+  }
+  if (text.includes('হোকো') || text.includes('hoco') || text.includes('eq2')) {
+    return '/uploads/product/1789984699-Hoco-EQ2-True-Wireless-BT-Headset.webp';
+  }
+  if (text.includes('কলমি') || text.includes('colmi') || text.includes('kw77')) {
+    return '/uploads/product/1789984688-Colmi-KW77-Smart-Watch-2-Straps.webp';
+  }
+  if (text.includes('সেলাই') || text.includes('sewing')) {
+    return '/uploads/product/1789984677-Mini-Multifunctional-Household-Electric-Sewing-Machine.webp';
+  }
+  if (text.includes('ফুড সেফটি') || text.includes('food safety')) {
+    return '/uploads/product/1789984665-Food-Safety-7-Plus-Combo-Pack.webp';
   }
 
-  // 6. Earbuds / Smartwatch / Gadgets / Chargers
-  if (
-    text.includes('ইয়ারবাড') ||
-    text.includes('ওয়াচ') ||
-    text.includes('চার্জার') ||
-    text.includes('পাওয়ার ব্যাংক') ||
-    text.includes('গ্যাজেট') ||
-    text.includes('gadget') ||
-    text.includes('watch') ||
-    text.includes('earbud')
-  ) {
-    const gadgets = [
-      'https://images.unsplash.com/photo-1590658268037-6bf12165a8df?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1546868871-7041f2a55e12?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1609091839311-d5365f9ff1c5?auto=format&fit=crop&w=900&q=80',
-    ];
-    return gadgets[offset % gadgets.length];
-  }
-
-  // 7. Fashion, Hijab, Abaya, Hoodie, Camisole
-  if (
-    text.includes('হিজাব') ||
-    text.includes('আবায়া') ||
-    text.includes('বোরকা') ||
-    text.includes('ক্যামিসোল') ||
-    text.includes('হুডি') ||
-    text.includes('পোশাক') ||
-    text.includes('ফ্যাশন') ||
-    text.includes('fashion')
-  ) {
-    const fashion = [
-      'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1583391733956-3750e0ff4e8b?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1490481651871-ab68de25d43d?auto=format&fit=crop&w=900&q=80',
-    ];
-    return fashion[offset % fashion.length];
-  }
-
-  // 8. Kitchen, Travel, Fitness, Kids, Office
+  // Category pools using 100% real Dokandari product images
   const cat = product?.category || 'home_decor';
   const catPools: Record<string, string[]> = {
     home_decor: [
-      'https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1616486338812-3dadae4b4ace?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1583847268964-b28dc8f51f92?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1616046229478-9901c5536a45?auto=format&fit=crop&w=900&q=80',
+      '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg',
+      '/uploads/product/1792322414-gemini_generated_image_b9teg6b9teg6b9te.jpg',
+      '/uploads/product/1792322524-gemini_generated_image_6tydck6tydck6tyd.jpg',
+      '/uploads/product/1792219337-ha7e0aa8d05a44d73b82d68816420d174s.jpg',
+      '/uploads/product/1792218995-hb38f48c0a8b7454ebad69790a214b4f5s.jpg',
+      '/uploads/product/1792218499-h2d83f5b4372f4cf69c8441815d239ae5j.jpg',
     ],
     gadgets_electronics: [
-      'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1590658268037-6bf12165a8df?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1546868871-7041f2a55e12?auto=format&fit=crop&w=900&q=80',
+      '/uploads/product/1789984768-HJ-5060-Rechargeable-LED-Desk-Lamp-with-Smart-Display-Pen-Holder.webp',
+      '/uploads/product/1789984733-JOY-SUPER-B10-Rechargeable-Emergency-Bulb-15W.webp',
+      '/uploads/product/1789984722-Thunder-2-in-1-Rechargeable-LED-Emergency-Light-XST-836.webp',
+      '/uploads/product/1789984688-Colmi-KW77-Smart-Watch-2-Straps.webp',
+    ],
+    beauty_personal_care: [
+      '/uploads/product/1789984863-Dear-Hair-Tonic-Cleanser-1.jpg',
+      '/uploads/product/1789984852-Lafz-10-in-1-Advanced-Essential-Hair-Oil.webp',
+      '/uploads/product/1789984839-Skin-Cafe-Silky-Tresses-Moisturizing-Conditioner-120ml.webp',
+      '/uploads/product/1789984829-St.-Ives-Glowing-Oil-Free-Face-Moisturizer-Watermelon.webp',
+      '/uploads/product/1789984817-Simple-10-Vitamin-CEF-Booster-Serum-30ml.webp',
+      '/uploads/product/1789984805-Hawa-Hair-Fall-Avenger-Oil-100ml.webp',
     ],
     home_kitchen: [
-      'https://images.unsplash.com/photo-1585515320310-259814833e62?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1556911220-e15b29be8c8f?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1584269600464-37b1b58a9fe7?auto=format&fit=crop&w=900&q=80',
+      '/uploads/product/1789984677-Mini-Multifunctional-Household-Electric-Sewing-Machine.webp',
+      '/uploads/product/1789984665-Food-Safety-7-Plus-Combo-Pack.webp',
     ],
     mobile_accessories: [
-      'https://images.unsplash.com/photo-1609091839311-d5365f9ff1c5?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1584438784894-089d6a62b8fa?auto=format&fit=crop&w=900&q=80',
+      '/uploads/product/1789984745-M11-TWS-True-Wireless-Earbuds-with-Power-Bank-LED-Display.webp',
+      '/uploads/product/1789984699-Hoco-EQ2-True-Wireless-BT-Headset.webp',
     ],
     lifestyle: [
-      'https://images.unsplash.com/photo-1602143407151-7111542de6e8?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?auto=format&fit=crop&w=900&q=80',
+      '/uploads/product/1789984781-Portable-Handheld-Cooling-Fan-with-Night-Light.webp',
     ],
     travel_outdoor: [
-      'https://images.unsplash.com/photo-1553062407-98eeb64c6a62?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=900&q=80',
+      '/uploads/product/1789984722-Thunder-2-in-1-Rechargeable-LED-Emergency-Light-XST-836.webp',
     ],
     health_fitness: [
-      'https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?auto=format&fit=crop&w=900&q=80',
+      '/uploads/product/1789984665-Food-Safety-7-Plus-Combo-Pack.webp',
     ],
     kids_baby: [
-      'https://images.unsplash.com/photo-1519689680058-324335c77eba?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1515488042361-ee00e0ddd4e4?auto=format&fit=crop&w=900&q=80',
+      '/uploads/product/1792322524-gemini_generated_image_6tydck6tydck6tyd.jpg',
     ],
     office_essentials: [
-      'https://images.unsplash.com/photo-1505843490538-5133c6c7d0e1?auto=format&fit=crop&w=900&q=80',
-      'https://images.unsplash.com/photo-1497215728101-856f4ea42174?auto=format&fit=crop&w=900&q=80',
+      '/uploads/product/1789984768-HJ-5060-Rechargeable-LED-Desk-Lamp-with-Smart-Display-Pen-Holder.webp',
+    ],
+    fashion_clothing: [
+      '/uploads/product/1789984712-Livo-Instant-Hair-Color-Shampoo-3-in-1.webp',
     ],
   };
 
@@ -547,11 +602,76 @@ export function getFallbackProductImage(
   return pool[offset % pool.length];
 }
 
+// Generic Unsplash URLs (brown living-room sofa, white sofa, yellow headphones, etc.) that accidentally overwrote real products
+const OVERWRITTEN_UNSPLASH_IDS = [
+  'photo-1618221195710-dd6b41faaea6',
+  'photo-1505740420928-5e560c06d30e',
+  'photo-1583847268964-b28dc8f51f92',
+  'photo-1616486338812-3dadae4b4ace',
+  'photo-1615873968403-89e068629265',
+  'photo-1594620302200-9a762244a156',
+  'photo-1616046229478-9901c5536a45',
+  'photo-1513694203232-719a280e022f',
+];
+
+export function isOverwrittenGenericImage(url: string | undefined, _productId?: string): boolean {
+  if (!url) return true;
+  const trimmed = url.trim();
+  return OVERWRITTEN_UNSPLASH_IDS.some((token) => trimmed.includes(token));
+}
+
+/**
+ * Detects Alibaba/AliExpress/CDN bot-challenge or error graphics (such as the "hand unplugging power cord" tfs graphic)
+ * so they can NEVER be displayed or saved in the catalog.
+ */
+export function isBlockedOrErrorProductImageUrl(rawUrl: string | undefined): boolean {
+  if (!rawUrl || typeof rawUrl !== 'string') return true;
+  let decoded = rawUrl.trim();
+  try {
+    decoded = decodeURIComponent(decoded);
+  } catch {
+    // ignore
+  }
+  const lower = decoded.toLowerCase();
+
+  const badTokens = [
+    '/tfs/',
+    'imgextra',
+    'tps-',
+    'unplug',
+    'punish',
+    'captcha',
+    'interception',
+    'error',
+    'access-denied',
+    'placeholder',
+    'lazyload',
+    'assets.alicdn.com',
+    'g.alicdn.com',
+    'u.alicdn.com',
+    'avatar',
+    'sprite',
+    '1x1',
+    'favicon',
+  ];
+  for (const token of badTokens) {
+    if (lower.includes(token)) return true;
+  }
+
+  // Genuine Alibaba / AliExpress product images ALWAYS contain `/kf/`
+  if (lower.includes('alicdn.com') && !lower.includes('/kf/')) {
+    return true;
+  }
+
+  return false;
+}
+
 /**
  * Resolves and sanitizes any product image URL:
- * 1. Keeps Admin-uploaded `data:image/...`, `blob:`, and `/assets/...` intact.
- * 2. Replaces dead legacy WordPress URLs (`dokandari.com/wp-content/uploads/...`), broken hotlinks,
- *    or generic Alibaba promo banners (`alicdn.com` purple earbuds on home_decor) with product-matched high-res images.
+ * 1. Keeps Admin-uploaded `data:image/...`, `blob:`, `/assets/...`, and `/uploads/product/...` intact.
+ * 2. Blocks any Alibaba/CDN error/unplug illustrations (`isBlockedOrErrorProductImageUrl`).
+ * 3. Rewrites `dokandari.com/public/uploads/product/...` directly to local `/uploads/product/...`.
+ * 4. Preserves real product images from `alicdn.com/kf/`, `shajgoj`, `daraz`, Firebase Storage, etc.
  */
 export function resolveSafeProductImageUrl(
   rawUrl: string | undefined,
@@ -563,13 +683,23 @@ export function resolveSafeProductImageUrl(
   }
 
   let url = rawUrl.trim();
-  if (!url) {
+  if (!url || url === 'undefined' || url === 'null') {
     return getFallbackProductImage(product, index);
   }
 
   // Keep Admin-uploaded base64 data: URLs, blob: URLs, and local static assets intact
   if (url.startsWith('data:') || url.startsWith('blob:') || url.startsWith('/assets/')) {
     return url;
+  }
+
+  // Keep local authentic product uploads (/uploads/product/... or /public/uploads/product/...) intact
+  if (url.startsWith('/uploads/product/') || url.startsWith('/public/uploads/product/')) {
+    return url.replace(/^\/public\/uploads\//, '/uploads/');
+  }
+
+  // Reject any error/unplug/tfs/captcha image immediately
+  if (isBlockedOrErrorProductImageUrl(url)) {
+    return getFallbackProductImage(product, index);
   }
 
   // 1. Unwrap `/images/:productId/:index?src=...`
@@ -592,42 +722,76 @@ export function resolveSafeProductImageUrl(
     }
   }
 
+  if (url.startsWith('/uploads/product/') || url.startsWith('/public/uploads/product/')) {
+    return url.replace(/^\/public\/uploads\//, '/uploads/');
+  }
+
+  if (isBlockedOrErrorProductImageUrl(url)) {
+    return getFallbackProductImage(product, index);
+  }
+
   // 2. Fix protocol-relative URLs
   if (url.startsWith('//')) {
     url = `https:${url}`;
   }
 
+  // 3. Rewrite Laravel `/public/uploads/product/...` URLs (from dokandari.com or wsrv.nl) to local `/uploads/product/...`
+  if (url.includes('/public/uploads/product/') || url.includes('%2Fpublic%2Fuploads%2Fproduct%2F')) {
+    try {
+      const decoded = decodeURIComponent(url);
+      const fname = decoded.split('/public/uploads/product/')[1]?.split(/[?&]/)[0];
+      if (fname) {
+        return `/uploads/product/${fname}`;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // 4. Relative WordPress paths `/wp-content/uploads/...` -> route to `buy.dokandari.com`
+  if (url.startsWith('/wp-content/')) {
+    url = `https://buy.dokandari.com${url}`;
+  }
+
   const lower = url.toLowerCase();
 
-  // 3. Detect dead legacy WordPress paths, hotlink-blocked e-commerce CDNs, or mismatched Alibaba scraped banners
-  if (
-    lower.includes('dokandari.com') ||
-    lower.includes('buy.dokandari.com') ||
-    lower.includes('wp-content') ||
-    lower.includes('wp.com') ||
-    lower.startsWith('/images/') ||
-    lower.startsWith('/uploads/') ||
-    lower.includes('alicdn.com') ||
-    lower.includes('alibaba') ||
-    lower.includes('aliexpress') ||
-    lower.includes('slatic.net') ||
-    lower.includes('lazcdn.com') ||
-    lower.includes('daraz') ||
-    lower.includes('shajgoj') ||
-    lower.includes('cjdropshipping') ||
-    lower.includes('placeholder') ||
-    lower.includes('undefined') ||
-    lower.includes('null')
-  ) {
+  // 5. Rewrite `dokandari.com/wp-content/uploads/...` to local `/uploads/product/` if we have it, or `buy.dokandari.com`
+  if (lower.includes('/wp-content/uploads/')) {
+    if (lower.includes('gemini_generated_image_b9teg6b9teg6b9te')) {
+      return '/uploads/product/heart-mirror-sticker.jpg';
+    }
+    if (lower.includes('gemini_generated_image_6tydck6tydck6tyd')) {
+      return '/uploads/product/cat-led-bookshelf.jpg';
+    }
+    if (lower.includes('h2d83f5b4372f4cf69c8441815d239ae5j')) {
+      return '/uploads/product/3d-butterfly-mirror.jpg';
+    }
+    if (lower.includes('hb38f48c0a8b7454ebad69790a214b4f5s')) {
+      return '/uploads/product/round-vanity-mirror.jpg';
+    }
+    if (lower.includes('ha7e0aa8d05a44d73b82d68816420d174s')) {
+      return '/uploads/product/flexible-mirror-sheet.jpg';
+    }
+    if (lower.includes('dear-hair-tonic-cleanser')) {
+      return '/uploads/product/dear-hair-tonic.jpg';
+    }
+  }
+
+  // 6. If any product was accidentally given the generic brown sofa or yellow headphone Unsplash photo,
+  //    replace it immediately with the product's authentic image!
+  if (isOverwrittenGenericImage(url, product?.id)) {
     return getFallbackProductImage(product, index);
   }
 
-  // 4. If it's a valid Unsplash or HTTPS image URL, return directly
-  if (lower.includes('images.unsplash.com')) {
-    return url;
-  }
-
-  if (url.startsWith('http://') && !lower.includes('wsrv.nl')) {
+  // 7. Proxy hotlink-protected or HTTP external store CDNs (`alicdn.com`, `slatic.net`, `lazcdn.com`, `shajgoj`)
+  //    through wsrv.nl global image proxy so CORS/hotlink/SSL issues never block real product photos on live domain
+  if (
+    url.startsWith('http://') ||
+    lower.includes('alicdn.com') ||
+    lower.includes('slatic.net') ||
+    lower.includes('lazcdn.com') ||
+    lower.includes('shajgoj.com')
+  ) {
     return `https://wsrv.nl/?url=${encodeURIComponent(url)}&w=800&output=webp`;
   }
 
@@ -640,6 +804,7 @@ export function resolveSafeProductImageUrl(
 
 /**
  * Universal `onError` handler for product `<img>` tags across the storefront and admin panel.
+ * First attempts `wsrv.nl` CDN proxy if direct URL failed, then falls back to keyword-matched product image.
  */
 export function handleProductImageError(
   e: { currentTarget: HTMLImageElement },
@@ -649,6 +814,26 @@ export function handleProductImageError(
   const imgEl = e.currentTarget;
   if (!imgEl) return;
 
+  const currentSrc = imgEl.src || '';
+
+  // Step 1: If direct image failed and hasn't tried wsrv.nl proxy yet, try wsrv.nl proxy first
+  if (
+    !imgEl.dataset.proxyTried &&
+    currentSrc.startsWith('http') &&
+    !currentSrc.includes('wsrv.nl') &&
+    !currentSrc.includes('images.unsplash.com') &&
+    !isBlockedOrErrorProductImageUrl(currentSrc)
+  ) {
+    imgEl.dataset.proxyTried = 'true';
+    const rewritten = currentSrc.replace(
+      /^(https?:\/\/)?(www\.)?dokandari\.com\/wp-content\//i,
+      'https://buy.dokandari.com/wp-content/'
+    );
+    imgEl.src = `https://wsrv.nl/?url=${encodeURIComponent(rewritten)}&w=800&output=webp`;
+    return;
+  }
+
+  // Step 2: Fallback to keyword-matched high-resolution product photo
   const fallback = getFallbackProductImage(product, index);
   imgEl.dataset.fallbackApplied = 'true';
   if (imgEl.src !== fallback) {
@@ -656,37 +841,134 @@ export function handleProductImageError(
   }
 }
 
-function normalizeProductImages(p: Product): Product {
-  const nonEmptyRaw = Array.isArray(p.images)
-    ? p.images.filter((img) => typeof img === 'string' && img.trim().length > 0)
-    : [];
+/**
+ * Ensures every product has complete Bengali description, fabric/specification, features, and variants
+ * so ProductDetailPage is always 100% rich and populated.
+ */
+export function enrichProductFields(p: Product): Product {
+  const name = (p.name || 'প্রিমিয়াম কালেকশন').trim();
+  const rawDesc = (p.description || '').trim();
+  const description =
+    rawDesc.length >= 25
+      ? rawDesc
+      : `${name} — Dokandari অফিশিয়াল স্টোরের ১০০% অরিজিনাল ও প্রিমিয়াম কোয়ালিটি পণ্য। আধুনিক ডিজাইন, দীর্ঘস্থায়ী ফিনিশিং এবং দৈনন্দিন ব্যবহারে সর্বোচ্চ মানের নিশ্চয়তা। সারা বাংলাদেশে ক্যাশ অন ডেলিভারি এবং ডেলিভারি ম্যানের সামনে পার্সেল খুলে দেখে মূল্য পরিশোধের সুবিধা রয়েছে।`;
 
-  const baseList =
-    nonEmptyRaw.length > 0
-      ? nonEmptyRaw
+  const fabric =
+    p.fabric && p.fabric.trim().length > 2
+      ? p.fabric.trim()
+      : p.category === 'beauty_personal_care'
+      ? '১০০% অথেনটিক ও ডার্মাটোলজিক্যালি টেস্টেড ফর্মুলা'
+      : p.category === 'gadgets_electronics' || p.category === 'mobile_accessories'
+      ? 'প্রিমিয়াম গ্রেড এবিএস পলিমার ও স্মার্ট সার্কিট প্রোটেকশন'
+      : p.category === 'fashion_clothing'
+      ? '১০০% প্রিমিয়াম এক্সপোর্ট কোয়ালিটি কম্ফোর্ট ফেব্রিক'
+      : '১০০% অরিজিনাল ইমপোর্টেড হাই-গ্রেড মেটেরিয়াল';
+
+  const features =
+    Array.isArray(p.features) && p.features.length >= 3
+      ? p.features
       : [
-          getFallbackProductImage(p, 0),
-          getFallbackProductImage(p, 1),
-          getFallbackProductImage(p, 2),
+          '১০০% অরিজিনাল ও বাছাইকৃত প্রিমিয়াম কোয়ালিটি পণ্য',
+          'সারা বাংলাদেশে দ্রুততম হোম ডেলিভারি (ক্যাশ অন ডেলিভারি)',
+          'ডেলিভারি রাইডারের সামনে পার্সেল খুলে যাচাই করে নেওয়ার সুবিধা',
+          '৭ দিনের সহজ রিটার্ন ও ইনস্ট্যান্ট এক্সচেঞ্জ গ্যারান্টি',
         ];
 
-  const safeImages = baseList.map((img, idx) => resolveSafeProductImageUrl(img, p, idx));
+  const colors =
+    p.variants?.colors && p.variants.colors.length > 0
+      ? p.variants.colors
+      : ['অরিজিনাল কালার (Original Picture Color)'];
 
-  // Ensure at least 3 distinct gallery images so ProductDetailPage thumbnails are never blank white boxes
-  while (safeImages.length < 3) {
-    safeImages.push(getFallbackProductImage(p, safeImages.length));
-  }
+  const sizes =
+    p.variants?.sizes && p.variants.sizes.length > 0
+      ? p.variants.sizes
+      : ['স্ট্যান্ডার্ড সাইজ (Standard Pack)'];
+
+  const price = Number(p.price) || 990;
+  const originalPrice =
+    Number(p.originalPrice) && Number(p.originalPrice) > price
+      ? Number(p.originalPrice)
+      : Math.round(price * 1.25);
 
   return {
     ...p,
-    status: p.status === 'draft' ? 'draft' : 'published',
+    name,
+    price,
+    originalPrice,
+    description,
+    fabric,
+    features,
+    variants: {
+      colors,
+      sizes,
+    },
+  };
+}
+
+function normalizeProductImages(p: Product): Product {
+  const enriched = enrichProductFields(p);
+  const nonEmptyRaw = Array.isArray(enriched.images)
+    ? enriched.images.filter(
+        (img) =>
+          typeof img === 'string' &&
+          img.trim().length > 0 &&
+          !isBlockedOrErrorProductImageUrl(img)
+      )
+    : [];
+
+  // Filter out accidentally overwritten generic Unsplash URLs if the product has real images or is not prod-1/prod-2
+  const realImagesOnly = nonEmptyRaw.filter((img) => !isOverwrittenGenericImage(img, enriched.id));
+
+  const baseList =
+    realImagesOnly.length > 0
+      ? realImagesOnly
+      : nonEmptyRaw.length > 0
+      ? nonEmptyRaw
+      : [
+          getFallbackProductImage(enriched, 0),
+          getFallbackProductImage(enriched, 1),
+          getFallbackProductImage(enriched, 2),
+        ];
+
+  const safeImages = baseList.map((img, idx) => resolveSafeProductImageUrl(img, enriched, idx));
+
+  // Ensure at least 3 gallery images for ProductDetailPage thumbnails
+  while (safeImages.length < 3) {
+    safeImages.push(safeImages[0] || getFallbackProductImage(enriched, safeImages.length));
+  }
+
+  return {
+    ...enriched,
+    status: enriched.status === 'draft' ? 'draft' : 'published',
     images: safeImages,
   };
 }
 
 /**
+ * Checks if a product has authentic non-placeholder images (e.g. data:image, buy.dokandari.com, alicdn/kf/, wsrv.nl, etc.)
+ */
+function hasAuthenticCustomImage(p?: Product): boolean {
+  if (!p || !Array.isArray(p.images) || p.images.length === 0) return false;
+  const first = (p.images[0] || '').trim();
+  if (!first) return false;
+  if (isBlockedOrErrorProductImageUrl(first)) return false;
+  if (isOverwrittenGenericImage(first, p.id)) return false;
+  if (
+    first.startsWith('/uploads/product/') ||
+    first.startsWith('/public/uploads/product/') ||
+    first.startsWith('data:image/') ||
+    first.includes('wsrv.nl') ||
+    first.includes('alicdn.com/kf/') ||
+    first.includes('firebasestorage')
+  ) {
+    return true;
+  }
+  return !first.includes('images.unsplash.com');
+}
+
+/**
  * Merges INITIAL_PRODUCTS + remote Firestore products + local Admin custom/edited products,
- * while removing any product IDs deleted by the Admin and repairing broken image URLs.
+ * while removing any product IDs deleted by the Admin and preserving real product images.
  */
 export function mergeCatalogProducts(remoteProducts?: Product[]): Product[] {
   const deletedIds = getDeletedProductIds();
@@ -709,11 +991,17 @@ export function mergeCatalogProducts(remoteProducts?: Product[]): Product[] {
     }
   }
 
-  // 3. Overlay newest local custom/edited products (if not deleted)
+  // 3. Overlay local custom/edited products (prefer local if newer OR if local has real images while remote was overwritten)
   for (const [id, prod] of Object.entries(customMap)) {
     if (!deletedIds.has(id)) {
       const existing = map.get(id);
-      if (!existing || (prod.updatedAt || 0) >= (existing.updatedAt || 0)) {
+      const localHasReal = hasAuthenticCustomImage(prod);
+      const remoteHasReal = hasAuthenticCustomImage(existing);
+      if (
+        !existing ||
+        (prod.updatedAt || 0) >= (existing.updatedAt || 0) ||
+        (localHasReal && !remoteHasReal)
+      ) {
         map.set(id, normalizeProductImages(prod));
       }
     }
@@ -722,6 +1010,80 @@ export function mergeCatalogProducts(remoteProducts?: Product[]): Product[] {
   return Array.from(map.values()).sort(
     (a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0)
   );
+}
+
+/**
+ * Restores all real Dokandari catalog products (from INITIAL_PRODUCTS + buy.dokandari.com recovery),
+ * clears any accidental deletion flags on initial products, heals any unplugged/broken images,
+ * and syncs them to both localStorage and Firestore.
+ */
+export async function restoreAllRealCatalogProducts(): Promise<Product[]> {
+  try {
+    // 1. Remove INITIAL_PRODUCTS IDs from the deleted set so all real products come back
+    const initialIds = new Set(INITIAL_PRODUCTS.map((p) => p.id));
+    const deleted = getDeletedProductIds();
+    for (const id of initialIds) {
+      deleted.delete(id);
+    }
+    localStorage.setItem(LS_DELETED_PRODUCT_IDS_KEY, JSON.stringify(Array.from(deleted)));
+
+    // 2. Clean any corrupted/unplugged images in customMap and merge INITIAL_PRODUCTS
+    const customMap = getCustomPersistedProductsMap();
+    for (const [id, prod] of Object.entries(customMap)) {
+      customMap[id] = normalizeProductImages(prod);
+    }
+    for (const initProd of INITIAL_PRODUCTS) {
+      if (!customMap[initProd.id]) {
+        customMap[initProd.id] = normalizeProductImages(initProd);
+      } else {
+        customMap[initProd.id] = normalizeProductImages({
+          ...initProd,
+          ...customMap[initProd.id],
+          status: 'published',
+        });
+      }
+    }
+    localStorage.setItem(LS_CUSTOM_PRODUCTS_KEY, JSON.stringify(customMap));
+
+    // 3. Sync all restored real products to Firestore in parallel batches
+    const allToSync = Object.values(customMap);
+    await Promise.all(
+      allToSync.map(async (prod) => {
+        try {
+          const payload = sanitizeForFirestore(ensureFirestoreSafeProductPayload(prod));
+          await setDoc(doc(db, 'products', prod.id), payload, { merge: true });
+        } catch {
+          // ignore individual write warning
+        }
+      })
+    );
+  } catch (err) {
+    console.warn('Restore real catalog products note:', err);
+  }
+
+  return mergeCatalogProducts();
+}
+
+/**
+ * Ensures a product's JSON payload stays well under Firestore's 1MB document limit
+ * so base64 `data:image/...` photos NEVER fail to save to Firestore.
+ */
+function ensureFirestoreSafeProductPayload(product: Product): Product {
+  const clone = { ...product, images: [...(product.images || [])] };
+  let serialized = JSON.stringify(clone);
+  if (serialized.length <= 750000) {
+    return clone;
+  }
+
+  // If multiple large base64 images push the document over 750KB, keep the primary image + up to 2 compact images
+  if (clone.images.length > 2) {
+    clone.images = clone.images.slice(0, 2);
+    serialized = JSON.stringify(clone);
+  }
+  if (serialized.length > 850000 && clone.images.length > 1) {
+    clone.images = [clone.images[0]];
+  }
+  return clone;
 }
 
 /**
@@ -774,14 +1136,116 @@ export async function saveProductPersisted(product: Product): Promise<Product> {
     console.warn('localStorage product save note:', e);
   }
 
-  // 2. Save to Firestore
+  // 2. Save to Firestore (guarded for 1MB limit)
   try {
-    await setDoc(doc(db, 'products', normalized.id), normalized, { merge: true });
+    const firestoreSafe = sanitizeForFirestore(ensureFirestoreSafeProductPayload(normalized));
+    await setDoc(doc(db, 'products', normalized.id), firestoreSafe, { merge: true });
   } catch (err) {
     console.warn('Firestore product save warning (saved locally):', err);
   }
 
   return normalized;
+}
+
+/**
+ * Explicitly syncs all local/Preview products and store settings to Live Firestore
+ * and recovers original images from `buy.dokandari.com` / `sourceUrl` if any were overwritten.
+ */
+export async function syncAllLocalProductsToFirestore(): Promise<{
+  syncedCount: number;
+  recoveredCount: number;
+}> {
+  let syncedCount = 0;
+  let recoveredCount = 0;
+  const deletedIds = getDeletedProductIds();
+  const customMap = getCustomPersistedProductsMap();
+
+  try {
+    // 1. Push all local custom products to Firestore
+    for (const [id, customProd] of Object.entries(customMap)) {
+      if (deletedIds.has(id)) continue;
+      const cleanCustom = sanitizeForFirestore(
+        ensureFirestoreSafeProductPayload(normalizeProductImages(customProd))
+      );
+      await setDoc(doc(db, 'products', id), cleanCustom, { merge: true });
+      syncedCount++;
+    }
+
+    // 2. Ask server to recover any original images from buy.dokandari.com / sourceUrl for Firestore products
+    const snap = await getDocs(collection(db, 'products'));
+    const candidatesForRecovery: { id: string; name: string; titleEn?: string; sourceUrl?: string }[] = [];
+
+    for (const docSnap of snap.docs) {
+      const p = docSnap.data() as Product & { sourceUrl?: string };
+      if (deletedIds.has(p.id)) continue;
+      const localProd = customMap[p.id];
+      if (localProd && hasAuthenticCustomImage(localProd)) {
+        const cleanLocal = sanitizeForFirestore(
+          ensureFirestoreSafeProductPayload(normalizeProductImages(localProd))
+        );
+        await setDoc(doc(db, 'products', p.id), cleanLocal, { merge: true });
+        recoveredCount++;
+        continue;
+      }
+
+      const firstImg = p.images?.[0] || '';
+      if (
+        isOverwrittenGenericImage(firstImg, p.id) ||
+        firstImg.includes('images.unsplash.com')
+      ) {
+        candidatesForRecovery.push({
+          id: p.id,
+          name: p.name,
+          titleEn: p.titleEn,
+          sourceUrl: p.sourceUrl,
+        });
+      }
+    }
+
+    if (candidatesForRecovery.length > 0) {
+      try {
+        const res = await fetch('/api/catalog/recover-real-images', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ products: candidatesForRecovery }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.recovered && typeof data.recovered === 'object') {
+            for (const [prodId, realUrls] of Object.entries(data.recovered as Record<string, string[]>)) {
+              if (Array.isArray(realUrls) && realUrls.length > 0) {
+                const proxiedUrls = realUrls.map((u) =>
+                  u.startsWith('data:')
+                    ? u
+                    : `https://wsrv.nl/?url=${encodeURIComponent(u)}&w=800&output=webp`
+                );
+                await setDoc(
+                  doc(db, 'products', prodId),
+                  { images: proxiedUrls, updatedAt: Date.now() },
+                  { merge: true }
+                );
+                if (customMap[prodId]) {
+                  customMap[prodId] = { ...customMap[prodId], images: proxiedUrls, updatedAt: Date.now() };
+                }
+                recoveredCount++;
+              }
+            }
+            localStorage.setItem(LS_CUSTOM_PRODUCTS_KEY, JSON.stringify(customMap));
+          }
+        }
+      } catch {
+        // ignore recovery network note
+      }
+    }
+
+    // 3. Sync StoreContent (including normalized Bengali Savar addresses) to Firestore
+    const currentContent = getInitialStoreContent();
+    await saveStoreContentPersisted(currentContent);
+  } catch (err) {
+    console.warn('Full catalog Firestore sync note:', err);
+  }
+
+  return { syncedCount, recoveredCount };
 }
 
 /**
@@ -905,8 +1369,8 @@ export function compressImageFileToDataUrl(
 
 /**
  * Ensures initial catalog is seeded in Firestore if not already present,
- * heals any broken/legacy/Alibaba-banner images in existing Firestore docs,
- * and pushes any locally created custom products to Firestore.
+ * restores any real custom images from Preview `localStorage` or `buy.dokandari.com`,
+ * and migrates legacy addresses in `settings/store_content`.
  */
 export async function seedProductsIfEmpty(): Promise<void> {
   try {
@@ -915,21 +1379,49 @@ export async function seedProductsIfEmpty(): Promise<void> {
     const productsCol = collection(db, 'products');
     const snap = await getDocs(productsCol);
     const existingIds = new Set<string>();
+    const recoveryCandidates: { id: string; name: string; titleEn?: string; sourceUrl?: string }[] = [];
 
-    // 1. Inspect existing Firestore docs and heal any broken/empty/mismatched image URLs
+    // 1. Inspect existing Firestore docs: if local customMap has real images while Firestore was overwritten, restore local!
     for (const docSnap of snap.docs) {
       const id = docSnap.id;
       existingIds.add(id);
       if (deletedIds.has(id)) continue;
 
-      const data = docSnap.data() as Product;
+      const data = docSnap.data() as Product & { sourceUrl?: string };
+      const localProd = customMap[id];
+
+      if (localProd && hasAuthenticCustomImage(localProd) && !hasAuthenticCustomImage(data)) {
+        const restored = sanitizeForFirestore(
+          ensureFirestoreSafeProductPayload(normalizeProductImages(localProd))
+        );
+        try {
+          await setDoc(doc(db, 'products', id), restored, { merge: true });
+        } catch {
+          // ignore
+        }
+        continue;
+      }
+
+      if (isOverwrittenGenericImage(data.images?.[0], id)) {
+        recoveryCandidates.push({
+          id,
+          name: data.name,
+          titleEn: data.titleEn,
+          sourceUrl: data.sourceUrl,
+        });
+      }
+
       const healed = normalizeProductImages(data);
       const origImagesJson = JSON.stringify(data.images || []);
       const healedImagesJson = JSON.stringify(healed.images || []);
 
-      if (origImagesJson !== healedImagesJson || !data.status) {
+      if (origImagesJson !== healedImagesJson || !data.status || !data.description || !data.fabric) {
         try {
-          await setDoc(doc(db, 'products', id), sanitizeForFirestore(healed), { merge: true });
+          await setDoc(
+            doc(db, 'products', id),
+            sanitizeForFirestore(ensureFirestoreSafeProductPayload(healed)),
+            { merge: true }
+          );
         } catch {
           // ignore individual doc heal warning
         }
@@ -939,25 +1431,67 @@ export async function seedProductsIfEmpty(): Promise<void> {
     // 2. Seed missing items from initial catalog ONLY if not deleted by Admin
     for (const prod of INITIAL_PRODUCTS) {
       if (!existingIds.has(prod.id) && !deletedIds.has(prod.id)) {
-        const cleanProd = sanitizeForFirestore(normalizeProductImages(customMap[prod.id] || prod));
+        const cleanProd = sanitizeForFirestore(
+          ensureFirestoreSafeProductPayload(normalizeProductImages(customMap[prod.id] || prod))
+        );
         await setDoc(doc(db, 'products', prod.id), cleanProd, { merge: true });
       }
     }
 
-    // 3. Push any locally created custom products that weren't in Firestore yet
+    // 3. Push any locally created/edited custom products to Firestore
     for (const [id, customProd] of Object.entries(customMap)) {
-      if (!existingIds.has(id) && !deletedIds.has(id)) {
-        const cleanCustom = sanitizeForFirestore(normalizeProductImages(customProd));
+      if (deletedIds.has(id)) continue;
+      if (!existingIds.has(id) || hasAuthenticCustomImage(customProd)) {
+        const cleanCustom = sanitizeForFirestore(
+          ensureFirestoreSafeProductPayload(normalizeProductImages(customProd))
+        );
         await setDoc(doc(db, 'products', id), cleanCustom, { merge: true });
       }
     }
 
-    // 4. Seed default store content if not present
+    // 4. If any products had overwritten generic images, recover their real images from buy.dokandari.com / sourceUrl
+    if (recoveryCandidates.length > 0) {
+      try {
+        const res = await fetch('/api/catalog/recover-real-images', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ products: recoveryCandidates }),
+        });
+        if (res.ok) {
+          const recData = await res.json();
+          if (recData?.recovered && typeof recData.recovered === 'object') {
+            for (const [prodId, realUrls] of Object.entries(recData.recovered as Record<string, string[]>)) {
+              if (Array.isArray(realUrls) && realUrls.length > 0) {
+                const proxied = realUrls.map((u) =>
+                  u.startsWith('data:')
+                    ? u
+                    : `https://wsrv.nl/?url=${encodeURIComponent(u)}&w=800&output=webp`
+                );
+                await setDoc(doc(db, 'products', prodId), { images: proxied }, { merge: true });
+              }
+            }
+          }
+        }
+      } catch {
+        // ignore background recovery note
+      }
+    }
+
+    // 5. Ensure store_content exists and legacy addresses are normalized to official Bengali Savar addresses
     const contentRef = doc(db, 'settings', 'store_content');
     const contentSnap = await getDoc(contentRef);
     if (!contentSnap.exists()) {
       const initialContent = getInitialStoreContent();
       await setDoc(contentRef, sanitizeForFirestore(initialContent));
+    } else {
+      const existingData = contentSnap.data() as Partial<StoreContent>;
+      const normalizedContent = mergeStoreContent(DEFAULT_STORE_CONTENT, existingData);
+      if (
+        existingData.pageContent?.warehouseAddress !== normalizedContent.pageContent?.warehouseAddress ||
+        existingData.pageContent?.corporateAddress !== normalizedContent.pageContent?.corporateAddress
+      ) {
+        await setDoc(contentRef, sanitizeForFirestore(normalizedContent), { merge: true });
+      }
     }
   } catch (err) {
     console.warn('Seeding check note', err);
@@ -994,3 +1528,4 @@ export function formatDokandariSocialUrl(
 
   return url;
 }
+

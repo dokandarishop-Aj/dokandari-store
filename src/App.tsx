@@ -45,13 +45,15 @@ import {
   mergeCatalogProducts,
   saveProductPersisted,
   deleteProductPersisted,
+  syncAllLocalProductsToFirestore,
+  compressImageFileToDataUrl,
 } from './lib/storeSync';
 import {
   initializeMultiPixels,
   initializeGoogleSeoAndTags,
   trackPixelPageView,
 } from './lib/pixelManager';
-import { ChevronLeft, ChevronRight, Clock } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Clock, Sparkles, Upload, X, Loader2 } from 'lucide-react';
 
 // Map legacy category strings to the 11 official category IDs so all products match accurately
 function normalizeCategoryId(cat: string, productName = ''): string {
@@ -128,6 +130,10 @@ function StoreMain() {
   const [isPolicyOpen, setIsPolicyOpen] = useState(false);
   const [isCustomerAuthOpen, setIsCustomerAuthOpen] = useState(false);
   const [currentSlide, setCurrentSlide] = useState(0);
+  const [isHeroAiModalOpen, setIsHeroAiModalOpen] = useState(false);
+  const [heroAiPrompt, setHeroAiPrompt] = useState('');
+  const [heroAiImage, setHeroAiImage] = useState('');
+  const [isHeroAiLoading, setIsHeroAiLoading] = useState(false);
 
   const touchStartX = useRef<number | null>(null);
   const bestSellingTrackRef = useRef<HTMLDivElement | null>(null);
@@ -160,9 +166,11 @@ function StoreMain() {
     return () => clearInterval(timer);
   }, [heroSlides.length, carouselInterval]);
 
-  // Seed initial catalog & attach real-time Firestore listeners
+  // Seed initial catalog, recover any broken WordPress/Unsplash images from buy.dokandari.com, & attach real-time Firestore listeners
   useEffect(() => {
     seedProductsIfEmpty();
+    fetch('/api/catalog/recover-real-images', { method: 'POST' }).catch(() => null);
+    syncAllLocalProductsToFirestore().catch(() => null);
 
     const unsubProducts = onSnapshot(
       collection(db, 'products'),
@@ -520,6 +528,70 @@ function StoreMain() {
     await saveStoreContentPersisted({ categoryHeroes: nextHeroes });
   };
 
+  const handleRemoveFounderPhoto = async () => {
+    const nextFounder: FounderData = {
+      ...founderData,
+      photo: '',
+    };
+    setFounderData(nextFounder);
+    await saveStoreContentPersisted({ founder: nextFounder });
+  };
+
+  const handleHeroAiBannerUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const compressed = await compressImageFileToDataUrl(file, 1280, 0.84);
+      setHeroAiImage(compressed);
+    } catch (err) {
+      console.warn('Hero banner image upload note:', err);
+    }
+  };
+
+  const handleApplyHeroAiBanner = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsHeroAiLoading(true);
+    try {
+      const activeSlide = heroSlides[currentSlide] || heroSlides[0];
+      const res = await fetch('/api/gemini/ai-edit-section', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sectionType: 'hero_banner',
+          prompt:
+            heroAiPrompt.trim() ||
+            'এই ব্যানারের জন্য আকর্ষণীয় প্রিমিয়াম বাংলা শিরোনাম, সাবটাইটেল ও বাটন টেক্সট তৈরি করো।',
+          imageDataUrl: heroAiImage || activeSlide?.image,
+          currentData: activeSlide,
+        }),
+      });
+      const json = await res.json();
+      const d = json?.data || {};
+      const nextSlides = heroSlides.map((s, idx) =>
+        idx === currentSlide
+          ? {
+              ...s,
+              image: heroAiImage || s.image,
+              tag: d.tag || s.tag,
+              title: d.title || s.title,
+              subtitle: d.subtitle || s.subtitle,
+              ctaText: d.ctaText || s.ctaText,
+            }
+          : s
+      );
+      setHeroSlides(nextSlides);
+      await saveStoreContentPersisted({ heroSlides: nextSlides });
+      setHeroAiImage('');
+      setHeroAiPrompt('');
+      setIsHeroAiModalOpen(false);
+    } catch (err) {
+      console.warn('Hero AI edit note:', err);
+      setIsHeroAiModalOpen(false);
+    } finally {
+      setIsHeroAiLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex flex-col bg-[#FAF9F6] overflow-x-hidden w-full">
       {/* Top Header with Ticker, Dokandari Logo & Navigation */}
@@ -669,6 +741,7 @@ function StoreMain() {
               window.history.pushState(null, '', '/');
             }}
             onEditFounder={() => setIsFounderEditOpen(true)}
+            onRemoveFounderPhoto={handleRemoveFounderPhoto}
           />
         ) : isVideoGalleryOpen ? (
           <VideoGalleryPage
@@ -849,7 +922,97 @@ function StoreMain() {
                   />
                 ))}
               </div>
+
+              {/* Admin-Only Quick AI Hero Banner Edit Button */}
+              {isAdminAuthenticated && (
+                <button
+                  type="button"
+                  onClick={() => setIsHeroAiModalOpen(true)}
+                  className="absolute top-3 right-3 z-20 px-3 py-1.5 rounded-xl bg-stone-950/80 hover:bg-[#E11D48] text-white text-[11px] font-bold border border-white/20 backdrop-blur-xs flex items-center gap-1.5 shadow-md cursor-pointer transition-all"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                  <span>✨ AI ব্যানার এডিট</span>
+                </button>
+              )}
             </section>
+
+            {/* Admin-Only Hero Banner AI Edit Modal */}
+            {isAdminAuthenticated && isHeroAiModalOpen && (
+              <div className="fixed inset-0 z-50 bg-stone-950/60 backdrop-blur-xs flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl max-w-lg w-full p-5 shadow-2xl border border-rose-200 text-xs space-y-4">
+                  <div className="flex items-center justify-between pb-2.5 border-b border-rose-100">
+                    <h3 className="text-sm font-extrabold text-stone-900 flex items-center gap-1.5">
+                      <Sparkles className="w-4 h-4 text-[#E11D48]" />
+                      <span>✨ হিরো ব্যানার স্লাইড #{currentSlide + 1} — AI ছবি ও লেখা এডিট</span>
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => setIsHeroAiModalOpen(false)}
+                      className="text-stone-400 hover:text-stone-700 cursor-pointer"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  <form onSubmit={handleApplyHeroAiBanner} className="space-y-3">
+                    <div className="flex items-center gap-3">
+                      <label className="px-3.5 py-2 bg-[#FFF1F2] hover:bg-rose-100 text-[#E11D48] border border-rose-300 rounded-xl font-bold flex items-center gap-1.5 cursor-pointer">
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>📸 নতুন ব্যানার ছবি আপলোড</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleHeroAiBannerUpload}
+                          className="hidden"
+                        />
+                      </label>
+                      {heroAiImage && (
+                        <img
+                          src={heroAiImage}
+                          alt="Preview"
+                          className="w-16 h-10 rounded-lg object-cover border border-rose-200"
+                        />
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-stone-700 mb-1">
+                        AI নির্দেশনা বা নতুন অফার লিখুন (ঐচ্ছিক)
+                      </label>
+                      <input
+                        type="text"
+                        value={heroAiPrompt}
+                        onChange={(e) => setHeroAiPrompt(e.target.value)}
+                        placeholder="যেমন: ঈদ স্পেশাল ৩০% ডিসকাউন্ট ও সারা দেশে ক্যাশ অন ডেলিভারি..."
+                        className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl"
+                      />
+                    </div>
+
+                    <div className="flex justify-end gap-2 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsHeroAiModalOpen(false)}
+                        className="px-4 py-2 border border-stone-300 rounded-xl text-stone-700 cursor-pointer"
+                      >
+                        বাতিল
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={isHeroAiLoading}
+                        className="px-5 py-2 bg-[#E11D48] hover:bg-[#BE123C] text-white font-bold rounded-xl flex items-center gap-1.5 cursor-pointer"
+                      >
+                        {isHeroAiLoading ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Sparkles className="w-3.5 h-3.5" />
+                        )}
+                        <span>{isHeroAiLoading ? 'AI সাজাচ্ছে...' : '✨ AI আপডেট ও সেভ'}</span>
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
 
             {/* Reorderable Official Categories Bar (Default: Home Decor 1st, Gadgets 2nd, Fashion 3rd...) */}
             <CategorySquircleBar
@@ -1155,6 +1318,7 @@ function StoreMain() {
                       }
                     : undefined
                 }
+                onRemovePhoto={isAdminAuthenticated ? handleRemoveFounderPhoto : undefined}
               />
             </div>
           </>
@@ -1175,6 +1339,11 @@ function StoreMain() {
             window.location.hash = '#/admin';
             window.scrollTo({ top: 0, behavior: 'smooth' });
           }}
+          onExitAdminMode={() => {
+            localStorage.removeItem('dokandari_admin_session');
+            setIsAdminAuthenticated(false);
+            setIsAdminOpen(false);
+          }}
         />
       )}
 
@@ -1187,6 +1356,7 @@ function StoreMain() {
         pageContent={pageContent}
         founderAddress={founderData.address}
         isAdmin={isAdminAuthenticated}
+        onUpdateStoreContent={handleApplyStoreContentUpdate}
         onOpenLogin={() => setIsCustomerAuthOpen(true)}
         onOpenAdmin={() => {
           setIsAdminAuthenticated(isAdminSessionValid());
@@ -1254,7 +1424,12 @@ function StoreMain() {
         isOpen={isFounderEditOpen}
         onClose={() => setIsFounderEditOpen(false)}
         founderData={founderData}
-        onSave={(updated) => setFounderData(updated)}
+        onSave={(updated, updatedStore) => {
+          setFounderData(updated);
+          if (updatedStore) {
+            handleApplyStoreContentUpdate(updatedStore);
+          }
+        }}
       />
 
       {/* Product Quick View Modal */}
