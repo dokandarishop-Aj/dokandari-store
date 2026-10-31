@@ -34,8 +34,11 @@ import {
   OFFICIAL_WHATSAPP_INT,
   resolveSafeProductImageUrl,
   handleProductImageError,
+  saveOrderPersisted,
+  saveProductPersisted,
 } from '../lib/storeSync';
 import { Product, Order, OFFICIAL_CATEGORIES } from '../types';
+import { ProductCard } from './ProductCard';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -62,6 +65,10 @@ interface ProductDetailPageProps {
   onOpenEdit: (product: Product) => void;
   onOrderSuccess: (orderId: string) => void;
   onProductUpdated?: (product: Product) => void;
+  isAdmin?: boolean;
+  allProducts?: Product[];
+  onSelectProduct?: (product: Product) => void;
+  onInstantOrderProduct?: (product: Product) => void;
 }
 
 interface ReviewItem {
@@ -79,6 +86,10 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   onOpenEdit,
   onOrderSuccess,
   onProductUpdated,
+  isAdmin = false,
+  allProducts = [],
+  onSelectProduct,
+  onInstantOrderProduct,
 }) => {
   const { addToCart } = useCart();
   const { firebaseUser, userProfile } = useAuth();
@@ -338,7 +349,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
         updatedAt: Date.now(),
       };
 
-      await setDoc(doc(db, 'orders', orderId), JSON.parse(JSON.stringify(newOrder)));
+      await saveOrderPersisted(newOrder);
 
       // Mark the captured lead as converted
       markLeadConverted(customerPhone, orderId);
@@ -436,8 +447,8 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
         updatedAt: Date.now(),
       };
 
-      await setDoc(doc(db, 'products', updated.id), updated);
-      if (onProductUpdated) onProductUpdated(updated);
+      const saved = await saveProductPersisted(updated);
+      if (onProductUpdated) onProductUpdated(saved);
       setRefreshToast('✅ প্রোডাক্টটি নতুন লিংক দিয়ে সফলভাবে লাইভ রিফ্রেশ ও ডাটাবেজে সেভ হয়েছে!');
       setRefreshUrl('');
       setTimeout(() => {
@@ -997,30 +1008,35 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               )}
             </button>
 
-            <button
-              onClick={() => setShowRefreshBar(!showRefreshBar)}
-              className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-bold bg-white hover:bg-rose-50 text-[#E11D48] border border-rose-200 px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-xl shadow-2xs transition-colors cursor-pointer"
-              title="১-ক্লিকে নতুন লিংক দিয়ে প্রোডাক্টের তথ্য রিফ্রেশ করুন"
-            >
-              <RefreshCw
-                className={`w-3.5 h-3.5 text-[#E11D48] ${isRefreshing ? 'animate-spin' : ''}`}
-              />
-              <span>লিংক রিফ্রেশ</span>
-            </button>
+            {/* Admin-Only Refresh & Edit Controls — Strictly hidden from customers unless Admin is logged in */}
+            {isAdmin && (
+              <>
+                <button
+                  onClick={() => setShowRefreshBar(!showRefreshBar)}
+                  className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-bold bg-white hover:bg-rose-50 text-[#E11D48] border border-rose-200 px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-xl shadow-2xs transition-colors cursor-pointer"
+                  title="১-ক্লিকে নতুন লিংক দিয়ে প্রোডাক্টের তথ্য রিফ্রেশ করুন"
+                >
+                  <RefreshCw
+                    className={`w-3.5 h-3.5 text-[#E11D48] ${isRefreshing ? 'animate-spin' : ''}`}
+                  />
+                  <span>লিংক রিফ্রেশ</span>
+                </button>
 
-            <button
-              onClick={() => onOpenEdit(product)}
-              className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-bold bg-[#E11D48] hover:bg-[#BE123C] text-white px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-xl shadow-xs transition-colors cursor-pointer"
-              title="Edit this product"
-            >
-              <Edit3 className="w-3.5 h-3.5 text-white" />
-              <span>এডিট</span>
-            </button>
+                <button
+                  onClick={() => onOpenEdit(product)}
+                  className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-bold bg-[#E11D48] hover:bg-[#BE123C] text-white px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-xl shadow-xs transition-colors cursor-pointer"
+                  title="Edit this product"
+                >
+                  <Edit3 className="w-3.5 h-3.5 text-white" />
+                  <span>এডিট</span>
+                </button>
+              </>
+            )}
           </div>
         </div>
 
-        {/* 1-Click Fast URL Refresh Bar on PDP */}
-        {showRefreshBar && (
+        {/* 1-Click Fast URL Refresh Bar on PDP (Admin Only) */}
+        {isAdmin && showRefreshBar && (
           <section className="bg-white border-2 border-rose-200 rounded-2xl p-4 sm:p-5 shadow-xs space-y-3 animate-in fade-in">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div className="flex items-center gap-2">
@@ -1639,87 +1655,79 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                 </ul>
               )}
             </div>
-
-            {/* Customer Reviews Section */}
-            <div className="bg-white rounded-2xl border border-stone-200 p-4 sm:p-6 shadow-xs space-y-4">
-              <div className="flex items-center justify-between border-b border-stone-100 pb-2.5">
-                <h3 className="text-xs sm:text-sm font-extrabold text-stone-900">
-                  কাস্টমার রিভিউ ({reviews.length})
-                </h3>
-                <span className="text-xs text-amber-500 font-bold flex items-center gap-1">
-                  ★ 5.0 রেটিং
-                </span>
-              </div>
-
-              {/* Reviews List */}
-              <div className="space-y-2.5">
-                {reviews.map((r, i) => (
-                  <div
-                    key={i}
-                    className="p-3 rounded-xl bg-stone-50 border border-stone-200 text-xs space-y-1"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-stone-900">{r.userName}</span>
-                      <span className="text-amber-500 font-mono">★★★★★</span>
-                    </div>
-                    <p className="text-stone-600 leading-relaxed">{r.comment}</p>
-                  </div>
-                ))}
-              </div>
-
-              {/* Write Review Form */}
-              <form
-                onSubmit={handleReviewSubmit}
-                className="pt-3 border-t border-stone-200 space-y-2.5 text-xs"
-              >
-                <h4 className="font-bold text-stone-900">একটি রিভিউ ও রেটিং লিখুন</h4>
-
-                {reviewSubmitted && (
-                  <div className="p-2.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    <span>আপনার মতামত সফলভাবে প্রকাশিত হয়েছে!</span>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <input
-                    type="text"
-                    required
-                    value={newReviewName}
-                    onChange={(e) => setNewReviewName(e.target.value)}
-                    placeholder="আপনার নাম..."
-                    className="px-3 py-2 bg-stone-50 border border-stone-300 rounded-lg"
-                  />
-                  <select
-                    value={newReviewRating}
-                    onChange={(e) => setNewReviewRating(Number(e.target.value))}
-                    className="px-3 py-2 bg-stone-50 border border-stone-300 rounded-lg"
-                  >
-                    <option value={5}>★★★★★ (৫ স্টার - চমৎকার)</option>
-                    <option value={4}>★★★★☆ (৪ স্টার - ভালো)</option>
-                    <option value={3}>★★★☆☆ (৩ স্টার - সাধারণ)</option>
-                  </select>
-                </div>
-
-                <textarea
-                  required
-                  rows={2}
-                  value={newReviewText}
-                  onChange={(e) => setNewReviewText(e.target.value)}
-                  placeholder="আপনার অভিজ্ঞতা শেয়ার করুন..."
-                  className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-lg resize-none"
-                />
-
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-[#E11D48] hover:bg-[#BE123C] text-white font-bold rounded-lg transition-colors cursor-pointer shadow-2xs"
-                >
-                  রিভিউ জমা দিন
-                </button>
-              </form>
-            </div>
           </div>
         </div>
+
+        {/* ============================================================================
+            SUGGESTED & RELATED PRODUCTS SECTION (সাজেস্টেড প্রোডাক্ট — রিভিউয়ের পরিবর্তে একই ক্যাটাগরির পণ্য)
+            ============================================================================ */}
+        {(() => {
+          const sameCategory = allProducts.filter(
+            (p) => p.id !== product.id && p.category === product.category
+          );
+          const otherPopular = allProducts.filter(
+            (p) => p.id !== product.id && p.category !== product.category
+          );
+          const suggestedList = [...sameCategory, ...otherPopular].slice(0, 8);
+
+          if (suggestedList.length === 0) return null;
+
+          return (
+            <section className="pt-4 sm:pt-6 space-y-4">
+              <div className="bg-white border border-rose-200/80 rounded-2xl p-3.5 sm:p-5 flex items-center justify-between shadow-2xs flex-wrap gap-2">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-8 h-8 rounded-xl bg-[#E11D48] text-white flex items-center justify-center text-sm font-bold shrink-0 shadow-2xs">
+                    ✨
+                  </span>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h2 className="text-sm sm:text-lg font-extrabold text-stone-900">
+                        সাজেস্টেড ও সম্পর্কিত প্রোডাক্ট ({categoryNameBn})
+                      </h2>
+                      <span className="text-[10px] font-bold text-[#E11D48] bg-rose-50 px-2.5 py-0.5 rounded-full border border-rose-200">
+                        {suggestedList.length} টি বাছাইকৃত পণ্য
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-stone-500 mt-0.5">
+                      আপনার পছন্দের এই ক্যাটাগরির আরও জনপ্রিয় ও ১০০% অরিজিনাল কালেকশন দেখুন
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={onBack}
+                  className="px-3.5 py-1.5 rounded-xl bg-[#FFF1F2] hover:bg-[#E11D48] text-[#E11D48] hover:text-white border border-rose-200 text-xs font-bold transition-all cursor-pointer shrink-0"
+                >
+                  সকল প্রোডাক্ট দেখুন &rarr;
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-4">
+                {suggestedList.map((sugProd) => (
+                  <ProductCard
+                    key={sugProd.id}
+                    product={sugProd}
+                    onOpenDetail={(p) => {
+                      if (onSelectProduct) {
+                        onSelectProduct(p);
+                      }
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    onInstantOrder={(p) => {
+                      if (onInstantOrderProduct) {
+                        onInstantOrderProduct(p);
+                      } else if (onSelectProduct) {
+                        onSelectProduct(p);
+                      }
+                    }}
+                    onEditProduct={isAdmin ? (p) => onOpenEdit(p) : undefined}
+                  />
+                ))}
+              </div>
+            </section>
+          );
+        })()}
       </div>
     </div>
   );

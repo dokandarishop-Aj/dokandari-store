@@ -92,6 +92,8 @@ import {
   compressImageFileToDataUrl,
   resolveSafeProductImageUrl,
   handleProductImageError,
+  getPersistedOrders,
+  saveOrderPersisted,
 } from '../lib/storeSync';
 import {
   OfficialWhatsAppIcon,
@@ -337,9 +339,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         const snap = await getDocs(collection(db, 'orders'));
         setPingLatencyMs(Math.round(performance.now() - t0));
 
-        const list: Order[] = [];
-        snap.forEach((d) => list.push(d.data() as Order));
-        list.sort((a, b) => b.createdAt - a.createdAt);
+        const orderMap = new Map<string, Order>();
+        for (const locOrd of getPersistedOrders()) {
+          if (locOrd && locOrd.id) orderMap.set(locOrd.id, locOrd);
+        }
+        snap.forEach((d) => {
+          const data = d.data() as Order;
+          if (data && data.id) orderMap.set(data.id, data);
+        });
+        const list = Array.from(orderMap.values()).sort((a, b) => b.createdAt - a.createdAt);
         setOrders(list);
 
         const apiDoc = await getDoc(doc(db, 'settings', 'api_credentials'));
@@ -400,6 +408,26 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     };
     loadData();
 
+    // Realtime live listener for customer orders
+    const unsubOrders = onSnapshot(
+      collection(db, 'orders'),
+      (snap) => {
+        const orderMap = new Map<string, Order>();
+        for (const locOrd of getPersistedOrders()) {
+          if (locOrd && locOrd.id) orderMap.set(locOrd.id, locOrd);
+        }
+        snap.forEach((d) => {
+          const data = d.data() as Order;
+          if (data && data.id) orderMap.set(data.id, data);
+        });
+        const list = Array.from(orderMap.values()).sort((a, b) => b.createdAt - a.createdAt);
+        setOrders(list);
+      },
+      (err) => {
+        console.warn('Realtime orders listener note', err);
+      }
+    );
+
     // Realtime live listener for dropped / abandoned leads
     const unsubLeads = onSnapshot(
       collection(db, 'abandoned_leads'),
@@ -415,6 +443,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     );
 
     return () => {
+      unsubOrders();
       unsubLeads();
     };
   }, []);

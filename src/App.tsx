@@ -597,6 +597,7 @@ function StoreMain() {
         }}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
+        isAdmin={isAdminAuthenticated}
       />
 
       <main className="flex-1 w-full">
@@ -701,6 +702,19 @@ function StoreMain() {
           <ProductDetailPage
             product={detailedProduct}
             initialStep={detailedProductStep}
+            isAdmin={isAdminAuthenticated}
+            allProducts={publishedProducts}
+            onSelectProduct={(p) => {
+              setDetailedProductStep('product');
+              setDetailedProduct(p);
+              window.history.pushState(
+                null,
+                '',
+                `/products/${encodeURIComponent(p.id)}?brand=dokandari`
+              );
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            onInstantOrderProduct={handleInstantOrder}
             onBack={() => {
               setDetailedProduct(null);
               setDetailedProductStep('product');
@@ -1134,33 +1148,35 @@ function StoreMain() {
             <div id="founder-section">
               <FounderSection
                 founderData={founderData}
-                onEdit={() => {
-                  if (isAdminAuthenticated) {
-                    setIsFounderEditOpen(true);
-                  } else {
-                    setIsAdminOpen(true);
-                  }
-                }}
+                onEdit={
+                  isAdminAuthenticated
+                    ? () => {
+                        setIsFounderEditOpen(true);
+                      }
+                    : undefined
+                }
               />
             </div>
           </>
         )}
       </main>
 
-      {/* Floating Bottom-Right Admin Control Button */}
-      <FloatingAdminButton
-        onClick={() => {
-          setIsAdminAuthenticated(isAdminSessionValid());
-          setIsAdminOpen(true);
-          setActiveCategoryPage(null);
-          setDetailedProduct(null);
-          setIsAboutOpen(false);
-          setIsVideoGalleryOpen(false);
-          setIsTrackingOpen(false);
-          window.location.hash = '#/admin';
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }}
-      />
+      {/* Floating Bottom-Right Admin Control Button — ONLY visible when Admin is logged in */}
+      {isAdminAuthenticated && (
+        <FloatingAdminButton
+          onClick={() => {
+            setIsAdminAuthenticated(isAdminSessionValid());
+            setIsAdminOpen(true);
+            setActiveCategoryPage(null);
+            setDetailedProduct(null);
+            setIsAboutOpen(false);
+            setIsVideoGalleryOpen(false);
+            setIsTrackingOpen(false);
+            window.location.hash = '#/admin';
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+        />
+      )}
 
       {/* Footer */}
       <Footer
@@ -1170,6 +1186,20 @@ function StoreMain() {
         officialEmail={officialEmail}
         pageContent={pageContent}
         founderAddress={founderData.address}
+        isAdmin={isAdminAuthenticated}
+        onOpenLogin={() => setIsCustomerAuthOpen(true)}
+        onOpenAdmin={() => {
+          setIsAdminAuthenticated(isAdminSessionValid());
+          setIsAdminOpen(true);
+          setActiveCategoryPage(null);
+          setDetailedProduct(null);
+          setIsAboutOpen(false);
+          setIsVideoGalleryOpen(false);
+          setIsPolicyOpen(false);
+          setIsTrackingOpen(false);
+          window.location.hash = '#/admin';
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
         onSelectCategory={(cat) => {
           setActiveCategory(cat);
           setDetailedProduct(null);
@@ -1288,6 +1318,29 @@ function StoreMain() {
       <MenuDrawer
         isOpen={isMenuOpen}
         onClose={() => setIsMenuOpen(false)}
+        products={publishedProducts}
+        isAdmin={isAdminAuthenticated}
+        onOpenLogin={() => {
+          setIsMenuOpen(false);
+          setIsCustomerAuthOpen(true);
+        }}
+        onOpenProductDetail={(p) => {
+          setIsMenuOpen(false);
+          setDetailedProductStep('product');
+          setDetailedProduct(p);
+          setActiveCategoryPage(null);
+          setIsAboutOpen(false);
+          setIsVideoGalleryOpen(false);
+          setIsPolicyOpen(false);
+          setIsTrackingOpen(false);
+          setIsAdminOpen(false);
+          window.history.pushState(
+            null,
+            '',
+            `/products/${encodeURIComponent(p.id)}?brand=dokandari`
+          );
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
         onGoHome={() => {
           setIsMenuOpen(false);
           setActiveCategory('all');

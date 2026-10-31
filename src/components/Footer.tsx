@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import { Phone, Mail, MapPin, ExternalLink, Sparkles } from 'lucide-react';
+import { Phone, Mail, MapPin, ExternalLink, Sparkles, User, Lock, LayoutDashboard } from 'lucide-react';
 import { ProductCategory, OFFICIAL_CATEGORIES } from '../types';
 import {
   OfficialWhatsAppIcon,
@@ -25,6 +25,9 @@ interface FooterProps {
   onOpenAiAssistant: () => void;
   onOpenAbout: () => void;
   onOpenPrivacy: () => void;
+  onOpenLogin?: () => void;
+  onOpenAdmin?: () => void;
+  isAdmin?: boolean;
   socialLinks?: {
     whatsapp: string;
     facebook: string;
@@ -49,6 +52,9 @@ export const Footer: React.FC<FooterProps> = ({
   onOpenAiAssistant,
   onOpenAbout,
   onOpenPrivacy,
+  onOpenLogin,
+  onOpenAdmin,
+  isAdmin = false,
   socialLinks,
   whatsappNumber,
   hotlineNumber,
@@ -355,13 +361,15 @@ export const Footer: React.FC<FooterProps> = ({
           </div>
         </div>
 
-        {/* Bottom Bar: Copyright & 3 Trust Badges */}
+        {/* Bottom Bar: Copyright, 3 Trust Badges & Bottom-Corner Login Buttons */}
         <div className="pt-6 border-t border-stone-200 flex flex-col sm:flex-row items-center justify-between text-xs text-stone-500 gap-4">
-          <div>
-            &copy; 2026 <strong>Dokandari (dokandari.com)</strong>. সর্বস্বত্ব সংরক্ষিত।
+          <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
+            <span>
+              &copy; 2026 <strong>Dokandari (dokandari.com)</strong>. সর্বস্বত্ব সংরক্ষিত।
+            </span>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center justify-center gap-2">
             <span className="bg-[#FFF1F2] text-[#E11D48] font-bold px-3 py-1 rounded-full text-[11px]">
               ক্যাশ অন ডেলিভারি
             </span>
@@ -371,9 +379,42 @@ export const Footer: React.FC<FooterProps> = ({
             <span className="bg-[#FFF1F2] text-[#E11D48] font-bold px-3 py-1 rounded-full text-[11px]">
               সারা দেশে হোম ডেলিভারি
             </span>
+
+            {/* Bottom Corner Login & Admin Access Buttons (নিচের কোণায় লগইন বাটন) */}
+            {onOpenLogin && (
+              <button
+                type="button"
+                onClick={onOpenLogin}
+                className="px-3 py-1 rounded-full border border-stone-200 hover:border-rose-300 bg-stone-50 hover:bg-rose-50 text-stone-700 hover:text-[#E11D48] font-bold text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
+              >
+                <User className="w-3 h-3 text-[#E11D48]" />
+                <span>লগইন</span>
+              </button>
+            )}
+
+            {onOpenAdmin && (
+              <button
+                type="button"
+                onClick={onOpenAdmin}
+                className="px-3 py-1 rounded-full border border-rose-200 bg-rose-50/70 hover:bg-[#E11D48] text-[#E11D48] hover:text-white font-bold text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
+              >
+                {isAdmin ? (
+                  <>
+                    <LayoutDashboard className="w-3 h-3" />
+                    <span>অ্যাডমিন প্যানেল</span>
+                  </>
+                ) : (
+                  <>
+                    <Lock className="w-3 h-3" />
+                    <span>স্টোর লগইন</span>
+                  </>
+                )}
+              </button>
+            )}
           </div>
         </div>
       </div>
     </footer>
   );
 };
+

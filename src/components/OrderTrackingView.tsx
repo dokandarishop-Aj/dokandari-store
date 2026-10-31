@@ -3,11 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Search, Package, CheckCircle2, Clock, Truck, MapPin, AlertCircle, ArrowLeft } from 'lucide-react';
 import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Order, OrderStatus } from '../types';
+import { getPersistedOrders } from '../lib/storeSync';
 
 interface OrderTrackingViewProps {
   initialOrderId?: string;
@@ -71,9 +72,8 @@ export const OrderTrackingView: React.FC<OrderTrackingViewProps> = ({
     setErrorMsg('');
   };
 
-  const handleSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const queryTerm = searchInput.trim();
+  const lookupOrderByTerm = async (rawTerm: string) => {
+    const queryTerm = rawTerm.trim();
     if (!queryTerm) return;
 
     setLoading(true);
@@ -81,11 +81,20 @@ export const OrderTrackingView: React.FC<OrderTrackingViewProps> = ({
     setOrder(null);
 
     try {
-      // 1. Try finding by direct ID
       const cleanedId = queryTerm.toUpperCase().startsWith('DKD-')
         ? queryTerm.toUpperCase()
         : `DKD-${queryTerm}`;
 
+      // 1. Check local persisted orders first for instant response
+      const localOrders = getPersistedOrders();
+      const localMatch = localOrders.find(
+        (o) =>
+          o.id.toUpperCase() === cleanedId ||
+          o.id.toUpperCase() === queryTerm.toUpperCase() ||
+          o.customer?.phone === queryTerm
+      );
+
+      // 2. Try finding by direct ID in Firestore
       const orderRef = doc(db, 'orders', cleanedId);
       const docSnap = await getDoc(orderRef);
 
@@ -95,7 +104,13 @@ export const OrderTrackingView: React.FC<OrderTrackingViewProps> = ({
         return;
       }
 
-      // 2. Alternatively search by phone number
+      if (localMatch) {
+        setOrder(localMatch);
+        setLoading(false);
+        return;
+      }
+
+      // 3. Alternatively search by phone number in Firestore
       const ordersCol = collection(db, 'orders');
       const q = query(ordersCol, where('customer.phone', '==', queryTerm));
       const querySnap = await getDocs(q);
@@ -103,14 +118,37 @@ export const OrderTrackingView: React.FC<OrderTrackingViewProps> = ({
       if (!querySnap.empty) {
         setOrder(querySnap.docs[0].data() as Order);
       } else {
-        setErrorMsg(`No order found matching "${queryTerm}". Please verify your Order ID or phone number.`);
+        setErrorMsg(`"${queryTerm}" এর সাথে মিলে এমন কোনো অর্ডার পাওয়া যায়নি। আপনার অর্ডার আইডি বা মোবাইল নম্বর যাচাই করুন।`);
       }
     } catch (err) {
       console.warn('Order lookup error, presenting fallback guidance', err);
-      setErrorMsg('Could not reach order server. Try entering your Order Reference ID.');
+      const localOrders = getPersistedOrders();
+      const cleanedId = queryTerm.toUpperCase().startsWith('DKD-')
+        ? queryTerm.toUpperCase()
+        : `DKD-${queryTerm}`;
+      const localMatch = localOrders.find(
+        (o) => o.id.toUpperCase() === cleanedId || o.customer?.phone === queryTerm
+      );
+      if (localMatch) {
+        setOrder(localMatch);
+      } else {
+        setErrorMsg('অর্ডার সার্ভারের সাথে সংযোগ করা যায়নি। আপনার অর্ডার আইডি দিয়ে আবার চেষ্টা করুন।');
+      }
     } finally {
       setLoading(false);
     }
+  };
+
+  useEffect(() => {
+    if (initialOrderId) {
+      setSearchInput(initialOrderId);
+      lookupOrderByTerm(initialOrderId);
+    }
+  }, [initialOrderId]);
+
+  const handleSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await lookupOrderByTerm(searchInput);
   };
 
   const getStepStatus = (stepIndex: number, currentStatus: OrderStatus) => {

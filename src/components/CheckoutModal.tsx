@@ -13,7 +13,7 @@ import { useAuth } from '../context/AuthContext';
 import { CustomerInfo, Order } from '../types';
 import { trackPixelInitiateCheckout, trackPixelPurchase } from '../lib/pixelManager';
 import { captureAbandonedLeadDebounced, markLeadConverted } from '../lib/leadRecovery';
-import { resolveSafeProductImageUrl, handleProductImageError } from '../lib/storeSync';
+import { resolveSafeProductImageUrl, handleProductImageError, saveOrderPersisted } from '../lib/storeSync';
 
 interface CheckoutModalProps {
   isOpen: boolean;
@@ -120,16 +120,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         updatedAt: Date.now(),
       };
 
-      // Save order to Firestore
-      try {
-        const orderRef = doc(db, 'orders', orderId);
-        await setDoc(orderRef, {
-          ...JSON.parse(JSON.stringify(newOrder)),
-          serverTimestamp: serverTimestamp(),
-        });
-      } catch (err) {
-        console.warn('Firestore order write fallback', err);
-      }
+      // Save order to Firestore and local backup
+      await saveOrderPersisted(newOrder);
 
       // Mark abandoned lead as successfully converted
       markLeadConverted(customerPhone, orderId);
