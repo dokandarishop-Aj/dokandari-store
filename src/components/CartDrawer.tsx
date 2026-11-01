@@ -4,8 +4,9 @@
  */
 
 import React, { useState } from 'react';
-import { X, Trash2, ArrowRight, ShoppingBag, Tag, Check, Sparkles } from 'lucide-react';
-import { useCart, DeliveryZone } from '../context/CartContext';
+import { X, Trash2, ArrowRight, ShoppingBag, Tag, Sparkles } from 'lucide-react';
+import { useCart } from '../context/CartContext';
+import { trackPixelInitiateCheckout } from '../lib/pixelManager';
 
 interface CartDrawerProps {
   onProceedToCheckout: () => void;
@@ -319,6 +320,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               {/* Checkout Action Button */}
               <button
                 onClick={() => {
+                  trackPixelInitiateCheckout(items, total);
                   setIsCartOpen(false);
                   onProceedToCheckout();
                 }}

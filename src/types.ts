@@ -190,6 +190,25 @@ export interface CustomerInfo {
   deliveryNotes?: string;
 }
 
+export interface PixelTrackingInfo {
+  eventId: string;
+  browserFired: boolean;
+  capiDispatched: boolean;
+  capiStatus: string;
+  metaPixels?: string[];
+  tiktokPixels?: string[];
+  contentIds?: string[];
+  capiResults?: Array<{
+    platform: string;
+    pixelId: string;
+    status: string;
+    eventId: string;
+    eventsReceived?: number;
+    detail?: string;
+  }>;
+  updatedAt: number;
+}
+
 export interface Order {
   id: string;
   customer: CustomerInfo;
@@ -208,6 +227,8 @@ export interface Order {
   courierName?: string;
   consignmentId?: string;
   courierStatus?: string;
+  customerScreenshot?: string;
+  pixelTracking?: PixelTrackingInfo;
 }
 
 export interface UserProfile {

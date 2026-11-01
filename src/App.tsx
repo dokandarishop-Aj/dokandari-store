@@ -4,12 +4,12 @@
  */
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { collection, doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db } from './lib/firebase';
 import { AuthProvider } from './context/AuthContext';
 import { CartProvider, useCart } from './context/CartContext';
 import { INITIAL_PRODUCTS } from './data/initialCatalog';
-import { Product, ProductCategory, OFFICIAL_CATEGORIES } from './types';
+import { Product, ProductCategory, OFFICIAL_CATEGORIES, Order } from './types';
 import { Header } from './components/Header';
 import { CategorySquircleBar } from './components/CategorySquircleBar';
 import { ProductCard } from './components/ProductCard';
@@ -48,6 +48,7 @@ import {
   setRemoteDeletedProductIds,
   syncAllLocalProductsToFirestore,
   compressImageFileToDataUrl,
+  getPersistedOrders,
 } from './lib/storeSync';
 import {
   initializeMultiPixels,
@@ -76,7 +77,8 @@ function StoreMain() {
   const [activeCategory, setActiveCategory] = useState<ProductCategory>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [detailedProduct, setDetailedProduct] = useState<Product | null>(null);
-  const [detailedProductStep, setDetailedProductStep] = useState<'product' | 'checkout'>('product');
+  const [detailedProductStep, setDetailedProductStep] = useState<'product' | 'checkout' | 'thank_you'>('product');
+  const [thankYouOrder, setThankYouOrder] = useState<Order | null>(null);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [isFounderEditOpen, setIsFounderEditOpen] = useState(false);
@@ -303,7 +305,7 @@ function StoreMain() {
     };
   }, []);
 
-  // Support clean domain-relative pathname routing (/products/:id, /catalog/:catId) + query (?product=id) + hash
+  // Support clean domain-relative pathname routing (/products/:id, /thank-you/:orderId, /catalog/:catId) + query (?product=id) + hash
   useEffect(() => {
     const syncFromUrl = () => {
       const pathname = window.location.pathname;
@@ -311,11 +313,55 @@ function StoreMain() {
       const queryProdId = searchParams.get('product');
       const hash = window.location.hash;
 
-      // 1. Clean Pathname Routing: /products/:id or /catalog/:catId or /category/:catId
-      if (pathname.startsWith('/products/')) {
-        const prodId = decodeURIComponent(pathname.replace('/products/', '').split('/')[0]);
+      // 1. Clean Pathname Routing: /thank-you/:orderId, /products/:id(/checkout), /catalog/:catId
+      if (pathname.startsWith('/thank-you/')) {
+        const orderId = decodeURIComponent(pathname.replace('/thank-you/', '').split('/')[0]);
+        if (orderId) {
+          const localOrders = getPersistedOrders();
+          const foundLocalOrder = localOrders.find((o) => o.id === orderId);
+          if (foundLocalOrder) {
+            const firstItemProdId =
+              foundLocalOrder.items?.[0]?.productId || foundLocalOrder.items?.[0]?.id;
+            const matchedProd =
+              products.find((p) => p.id === firstItemProdId) || products[0] || INITIAL_PRODUCTS[0];
+            setThankYouOrder(foundLocalOrder);
+            setDetailedProductStep('thank_you');
+            setDetailedProduct(matchedProd);
+            setActiveCategoryPage(null);
+            setIsAboutOpen(false);
+            setIsVideoGalleryOpen(false);
+            return;
+          }
+          // Also check Firestore if not in localStorage
+          getDoc(doc(db, 'orders', orderId))
+            .then((snap) => {
+              if (snap.exists()) {
+                const remoteOrder = snap.data() as Order;
+                const firstItemProdId =
+                  remoteOrder.items?.[0]?.productId || remoteOrder.items?.[0]?.id;
+                const matchedProd =
+                  products.find((p) => p.id === firstItemProdId) ||
+                  products[0] ||
+                  INITIAL_PRODUCTS[0];
+                setThankYouOrder(remoteOrder);
+                setDetailedProductStep('thank_you');
+                setDetailedProduct(matchedProd);
+                setActiveCategoryPage(null);
+                setIsAboutOpen(false);
+                setIsVideoGalleryOpen(false);
+              }
+            })
+            .catch(() => null);
+          return;
+        }
+      } else if (pathname.startsWith('/products/')) {
+        const segments = pathname.replace('/products/', '').split('/');
+        const prodId = decodeURIComponent(segments[0]);
+        const isCheckoutStep = segments[1] === 'checkout';
         const found = products.find((p) => p.id === prodId && p.status !== 'draft');
         if (found) {
+          setThankYouOrder(null);
+          setDetailedProductStep(isCheckoutStep ? 'checkout' : 'product');
           setDetailedProduct(found);
           setActiveCategoryPage(null);
           setIsAboutOpen(false);
@@ -360,6 +406,8 @@ function StoreMain() {
       if (queryProdId) {
         const found = products.find((p) => p.id === queryProdId && p.status !== 'draft');
         if (found) {
+          setThankYouOrder(null);
+          setDetailedProductStep('product');
           setDetailedProduct(found);
           return;
         }
@@ -370,6 +418,8 @@ function StoreMain() {
         const prodId = decodeURIComponent(hash.replace('#/products/', ''));
         const found = products.find((p) => p.id === prodId && p.status !== 'draft');
         if (found) {
+          setThankYouOrder(null);
+          setDetailedProductStep('product');
           setDetailedProduct(found);
           setActiveCategoryPage(null);
           setIsAboutOpen(false);
@@ -482,6 +532,12 @@ function StoreMain() {
 
   // Handle instant order click (from "অর্ডার করুন" button -> opens dedicated Instant Checkout Page)
   const handleInstantOrder = (product: Product) => {
+    window.history.pushState(
+      null,
+      '',
+      `/products/${encodeURIComponent(product.id)}/checkout?brand=dokandari`
+    );
+    setThankYouOrder(null);
     setDetailedProductStep('checkout');
     setDetailedProduct(product);
     setActiveCategoryPage(null);
@@ -490,11 +546,6 @@ function StoreMain() {
     setIsPolicyOpen(false);
     setIsTrackingOpen(false);
     setIsAdminOpen(false);
-    window.history.pushState(
-      null,
-      '',
-      `/products/${encodeURIComponent(product.id)}/checkout?brand=dokandari`
-    );
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -809,28 +860,32 @@ function StoreMain() {
           <ProductDetailPage
             product={detailedProduct}
             initialStep={detailedProductStep}
+            initialCompletedOrder={thankYouOrder}
             isAdmin={isAdminAuthenticated}
             allProducts={publishedProducts}
             categoryHeroes={categoryHeroes}
             onSaveCategoryHero={handleSaveCategoryHero}
             onSelectProduct={(p) => {
-              setDetailedProductStep('product');
-              setDetailedProduct(p);
               window.history.pushState(
                 null,
                 '',
                 `/products/${encodeURIComponent(p.id)}?brand=dokandari`
               );
+              setThankYouOrder(null);
+              setDetailedProductStep('product');
+              setDetailedProduct(p);
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
             onInstantOrderProduct={handleInstantOrder}
             onBack={() => {
+              setThankYouOrder(null);
               setDetailedProduct(null);
               setDetailedProductStep('product');
               window.history.pushState(null, '', '/');
             }}
             onOpenEdit={(p) => setEditingProduct(p)}
             onOrderSuccess={(orderId) => {
+              setThankYouOrder(null);
               setDetailedProduct(null);
               setDetailedProductStep('product');
               setTrackingOrderId(orderId);

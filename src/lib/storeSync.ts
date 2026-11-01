@@ -88,7 +88,7 @@ export const DEFAULT_CATEGORY_HEROES: Record<string, CategoryHeroConfig> = {
   gadgets_electronics: {
     title: 'অরিজিনাল স্মার্ট গ্যাজেটস ও ইলেকট্রনিক্স কালেকশন',
     subtitle: 'টিডব্লিউএস ইয়ারবাডস, স্মার্টওয়াচ, পোর্টেবল মিনি ফ্যান ও আধুনিক টেক গ্যাজেটস এখন আকর্ষণীয় ডিসকাউন্টে।',
-    image: '/uploads/product/1789984768-HJ-5060-Rechargeable-LED-Desk-Lamp-with-Smart-Display-Pen-Holder.webp',
+    image: '/uploads/product/1776523954-20516.jpg',
     tag: 'স্মার্ট গ্যাজেটস ও টেক',
     ctaText: 'গ্যাজেটস দেখুন',
   },
@@ -102,7 +102,7 @@ export const DEFAULT_CATEGORY_HEROES: Record<string, CategoryHeroConfig> = {
   beauty_personal_care: {
     title: 'অথেনটিক বিউটি ও পার্সোনাল কেয়ার কালেকশন',
     subtitle: 'ত্বক ও চুলের যত্নে ১০০% অরিজিনাল স্কিনকেয়ার, অর্গানাইজার ও গ্রুমিং এসেনশিয়ালস।',
-    image: '/uploads/product/1789984863-Dear-Hair-Tonic-Cleanser-1.jpg',
+    image: '/uploads/product/1776151737-untitled-design-49.webp',
     tag: 'বিউটি ও স্কিনকেয়ার',
     ctaText: 'বিউটি প্রোডাক্টস',
   },
@@ -209,7 +209,7 @@ export const DEFAULT_STORE_CONTENT: StoreContent = {
       id: 'slide-2',
       title: 'অরিজিনাল স্মার্ট গ্যাজেটস ও ওয়্যারলেস অ্যাক্সেসরিজ',
       subtitle: 'আন্তর্জাতিক ব্র্যান্ডের লেটেস্ট টেকনোলজি এখন আপনার হাতের মুঠোয়',
-      image: '/uploads/product/1789984768-HJ-5060-Rechargeable-LED-Desk-Lamp-with-Smart-Display-Pen-Holder.webp',
+      image: '/uploads/product/1776523954-20516.jpg',
       tag: 'স্মার্ট গ্যাজেটস',
       ctaText: 'গ্যাজেট দেখুন',
       ctaLink: '#products-section',
@@ -218,7 +218,7 @@ export const DEFAULT_STORE_CONTENT: StoreContent = {
       id: 'slide-3',
       title: 'আন্তর্জাতিক কোয়ালিটি স্কিনকেয়ার ও হেয়ার কেয়ার কালেকশন',
       subtitle: '১০০% অথেনটিক হেয়ার টনিক, সিরাম ও নিত্যপ্রয়োজনীয় বিউটি পণ্য',
-      image: '/uploads/product/1789984863-Dear-Hair-Tonic-Cleanser-1.jpg',
+      image: '/uploads/product/1776151737-untitled-design-49.webp',
       tag: 'বিউটি ও লাইফস্টাইল',
       ctaText: 'অর্ডার করুন',
       ctaLink: '#products-section',
@@ -422,6 +422,109 @@ export function getCustomPersistedProductsMap(): Record<string, Product> {
 }
 
 /**
+ * Exact set of 38 verified real files present in `/public/uploads/product/`.
+ * Any `/uploads/product/...` filename NOT in this set is a broken legacy path and will be healed automatically.
+ */
+export const VALID_LOCAL_UPLOAD_FILES = new Set<string>([
+  '1769861322-hawaa-hair-fall-avenger-oil-1-(2).webp',
+  '1769861382-1-3.webp',
+  '1769861435-1-1.webp',
+  '1769861471-skin-cafe-silky-tresses-moisturizing-conditioner-1-2-(1).webp',
+  '1769861519-10_in_1_ess_advanced_hair_oil_100ml_1-(1).webp',
+  '1776151737-untitled-design-49.webp',
+  '1776247559-img_69d539f2bf516_0_1775581682.jpg',
+  '1776319126-1732248160-1722670821-sellmart_54.jpg',
+  '1776324094-5-layer-food-safety-cover-150x150.jpg',
+  '1776348493-20052.jpg',
+  '1776348730-b73a05b8565f8909e9c6a07d2de29dc8.jpg_720x720q80.jpg_.webp',
+  '1776508057-1753857716-1753706738-10001.webp',
+  '1776508199-1725622701-1722940972-usb-table-fans-folding-rechargeable-fan-led-light-and-original-imagdwfz3zyz9g7m.webp',
+  '1776523547-product_image_2130.jpg',
+  '1776523954-20516.jpg',
+  '1777098758-eq34-plus-02-500x500.webp',
+  '1777787708-livo-high-speed-turbo-fan-1.webp',
+  '1777788043-hp-turbo-fan.webp',
+  '1777788637-1.webp',
+  '1777788826-1776932024-smart-watch-1.webp',
+  '1789888147-h8106c4a8711947bfaf519bb680ae518cv.jpg',
+  '1791961933-whatsapp-image-2026-10-14-at-12.59.52-(1).jpeg',
+  '1792322414-gemini_generated_image_b9teg6b9teg6b9te.jpg',
+  '1792322524-gemini_generated_image_6tydck6tydck6tyd.jpg',
+  '1792322634-gemini_generated_image_i3plevi3plevi3pl.jpg',
+  '1792322764-whatsapp-image-2026-10-14-at-12.59.53.jpeg',
+  'Gemini_Generated_Image_dsg9pjdsg9pjdsg9.jpeg',
+  'Gemini_Generated_Image_vid5cyvid5cyvid5.jpg',
+  'H1a1445f9950249049b15d7e7e9da8e55G.jpg',
+  'H25ea4841afd5463591250f1d029873acN.jpg',
+  'H29cc3664a9fa41368666c15926e0d2b5S.jpg',
+  'H6a326173d1a54849a898cf5017343e7ah.jpg',
+  'H7b42b36b865e4395afe3ab4e82d5ec37D-6.jpg',
+  'H952cd307db5c46eea7a3728480fb7c42j.jpg',
+  'Ha2ef56dd79ed496bafac7990404868f7u.jpg',
+  'Ha595a0e636bb4479885d5e8a88bd25afz.jpg',
+  'Hb954a2545019473bba00901770da8608F.jpg',
+  'He1e7d0e527634b5196f9d7cd961eb694M.jpg',
+]);
+
+/**
+ * Maps legacy or broken filenames directly to their verified real file in `/public/uploads/product/`.
+ */
+const LEGACY_FILENAME_REMAP: Record<string, string> = {
+  '1792219337-ha7e0aa8d05a44d73b82d68816420d174s.jpg':
+    '/uploads/product/1792322764-whatsapp-image-2026-10-14-at-12.59.53.jpeg',
+  'flexible-mirror-sheet.jpg':
+    '/uploads/product/1792322764-whatsapp-image-2026-10-14-at-12.59.53.jpeg',
+  '1792218995-hb38f48c0a8b7454ebad69790a214b4f5s.jpg':
+    '/uploads/product/Gemini_Generated_Image_vid5cyvid5cyvid5.jpg',
+  'round-vanity-mirror.jpg':
+    '/uploads/product/Gemini_Generated_Image_vid5cyvid5cyvid5.jpg',
+  '1792218499-h2d83f5b4372f4cf69c8441815d239ae5j.jpg':
+    '/uploads/product/Gemini_Generated_Image_dsg9pjdsg9pjdsg9.jpeg',
+  '3d-butterfly-mirror.jpg':
+    '/uploads/product/Gemini_Generated_Image_dsg9pjdsg9pjdsg9.jpeg',
+  'heart-mirror-sticker.jpg':
+    '/uploads/product/1792322414-gemini_generated_image_b9teg6b9teg6b9te.jpg',
+  'cat-led-bookshelf.jpg':
+    '/uploads/product/1792322524-gemini_generated_image_6tydck6tydck6tyd.jpg',
+  '1789984863-Dear-Hair-Tonic-Cleanser-1.jpg':
+    '/uploads/product/1776151737-untitled-design-49.webp',
+  'dear-hair-tonic.jpg':
+    '/uploads/product/1776151737-untitled-design-49.webp',
+  '1789984852-Lafz-10-in-1-Advanced-Essential-Hair-Oil.webp':
+    '/uploads/product/1769861519-10_in_1_ess_advanced_hair_oil_100ml_1-(1).webp',
+  '1789984839-Skin-Cafe-Silky-Tresses-Moisturizing-Conditioner-120ml.webp':
+    '/uploads/product/1769861471-skin-cafe-silky-tresses-moisturizing-conditioner-1-2-(1).webp',
+  '1789984829-St.-Ives-Glowing-Oil-Free-Face-Moisturizer-Watermelon.webp':
+    '/uploads/product/1769861435-1-1.webp',
+  '1789984817-Simple-10-Vitamin-CEF-Booster-Serum-30ml.webp':
+    '/uploads/product/1769861382-1-3.webp',
+  '1789984805-Hawa-Hair-Fall-Avenger-Oil-100ml.webp':
+    '/uploads/product/1769861322-hawaa-hair-fall-avenger-oil-1-(2).webp',
+  '1789984794-Muuchstac-Ocean-Face-Wash-Herbal-Skin-Lightning-Oil-Combo.webp':
+    '/uploads/product/1776247559-img_69d539f2bf516_0_1775581682.jpg',
+  '1789984781-Portable-Handheld-Cooling-Fan-with-Night-Light.webp':
+    '/uploads/product/1777788637-1.webp',
+  '1789984768-HJ-5060-Rechargeable-LED-Desk-Lamp-with-Smart-Display-Pen-Holder.webp':
+    '/uploads/product/1776523954-20516.jpg',
+  '1789984745-M11-TWS-True-Wireless-Earbuds-with-Power-Bank-LED-Display.webp':
+    '/uploads/product/1776523547-product_image_2130.jpg',
+  '1789984733-JOY-SUPER-B10-Rechargeable-Emergency-Bulb-15W.webp':
+    '/uploads/product/1776508199-1725622701-1722940972-usb-table-fans-folding-rechargeable-fan-led-light-and-original-imagdwfz3zyz9g7m.webp',
+  '1789984722-Thunder-2-in-1-Rechargeable-LED-Emergency-Light-XST-836.webp':
+    '/uploads/product/1776508057-1753857716-1753706738-10001.webp',
+  '1789984712-Livo-Instant-Hair-Color-Shampoo-3-in-1.webp':
+    '/uploads/product/1777787708-livo-high-speed-turbo-fan-1.webp',
+  '1789984699-Hoco-EQ2-True-Wireless-BT-Headset.webp':
+    '/uploads/product/1777098758-eq34-plus-02-500x500.webp',
+  '1789984688-Colmi-KW77-Smart-Watch-2-Straps.webp':
+    '/uploads/product/1777788826-1776932024-smart-watch-1.webp',
+  '1789984677-Mini-Multifunctional-Household-Electric-Sewing-Machine.webp':
+    '/uploads/product/1776319126-1732248160-1722670821-sellmart_54.jpg',
+  '1789984665-Food-Safety-7-Plus-Combo-Pack.webp':
+    '/uploads/product/1776324094-5-layer-food-safety-cover-150x150.jpg',
+};
+
+/**
  * Deterministic string hash so every product gets a unique, consistent image index from its category pool.
  */
 function hashProductSeed(seed: string): number {
@@ -433,8 +536,8 @@ function hashProductSeed(seed: string): number {
 }
 
 /**
- * Keyword-aware high-resolution fallback product image selector so every product
- * gets a matching visual even if a legacy WordPress (dokandari.com/wp-content/...), Alibaba, or hotlink fails.
+ * Keyword-aware high-resolution fallback product image selector using ONLY the 38 verified real files
+ * in `/public/uploads/product/`.
  */
 export function getFallbackProductImage(
   product?: { id?: string; name?: string; titleEn?: string; category?: string },
@@ -445,7 +548,7 @@ export function getFallbackProductImage(
   const seed = hashProductSeed(`${product?.id || ''}-${product?.name || ''}`);
   const offset = seed + index;
 
-  // Exact match for real Dokandari products
+  // Exact match for real Dokandari products using 100% verified local files
   if (text.includes('arch') || text.includes('খিলান')) {
     const archGallery = [
       '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg',
@@ -461,7 +564,8 @@ export function getFallbackProductImage(
   if (text.includes('হার্ট') || text.includes('heart')) {
     const heartGallery = [
       '/uploads/product/1792322414-gemini_generated_image_b9teg6b9teg6b9te.jpg',
-      '/uploads/product/heart-mirror-sticker.jpg',
+      '/uploads/product/1792322634-gemini_generated_image_i3plevi3plevi3pl.jpg',
+      '/uploads/product/1792322764-whatsapp-image-2026-10-14-at-12.59.53.jpeg',
     ];
     return heartGallery[index % heartGallery.length];
   }
@@ -476,144 +580,152 @@ export function getFallbackProductImage(
     text.includes('shelf') ||
     text.includes('bookshelf')
   ) {
-    const catGallery = [
-      '/uploads/product/1792322524-gemini_generated_image_6tydck6tydck6tyd.jpg',
-      '/uploads/product/cat-led-bookshelf.jpg',
-    ];
-    return catGallery[index % catGallery.length];
+    return '/uploads/product/1792322524-gemini_generated_image_6tydck6tydck6tyd.jpg';
   }
 
   if (text.includes('প্রজাপতি') || text.includes('butterfly') || text.includes('৩ডি') || text.includes('3d')) {
     const bflyGallery = [
-      '/uploads/product/1792218499-h2d83f5b4372f4cf69c8441815d239ae5j.jpg',
-      '/uploads/product/3d-butterfly-mirror.jpg',
+      '/uploads/product/Gemini_Generated_Image_dsg9pjdsg9pjdsg9.jpeg',
+      '/uploads/product/1791961933-whatsapp-image-2026-10-14-at-12.59.52-(1).jpeg',
+      '/uploads/product/1792322414-gemini_generated_image_b9teg6b9teg6b9te.jpg',
     ];
     return bflyGallery[index % bflyGallery.length];
   }
 
   if (text.includes('গোল') || text.includes('বাথরুম') || text.includes('ভ্যানিটি') || text.includes('round') || text.includes('vanity')) {
     const roundGallery = [
-      '/uploads/product/1792218995-hb38f48c0a8b7454ebad69790a214b4f5s.jpg',
-      '/uploads/product/round-vanity-mirror.jpg',
+      '/uploads/product/Gemini_Generated_Image_vid5cyvid5cyvid5.jpg',
+      '/uploads/product/1792322634-gemini_generated_image_i3plevi3plevi3pl.jpg',
+      '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg',
     ];
     return roundGallery[index % roundGallery.length];
   }
 
   if (text.includes('ফ্লেক্সিবল') || text.includes('সেলফ-আঠালো') || text.includes('flexible') || text.includes('sheet')) {
     const flexGallery = [
-      '/uploads/product/1792219337-ha7e0aa8d05a44d73b82d68816420d174s.jpg',
-      '/uploads/product/flexible-mirror-sheet.jpg',
+      '/uploads/product/1792322764-whatsapp-image-2026-10-14-at-12.59.53.jpeg',
+      '/uploads/product/1789888147-h8106c4a8711947bfaf519bb680ae518cv.jpg',
+      '/uploads/product/H7b42b36b865e4395afe3ab4e82d5ec37D-6.jpg',
+      '/uploads/product/Ha595a0e636bb4479885d5e8a88bd25afz.jpg',
+      '/uploads/product/H1a1445f9950249049b15d7e7e9da8e55G.jpg',
+      '/uploads/product/Hb954a2545019473bba00901770da8608F.jpg',
     ];
     return flexGallery[index % flexGallery.length];
   }
 
   if (text.includes('ডিয়ার') || text.includes('dear')) {
-    const dearGallery = [
-      '/uploads/product/1789984863-Dear-Hair-Tonic-Cleanser-1.jpg',
-      '/uploads/product/dear-hair-tonic.jpg',
-    ];
-    return dearGallery[index % dearGallery.length];
+    return '/uploads/product/1776151737-untitled-design-49.webp';
   }
-
   if (text.includes('লাফজ') || text.includes('lafz')) {
-    return '/uploads/product/1789984852-Lafz-10-in-1-Advanced-Essential-Hair-Oil.webp';
+    return '/uploads/product/1769861519-10_in_1_ess_advanced_hair_oil_100ml_1-(1).webp';
   }
   if (text.includes('স্কিন ক্যাফে') || text.includes('skin cafe')) {
-    return '/uploads/product/1789984839-Skin-Cafe-Silky-Tresses-Moisturizing-Conditioner-120ml.webp';
+    return '/uploads/product/1769861471-skin-cafe-silky-tresses-moisturizing-conditioner-1-2-(1).webp';
   }
   if (text.includes('সেন্ট আইভস') || text.includes('st. ives') || text.includes('st ives')) {
-    return '/uploads/product/1789984829-St.-Ives-Glowing-Oil-Free-Face-Moisturizer-Watermelon.webp';
+    return '/uploads/product/1769861435-1-1.webp';
   }
   if (text.includes('সিম্পল') || text.includes('simple')) {
-    return '/uploads/product/1789984817-Simple-10-Vitamin-CEF-Booster-Serum-30ml.webp';
+    return '/uploads/product/1769861382-1-3.webp';
   }
   if (text.includes('হাওয়া') || text.includes('hawa')) {
-    return '/uploads/product/1789984805-Hawa-Hair-Fall-Avenger-Oil-100ml.webp';
+    return '/uploads/product/1769861322-hawaa-hair-fall-avenger-oil-1-(2).webp';
   }
   if (text.includes('মুশট্যাক') || text.includes('muuchstac')) {
-    return '/uploads/product/1789984794-Muuchstac-Ocean-Face-Wash-Herbal-Skin-Lightning-Oil-Combo.webp';
+    return '/uploads/product/1776247559-img_69d539f2bf516_0_1775581682.jpg';
   }
-  if (text.includes('ফ্যান') || text.includes('কুলিং') || text.includes('fan')) {
-    return '/uploads/product/1789984781-Portable-Handheld-Cooling-Fan-with-Night-Light.webp';
+  if (text.includes('hj-5060') || text.includes('ডেস্ক ল্যাম্প') || text.includes('desk lamp') || text.includes('20516')) {
+    return '/uploads/product/1776523954-20516.jpg';
   }
-  if (text.includes('hj-5060') || text.includes('ডেস্ক ল্যাম্প') || text.includes('desk lamp')) {
-    return '/uploads/product/1789984768-HJ-5060-Rechargeable-LED-Desk-Lamp-with-Smart-Display-Pen-Holder.webp';
+  if (text.includes('m11') || text.includes('ব্লেডলেস') || text.includes('bladeless')) {
+    return '/uploads/product/1776523547-product_image_2130.jpg';
   }
-  if (text.includes('m11')) {
-    return '/uploads/product/1789984745-M11-TWS-True-Wireless-Earbuds-with-Power-Bank-LED-Display.webp';
+  if (text.includes('jy-2570') || text.includes('৬ ব্যাটারি')) {
+    return '/uploads/product/1776348493-20052.jpg';
   }
-  if (text.includes('জয় সুপার') || text.includes('joy-super') || text.includes('b10')) {
-    return '/uploads/product/1789984733-JOY-SUPER-B10-Rechargeable-Emergency-Bulb-15W.webp';
+  if (text.includes('জয় সুপার') || text.includes('জয়-সুপার') || text.includes('joy-super') || text.includes('b10')) {
+    return '/uploads/product/1776508199-1725622701-1722940972-usb-table-fans-folding-rechargeable-fan-led-light-and-original-imagdwfz3zyz9g7m.webp';
   }
-  if (text.includes('থান্ডার') || text.includes('thunder') || text.includes('xst-836')) {
-    return '/uploads/product/1789984722-Thunder-2-in-1-Rechargeable-LED-Emergency-Light-XST-836.webp';
+  if (text.includes('থান্ডার') || text.includes('thunder') || text.includes('xst-836') || text.includes('টর্চ') || text.includes('ফ্ল্যাশলাইট')) {
+    return '/uploads/product/1776508057-1753857716-1753706738-10001.webp';
   }
   if (text.includes('লিভো') || text.includes('livo')) {
-    return '/uploads/product/1789984712-Livo-Instant-Hair-Color-Shampoo-3-in-1.webp';
+    return '/uploads/product/1777787708-livo-high-speed-turbo-fan-1.webp';
   }
-  if (text.includes('হোকো') || text.includes('hoco') || text.includes('eq2')) {
-    return '/uploads/product/1789984699-Hoco-EQ2-True-Wireless-BT-Headset.webp';
+  if (text.includes('হ্যান্ডহেল্ড') || text.includes('মিনি টার্বো') || text.includes('hp-turbo')) {
+    return '/uploads/product/1777788043-hp-turbo-fan.webp';
   }
-  if (text.includes('কলমি') || text.includes('colmi') || text.includes('kw77')) {
-    return '/uploads/product/1789984688-Colmi-KW77-Smart-Watch-2-Straps.webp';
+  if (text.includes('এলইডি ডিসপ্লে') || text.includes('led display')) {
+    return '/uploads/product/1776348730-b73a05b8565f8909e9c6a07d2de29dc8.jpg_720x720q80.jpg_.webp';
+  }
+  if (text.includes('ফ্যান') || text.includes('কুলিং') || text.includes('fan')) {
+    return '/uploads/product/1777788637-1.webp';
+  }
+  if (text.includes('হোকো') || text.includes('hoco') || text.includes('eq34') || text.includes('eq2') || text.includes('ইয়ারবাড')) {
+    return '/uploads/product/1777098758-eq34-plus-02-500x500.webp';
+  }
+  if (text.includes('কলমি') || text.includes('কেকিওয়্যার') || text.includes('colmi') || text.includes('kw77') || text.includes('watch')) {
+    return '/uploads/product/1777788826-1776932024-smart-watch-1.webp';
   }
   if (text.includes('সেলাই') || text.includes('sewing')) {
-    return '/uploads/product/1789984677-Mini-Multifunctional-Household-Electric-Sewing-Machine.webp';
+    return '/uploads/product/1776319126-1732248160-1722670821-sellmart_54.jpg';
   }
-  if (text.includes('ফুড সেফটি') || text.includes('food safety')) {
-    return '/uploads/product/1789984665-Food-Safety-7-Plus-Combo-Pack.webp';
+  if (text.includes('ফুড সেফটি') || text.includes('food safety') || text.includes('কভার')) {
+    return '/uploads/product/1776324094-5-layer-food-safety-cover-150x150.jpg';
   }
 
-  // Category pools using 100% real Dokandari product images
+  // Category pools using ONLY 100% verified real files in /public/uploads/product/
   const cat = product?.category || 'home_decor';
   const catPools: Record<string, string[]> = {
     home_decor: [
       '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg',
       '/uploads/product/1792322414-gemini_generated_image_b9teg6b9teg6b9te.jpg',
       '/uploads/product/1792322524-gemini_generated_image_6tydck6tydck6tyd.jpg',
-      '/uploads/product/1792219337-ha7e0aa8d05a44d73b82d68816420d174s.jpg',
-      '/uploads/product/1792218995-hb38f48c0a8b7454ebad69790a214b4f5s.jpg',
-      '/uploads/product/1792218499-h2d83f5b4372f4cf69c8441815d239ae5j.jpg',
+      '/uploads/product/1792322764-whatsapp-image-2026-10-14-at-12.59.53.jpeg',
+      '/uploads/product/Gemini_Generated_Image_vid5cyvid5cyvid5.jpg',
+      '/uploads/product/Gemini_Generated_Image_dsg9pjdsg9pjdsg9.jpeg',
     ],
     gadgets_electronics: [
-      '/uploads/product/1789984768-HJ-5060-Rechargeable-LED-Desk-Lamp-with-Smart-Display-Pen-Holder.webp',
-      '/uploads/product/1789984733-JOY-SUPER-B10-Rechargeable-Emergency-Bulb-15W.webp',
-      '/uploads/product/1789984722-Thunder-2-in-1-Rechargeable-LED-Emergency-Light-XST-836.webp',
-      '/uploads/product/1789984688-Colmi-KW77-Smart-Watch-2-Straps.webp',
+      '/uploads/product/1777788637-1.webp',
+      '/uploads/product/1776523954-20516.jpg',
+      '/uploads/product/1776523547-product_image_2130.jpg',
+      '/uploads/product/1777098758-eq34-plus-02-500x500.webp',
+      '/uploads/product/1777788826-1776932024-smart-watch-1.webp',
     ],
     beauty_personal_care: [
-      '/uploads/product/1789984863-Dear-Hair-Tonic-Cleanser-1.jpg',
-      '/uploads/product/1789984852-Lafz-10-in-1-Advanced-Essential-Hair-Oil.webp',
-      '/uploads/product/1789984839-Skin-Cafe-Silky-Tresses-Moisturizing-Conditioner-120ml.webp',
-      '/uploads/product/1789984829-St.-Ives-Glowing-Oil-Free-Face-Moisturizer-Watermelon.webp',
-      '/uploads/product/1789984817-Simple-10-Vitamin-CEF-Booster-Serum-30ml.webp',
-      '/uploads/product/1789984805-Hawa-Hair-Fall-Avenger-Oil-100ml.webp',
+      '/uploads/product/1776151737-untitled-design-49.webp',
+      '/uploads/product/1769861519-10_in_1_ess_advanced_hair_oil_100ml_1-(1).webp',
+      '/uploads/product/1769861471-skin-cafe-silky-tresses-moisturizing-conditioner-1-2-(1).webp',
+      '/uploads/product/1769861435-1-1.webp',
+      '/uploads/product/1769861382-1-3.webp',
+      '/uploads/product/1769861322-hawaa-hair-fall-avenger-oil-1-(2).webp',
     ],
     home_kitchen: [
-      '/uploads/product/1789984677-Mini-Multifunctional-Household-Electric-Sewing-Machine.webp',
-      '/uploads/product/1789984665-Food-Safety-7-Plus-Combo-Pack.webp',
+      '/uploads/product/1776319126-1732248160-1722670821-sellmart_54.jpg',
+      '/uploads/product/1776324094-5-layer-food-safety-cover-150x150.jpg',
     ],
     mobile_accessories: [
-      '/uploads/product/1789984745-M11-TWS-True-Wireless-Earbuds-with-Power-Bank-LED-Display.webp',
-      '/uploads/product/1789984699-Hoco-EQ2-True-Wireless-BT-Headset.webp',
+      '/uploads/product/1777098758-eq34-plus-02-500x500.webp',
+      '/uploads/product/1777788826-1776932024-smart-watch-1.webp',
     ],
     lifestyle: [
-      '/uploads/product/1789984781-Portable-Handheld-Cooling-Fan-with-Night-Light.webp',
+      '/uploads/product/1777788637-1.webp',
+      '/uploads/product/1777788043-hp-turbo-fan.webp',
     ],
     travel_outdoor: [
-      '/uploads/product/1789984722-Thunder-2-in-1-Rechargeable-LED-Emergency-Light-XST-836.webp',
+      '/uploads/product/1776508057-1753857716-1753706738-10001.webp',
     ],
     health_fitness: [
-      '/uploads/product/1789984665-Food-Safety-7-Plus-Combo-Pack.webp',
+      '/uploads/product/1776324094-5-layer-food-safety-cover-150x150.jpg',
     ],
     kids_baby: [
       '/uploads/product/1792322524-gemini_generated_image_6tydck6tydck6tyd.jpg',
     ],
     office_essentials: [
-      '/uploads/product/1789984768-HJ-5060-Rechargeable-LED-Desk-Lamp-with-Smart-Display-Pen-Holder.webp',
+      '/uploads/product/1776523954-20516.jpg',
     ],
     fashion_clothing: [
-      '/uploads/product/1789984712-Livo-Instant-Hair-Color-Shampoo-3-in-1.webp',
+      '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg',
     ],
   };
 
@@ -686,10 +798,31 @@ export function isBlockedOrErrorProductImageUrl(rawUrl: string | undefined): boo
 }
 
 /**
+ * Validates a local `/uploads/product/...` path against `VALID_LOCAL_UPLOAD_FILES`.
+ * If the filename exists on disk, returns `/uploads/product/<filename>`.
+ * Otherwise remaps via `LEGACY_FILENAME_REMAP` or `getFallbackProductImage`.
+ */
+function resolveVerifiedLocalUploadPath(
+  localPath: string,
+  product?: { id?: string; name?: string; titleEn?: string; category?: string },
+  index = 0
+): string {
+  const normalized = localPath.replace(/^\/public\/uploads\//, '/uploads/');
+  const fname = normalized.replace(/^\/uploads\/product\//, '').split(/[?&]/)[0];
+  if (VALID_LOCAL_UPLOAD_FILES.has(fname)) {
+    return `/uploads/product/${fname}`;
+  }
+  if (LEGACY_FILENAME_REMAP[fname]) {
+    return LEGACY_FILENAME_REMAP[fname];
+  }
+  return getFallbackProductImage(product, index);
+}
+
+/**
  * Resolves and sanitizes any product image URL:
- * 1. Keeps Admin-uploaded `data:image/...`, `blob:`, `/assets/...`, and `/uploads/product/...` intact.
- * 2. Blocks any Alibaba/CDN error/unplug illustrations (`isBlockedOrErrorProductImageUrl`).
- * 3. Rewrites `dokandari.com/public/uploads/product/...` directly to local `/uploads/product/...`.
+ * 1. Keeps Admin-uploaded `data:image/...`, `blob:`, `/assets/...` intact.
+ * 2. Validates `/uploads/product/...` against `VALID_LOCAL_UPLOAD_FILES` so broken 404 filenames are healed immediately.
+ * 3. Blocks any Alibaba/CDN error/unplug illustrations (`isBlockedOrErrorProductImageUrl`).
  * 4. Preserves real product images from `alicdn.com/kf/`, `shajgoj`, `daraz`, Firebase Storage, etc.
  */
 export function resolveSafeProductImageUrl(
@@ -711,9 +844,48 @@ export function resolveSafeProductImageUrl(
     return url;
   }
 
-  // Keep local authentic product uploads (/uploads/product/... or /public/uploads/product/...) intact
+  // 0. Unwrap any existing `wsrv.nl/?url=...` layers so we NEVER double-wrap wsrv.nl inside wsrv.nl (which causes HTTP 404)!
+  let wsrvUnwrapCount = 0;
+  while (
+    wsrvUnwrapCount < 6 &&
+    (url.toLowerCase().includes('wsrv.nl/?url=') ||
+      url.toLowerCase().includes('wsrv.nl?url=') ||
+      url.toLowerCase().includes('images.weserv.nl'))
+  ) {
+    wsrvUnwrapCount++;
+    try {
+      const parsedWsrv = new URL(url.startsWith('//') ? `https:${url}` : url);
+      const inner = parsedWsrv.searchParams.get('url');
+      if (inner) {
+        let nextUrl = inner.trim();
+        try {
+          if (nextUrl.includes('%2F') || nextUrl.includes('%3A')) {
+            nextUrl = decodeURIComponent(nextUrl).trim();
+          }
+        } catch {
+          // ignore
+        }
+        url = nextUrl;
+      } else {
+        break;
+      }
+    } catch {
+      const match = url.match(/[?&]url=([^&]+)/i);
+      if (match?.[1]) {
+        try {
+          url = decodeURIComponent(match[1]).trim();
+        } catch {
+          break;
+        }
+      } else {
+        break;
+      }
+    }
+  }
+
+  // Verify local `/uploads/product/...` or `/public/uploads/product/...` against the 38 real files on disk
   if (url.startsWith('/uploads/product/') || url.startsWith('/public/uploads/product/')) {
-    return url.replace(/^\/public\/uploads\//, '/uploads/');
+    return resolveVerifiedLocalUploadPath(url, product, index);
   }
 
   // Reject any error/unplug/tfs/captcha image immediately
@@ -742,7 +914,7 @@ export function resolveSafeProductImageUrl(
   }
 
   if (url.startsWith('/uploads/product/') || url.startsWith('/public/uploads/product/')) {
-    return url.replace(/^\/public\/uploads\//, '/uploads/');
+    return resolveVerifiedLocalUploadPath(url, product, index);
   }
 
   if (isBlockedOrErrorProductImageUrl(url)) {
@@ -754,13 +926,13 @@ export function resolveSafeProductImageUrl(
     url = `https:${url}`;
   }
 
-  // 3. Rewrite Laravel `/public/uploads/product/...` URLs (from dokandari.com or wsrv.nl) to local `/uploads/product/...`
+  // 3. Rewrite Laravel `/public/uploads/product/...` URLs (from dokandari.com or wsrv.nl) to verified local `/uploads/product/...`
   if (url.includes('/public/uploads/product/') || url.includes('%2Fpublic%2Fuploads%2Fproduct%2F')) {
     try {
       const decoded = decodeURIComponent(url);
       const fname = decoded.split('/public/uploads/product/')[1]?.split(/[?&]/)[0];
       if (fname) {
-        return `/uploads/product/${fname}`;
+        return resolveVerifiedLocalUploadPath(`/uploads/product/${fname}`, product, index);
       }
     } catch {
       // ignore
@@ -774,25 +946,25 @@ export function resolveSafeProductImageUrl(
 
   const lower = url.toLowerCase();
 
-  // 5. Rewrite `dokandari.com/wp-content/uploads/...` to local `/uploads/product/` if we have it, or `buy.dokandari.com`
+  // 5. Rewrite `dokandari.com/wp-content/uploads/...` to verified local `/uploads/product/`
   if (lower.includes('/wp-content/uploads/')) {
     if (lower.includes('gemini_generated_image_b9teg6b9teg6b9te')) {
-      return '/uploads/product/heart-mirror-sticker.jpg';
+      return '/uploads/product/1792322414-gemini_generated_image_b9teg6b9teg6b9te.jpg';
     }
     if (lower.includes('gemini_generated_image_6tydck6tydck6tyd')) {
-      return '/uploads/product/cat-led-bookshelf.jpg';
+      return '/uploads/product/1792322524-gemini_generated_image_6tydck6tydck6tyd.jpg';
     }
     if (lower.includes('h2d83f5b4372f4cf69c8441815d239ae5j')) {
-      return '/uploads/product/3d-butterfly-mirror.jpg';
+      return '/uploads/product/Gemini_Generated_Image_dsg9pjdsg9pjdsg9.jpeg';
     }
     if (lower.includes('hb38f48c0a8b7454ebad69790a214b4f5s')) {
-      return '/uploads/product/round-vanity-mirror.jpg';
+      return '/uploads/product/Gemini_Generated_Image_vid5cyvid5cyvid5.jpg';
     }
     if (lower.includes('ha7e0aa8d05a44d73b82d68816420d174s')) {
-      return '/uploads/product/flexible-mirror-sheet.jpg';
+      return '/uploads/product/1792322764-whatsapp-image-2026-10-14-at-12.59.53.jpeg';
     }
     if (lower.includes('dear-hair-tonic-cleanser')) {
-      return '/uploads/product/dear-hair-tonic.jpg';
+      return '/uploads/product/1776151737-untitled-design-49.webp';
     }
   }
 
@@ -802,11 +974,10 @@ export function resolveSafeProductImageUrl(
     return getFallbackProductImage(product, index);
   }
 
-  // 7. Proxy hotlink-protected or HTTP external store CDNs (`alicdn.com`, `slatic.net`, `lazcdn.com`, `shajgoj`)
-  //    through wsrv.nl global image proxy so CORS/hotlink/SSL issues never block real product photos on live domain
+  // 7. Proxy HTTP-only or hotlink-protected store CDNs (`slatic.net`, `lazcdn.com`, `shajgoj`) through a SINGLE layer of wsrv.nl.
+  //    Keep HTTPS `alicdn.com/kf/`, `m.media-amazon.com`, `cdn.shopify.com`, etc. clean & direct (and if direct fails, `handleProductImageError` will try wsrv.nl).
   if (
     url.startsWith('http://') ||
-    lower.includes('alicdn.com') ||
     lower.includes('slatic.net') ||
     lower.includes('lazcdn.com') ||
     lower.includes('shajgoj.com')
@@ -823,7 +994,9 @@ export function resolveSafeProductImageUrl(
 
 /**
  * Universal `onError` handler for product `<img>` tags across the storefront and admin panel.
- * First attempts `wsrv.nl` CDN proxy if direct URL failed, then falls back to keyword-matched product image.
+ * 1. If a `wsrv.nl` proxied URL failed, unwraps and tries the direct HTTPS source URL first.
+ * 2. If a direct HTTPS URL failed, tries a single-layer `wsrv.nl` CDN proxy.
+ * 3. Only if both fail, falls back to a product image.
  */
 export function handleProductImageError(
   e: { currentTarget: HTMLImageElement },
@@ -835,7 +1008,26 @@ export function handleProductImageError(
 
   const currentSrc = imgEl.src || '';
 
-  // Step 1: If direct image failed and hasn't tried wsrv.nl proxy yet, try wsrv.nl proxy first
+  // Step 1: If a wsrv.nl URL failed, unwrap it and try loading the direct HTTPS image URL
+  if (!imgEl.dataset.directTried && currentSrc.includes('wsrv.nl')) {
+    imgEl.dataset.directTried = 'true';
+    try {
+      const parsed = new URL(currentSrc);
+      let inner = parsed.searchParams.get('url') || '';
+      while (inner.includes('wsrv.nl')) {
+        const p2 = new URL(inner);
+        inner = p2.searchParams.get('url') || inner;
+      }
+      if (inner.startsWith('http') && !isBlockedOrErrorProductImageUrl(inner)) {
+        imgEl.src = inner;
+        return;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // Step 2: If direct image failed and hasn't tried wsrv.nl proxy yet, try a single-layer wsrv.nl proxy
   if (
     !imgEl.dataset.proxyTried &&
     currentSrc.startsWith('http') &&
@@ -852,7 +1044,7 @@ export function handleProductImageError(
     return;
   }
 
-  // Step 2: Fallback to keyword-matched high-resolution product photo
+  // Step 3: Fallback to keyword-matched high-resolution product photo
   const fallback = getFallbackProductImage(product, index);
   imgEl.dataset.fallbackApplied = 'true';
   if (imgEl.src !== fallback) {

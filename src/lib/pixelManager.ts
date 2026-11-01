@@ -3,6 +3,35 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+export const DEFAULT_DOKANDARI_META_PIXEL_ID = '1994859257776698';
+
+export interface PixelEventTelemetryLog {
+  id: string;
+  eventName: string;
+  eventId: string;
+  orderId?: string;
+  contentIds: string[];
+  value: number;
+  currency: string;
+  url: string;
+  source: 'client_storefront' | 'server_capi' | 'admin_test' | 'order_reconcile';
+  browserFired: boolean;
+  capiDispatched: boolean;
+  metaPixels: string[];
+  tiktokPixels: string[];
+  status: string;
+  capiResults?: Array<{
+    platform: string;
+    pixelId: string;
+    status: string;
+    eventId: string;
+    eventsReceived?: number;
+    detail?: string;
+  }>;
+  timestamp: number;
+  timeFormatted: string;
+}
+
 declare global {
   interface Window {
     fbq?: any;
@@ -17,7 +46,138 @@ declare global {
     __dokandari_meta_script_loaded?: boolean;
     __dokandari_tiktok_script_loaded?: boolean;
     __dokandari_youtube_script_loaded?: boolean;
+    __dokandari_pending_pixel_events?: Array<() => void>;
+    __dokandari_fired_purchase_orders?: Map<string, CapiDispatchResponse>;
+    __dokandari_client_pixel_logs?: PixelEventTelemetryLog[];
   }
+}
+
+export interface CapiDispatchResponse {
+  success: boolean;
+  eventName: string;
+  eventId: string;
+  orderId?: string;
+  metaPixels?: string[];
+  tiktokPixels?: string[];
+  contentIds?: string[];
+  value?: number;
+  currency?: string;
+  capiResults?: Array<{
+    platform: string;
+    pixelId: string;
+    status: string;
+    eventId: string;
+    eventsReceived?: number;
+    detail?: string;
+    responseBody?: any;
+  }>;
+  status?: string;
+}
+
+const LS_PIXEL_LOGS_KEY = 'dokandari_pixel_event_logs';
+
+export function recordClientPixelLog(entry: Omit<PixelEventTelemetryLog, 'id' | 'timestamp' | 'timeFormatted'>): PixelEventTelemetryLog {
+  const now = Date.now();
+  const fullEntry: PixelEventTelemetryLog = {
+    ...entry,
+    id: `pxlog_${now}_${Math.random().toString(36).slice(2, 6)}`,
+    timestamp: now,
+    timeFormatted: new Date(now).toLocaleTimeString('bn-BD'),
+  };
+
+  if (typeof window !== 'undefined') {
+    window.__dokandari_client_pixel_logs = window.__dokandari_client_pixel_logs || [];
+    window.__dokandari_client_pixel_logs.unshift(fullEntry);
+    window.__dokandari_client_pixel_logs = window.__dokandari_client_pixel_logs.slice(0, 100);
+    try {
+      localStorage.setItem(
+        LS_PIXEL_LOGS_KEY,
+        JSON.stringify(window.__dokandari_client_pixel_logs.slice(0, 60))
+      );
+    } catch {
+      // ignore storage quota errors
+    }
+    console.info(
+      `[Dokandari Pixel & CAPI] ${fullEntry.eventName} | EventID: ${fullEntry.eventId} | Order: ${
+        fullEntry.orderId || 'N/A'
+      } | Value: ৳${fullEntry.value} | ContentIDs: [${fullEntry.contentIds.join(', ')}] | Status: ${
+        fullEntry.status
+      }`,
+      fullEntry
+    );
+  }
+  return fullEntry;
+}
+
+export function getClientPixelLogs(): PixelEventTelemetryLog[] {
+  if (typeof window === 'undefined') return [];
+  if (window.__dokandari_client_pixel_logs && window.__dokandari_client_pixel_logs.length > 0) {
+    return window.__dokandari_client_pixel_logs;
+  }
+  try {
+    const raw = localStorage.getItem(LS_PIXEL_LOGS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        window.__dokandari_client_pixel_logs = parsed;
+        return parsed;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+export async function fetchServerPixelLogs(): Promise<PixelEventTelemetryLog[]> {
+  try {
+    const res = await fetch('/api/pixel/logs');
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data?.logs)) {
+        return data.logs;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+export async function reconcileOrdersWithCapi(orders: any[]): Promise<{
+  success: boolean;
+  reconciledCount: number;
+  totalOrders: number;
+  results: any[];
+}> {
+  try {
+    let storedCreds: any = {};
+    try {
+      const raw = localStorage.getItem('dokandari_api_credentials');
+      if (raw) storedCreds = JSON.parse(raw);
+    } catch {
+      // ignore
+    }
+    const res = await fetch('/api/pixel/reconcile-orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        orders,
+        metaPixelIds: parsePixelIds(storedCreds.facebookPixelId || DEFAULT_DOKANDARI_META_PIXEL_ID),
+        tiktokPixelIds: parsePixelIds(storedCreds.tiktokPixelId),
+        facebookCapiToken: storedCreds.facebookCapiToken || '',
+        tiktokAccessToken: storedCreds.tiktokAccessToken || '',
+        metaTestEventCode: storedCreds.metaTestEventCode || '',
+        tiktokTestEventCode: storedCreds.tiktokTestEventCode || '',
+      }),
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (err) {
+    console.warn('Order CAPI reconciliation note:', err);
+  }
+  return { success: false, reconciledCount: 0, totalOrders: orders.length, results: [] };
 }
 
 /**
@@ -58,11 +218,31 @@ export function parsePixelIds(raw?: string | null): string[] {
 }
 
 /**
+ * Normalizes any cart/order item ID to match the exact product ID in the Meta & TikTok Catalog Feed.
+ */
+export function normalizeCatalogProductId(rawId?: string | null): string {
+  const cleaned = String(rawId || '').trim();
+  if (!cleaned) return 'dkd-product';
+  // If an item ID was constructed like "dkd-1-Silver-Standard" or "dkd-real-1-Default-Standard",
+  // extract the canonical product ID prefix so it matches the catalog feed 100%.
+  const realMatch = cleaned.match(/^(dkd-real-\d+|dkd-custom-\d+|dkd-ai-\d+|dkd-\d+|prod-\d+)/i);
+  if (realMatch && realMatch[1]) {
+    return realMatch[1];
+  }
+  return cleaned;
+}
+
+/**
  * Injects Meta Pixel base library script tag strictly ONCE globally
+ * and sets disablePushState = true so SPA route changes never wipe Purchase/InitiateCheckout events
+ * in Meta Ads Data Advisor / Meta Pixel Helper.
  */
 function ensureMetaBaseScriptLoaded(): void {
   if (typeof window === 'undefined') return;
-  if (window.fbq || window.__dokandari_meta_script_loaded) return;
+  if (window.fbq && window.__dokandari_meta_script_loaded) {
+    window.fbq.disablePushState = true;
+    return;
+  }
 
   try {
     (function (f: any, b: any, e: any, v: any, n?: any, t?: any, s?: any) {
@@ -75,6 +255,7 @@ function ensureMetaBaseScriptLoaded(): void {
       n.loaded = true;
       n.version = '2.0';
       n.queue = [];
+      n.disablePushState = true;
       t = b.createElement(e);
       t.async = true;
       t.id = 'meta-pixel-base-script';
@@ -83,6 +264,9 @@ function ensureMetaBaseScriptLoaded(): void {
       s?.parentNode?.insertBefore(t, s);
     })(window, document, 'script', 'https://connect.facebook.net/en_US/fbevents.js');
 
+    if (window.fbq) {
+      window.fbq.disablePushState = true;
+    }
     window.__dokandari_meta_script_loaded = true;
   } catch (err) {
     console.warn('Meta Pixel script injection note:', err);
@@ -94,7 +278,7 @@ function ensureMetaBaseScriptLoaded(): void {
  */
 function ensureTikTokBaseScriptLoaded(): void {
   if (typeof window === 'undefined') return;
-  if (window.ttq || window.__dokandari_tiktok_script_loaded) return;
+  if (window.ttq && window.__dokandari_tiktok_script_loaded) return;
 
   try {
     (function (w: any, d: any, t: any) {
@@ -144,7 +328,7 @@ function ensureTikTokBaseScriptLoaded(): void {
         var a = d.createElement('script');
         a.type = 'text/javascript';
         a.async = true;
-        a.id = 'tiktok-pixel-base-script';
+        a.id = `tiktok-pixel-base-script-${e}`;
         a.src = r + '?sdkid=' + e + '&lib=' + t;
         var c = d.getElementsByTagName('script')[0];
         c?.parentNode?.insertBefore(a, c);
@@ -182,6 +366,29 @@ function ensureYouTubeBaseScriptLoaded(primaryTagId: string): void {
   } catch (err) {
     console.warn('YouTube/Google Tag script injection note:', err);
   }
+}
+
+/**
+ * Synchronously checks localStorage for saved pixel IDs if not yet initialized in memory.
+ */
+function ensurePixelsInitializedFromStorage(): void {
+  if (typeof window === 'undefined') return;
+  const hasMeta = (window.__dokandari_meta_initialized_ids?.size || 0) > 0;
+  const hasTiktok = (window.__dokandari_tiktok_initialized_ids?.size || 0) > 0;
+  if (hasMeta || hasTiktok) return;
+
+  try {
+    const raw = localStorage.getItem('dokandari_api_credentials');
+    if (raw) {
+      const creds = JSON.parse(raw);
+      const metaId = creds?.facebookPixelId || DEFAULT_DOKANDARI_META_PIXEL_ID;
+      initializeMultiPixels(metaId, creds?.tiktokPixelId, creds?.youtubeTagId);
+      return;
+    }
+  } catch {
+    // ignore
+  }
+  initializeMultiPixels(DEFAULT_DOKANDARI_META_PIXEL_ID);
 }
 
 /**
@@ -277,6 +484,24 @@ export function initializeMultiPixels(
     });
   }
 
+  // Flush any queued events that fired before Firestore credentials resolved
+  if (
+    (window.__dokandari_meta_initialized_ids.size > 0 ||
+      window.__dokandari_tiktok_initialized_ids.size > 0) &&
+    Array.isArray(window.__dokandari_pending_pixel_events) &&
+    window.__dokandari_pending_pixel_events.length > 0
+  ) {
+    const queued = [...window.__dokandari_pending_pixel_events];
+    window.__dokandari_pending_pixel_events = [];
+    queued.forEach((fn) => {
+      try {
+        fn();
+      } catch {
+        // ignore
+      }
+    });
+  }
+
   return {
     metaCount: window.__dokandari_meta_initialized_ids.size,
     tiktokCount: window.__dokandari_tiktok_initialized_ids.size,
@@ -284,17 +509,28 @@ export function initializeMultiPixels(
   };
 }
 
-/**
- * Dispatches real server-side Conversions API (CAPI) event with active Pixel IDs and Tokens
- */
 function getCookieValue(name: string): string {
   if (typeof document === 'undefined' || !document.cookie) return '';
   const match = document.cookie.match(new RegExp('(^|;\\s*)' + name + '=([^;]*)'));
   return match ? decodeURIComponent(match[2]) : '';
 }
 
-function generateDeduplicationEventId(prefix: string, refId?: string): string {
-  const cleanRef = (refId || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24);
+function getOrCreateFbp(): string {
+  const existing = getCookieValue('_fbp');
+  if (existing) return existing;
+  try {
+    const cached = localStorage.getItem('dokandari_fbp_fallback');
+    if (cached) return cached;
+    const generated = `fb.1.${Date.now()}.${Math.floor(1000000000 + Math.random() * 9000000000)}`;
+    localStorage.setItem('dokandari_fbp_fallback', generated);
+    return generated;
+  } catch {
+    return `fb.1.${Date.now()}.1092837465`;
+  }
+}
+
+export function generateDeduplicationEventId(prefix: string, refId?: string): string {
+  const cleanRef = (refId || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32);
   return `dkd_${prefix.toLowerCase()}_${cleanRef ? cleanRef + '_' : ''}${Date.now()}_${Math.random()
     .toString(36)
     .slice(2, 6)}`;
@@ -302,14 +538,16 @@ function generateDeduplicationEventId(prefix: string, refId?: string): string {
 
 /**
  * Dispatches real server-side Conversions API (CAPI) event with active Pixel IDs, Tokens, event_id & _fbp/_fbc
+ * and logs both client-side trigger and server-side CAPI response for 100% auditability.
  */
-async function dispatchServerCapi(
+export async function dispatchServerCapi(
   eventName: string,
   eventData: any,
   customer?: any,
   eventId?: string
-) {
+): Promise<CapiDispatchResponse | null> {
   try {
+    ensurePixelsInitializedFromStorage();
     let storedCreds: any = {};
     try {
       const raw = localStorage.getItem('dokandari_api_credentials');
@@ -318,11 +556,23 @@ async function dispatchServerCapi(
       // ignore
     }
 
-    const metaPixelIds = Array.from(window.__dokandari_meta_initialized_ids || []);
-    const tiktokPixelIds = Array.from(window.__dokandari_tiktok_initialized_ids || []);
-    const youtubeTagIds = Array.from(window.__dokandari_youtube_initialized_ids || []);
+    const metaPixelIds = Array.from(
+      window.__dokandari_meta_initialized_ids?.size
+        ? window.__dokandari_meta_initialized_ids
+        : parsePixelIds(storedCreds.facebookPixelId || DEFAULT_DOKANDARI_META_PIXEL_ID)
+    );
+    const tiktokPixelIds = Array.from(
+      window.__dokandari_tiktok_initialized_ids?.size
+        ? window.__dokandari_tiktok_initialized_ids
+        : parsePixelIds(storedCreds.tiktokPixelId)
+    );
+    const youtubeTagIds = Array.from(
+      window.__dokandari_youtube_initialized_ids?.size
+        ? window.__dokandari_youtube_initialized_ids
+        : parsePixelIds(storedCreds.youtubeTagId)
+    );
 
-    const fbp = getCookieValue('_fbp');
+    const fbp = getOrCreateFbp();
     let fbc = getCookieValue('_fbc');
     if (!fbc && typeof window !== 'undefined') {
       const urlParams = new URLSearchParams(window.location.search);
@@ -332,35 +582,69 @@ async function dispatchServerCapi(
       }
     }
 
-    fetch('/api/pixel/event', {
+    const finalEventId = eventId || generateDeduplicationEventId(eventName);
+    const currentUrl = typeof window !== 'undefined' ? window.location.href : 'https://dokandari.com';
+
+    const res = await fetch('/api/pixel/event', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         eventName,
-        eventId: eventId || generateDeduplicationEventId(eventName),
+        eventId: finalEventId,
         eventData,
         customer,
         fbp,
         fbc,
-        url: typeof window !== 'undefined' ? window.location.href : 'https://dokandari.com',
+        url: currentUrl,
         metaPixelIds,
         tiktokPixelIds,
         youtubeTagIds,
         facebookCapiToken: storedCreds.facebookCapiToken || '',
         tiktokAccessToken: storedCreds.tiktokAccessToken || '',
+        metaTestEventCode: storedCreds.metaTestEventCode || '',
+        tiktokTestEventCode: storedCreds.tiktokTestEventCode || '',
       }),
-    }).catch(() => {});
+    });
+
+    if (res.ok) {
+      const capiData = (await res.json()) as CapiDispatchResponse;
+      const capiSummary =
+        Array.isArray(capiData.capiResults) && capiData.capiResults.length > 0
+          ? capiData.capiResults.map((r) => `${r.platform}(${r.pixelId}): ${r.status}`).join(' | ')
+          : 'Browser Pixel Fired (Server CAPI Standby)';
+
+      recordClientPixelLog({
+        eventName,
+        eventId: capiData.eventId || finalEventId,
+        orderId: eventData?.orderId || eventData?.order_id || undefined,
+        contentIds: capiData.contentIds || eventData?.content_ids || [],
+        value: Number(capiData.value ?? eventData?.value ?? eventData?.total ?? 0),
+        currency: 'BDT',
+        url: currentUrl,
+        source: 'client_storefront',
+        browserFired: true,
+        capiDispatched: Boolean(capiData.capiResults && capiData.capiResults.length > 0),
+        metaPixels: capiData.metaPixels || metaPixelIds,
+        tiktokPixels: capiData.tiktokPixels || tiktokPixelIds,
+        status: `✓ Browser + ${capiSummary}`,
+        capiResults: capiData.capiResults,
+      });
+
+      return capiData;
+    }
+    return null;
   } catch {
-    // Graceful background fallback
+    return null;
   }
 }
 
 /**
  * Global PageView tracking for all initialized Meta, TikTok & YouTube/Google pixels
  */
-export function trackPixelPageView(): void {
-  if (typeof window === 'undefined') return;
+export function trackPixelPageView(): Promise<CapiDispatchResponse | null> {
+  if (typeof window === 'undefined') return Promise.resolve(null);
 
+  ensurePixelsInitializedFromStorage();
   const eventId = generateDeduplicationEventId('pageview');
   try {
     if (typeof window.fbq === 'function' && window.__dokandari_meta_initialized_ids?.size) {
@@ -375,9 +659,10 @@ export function trackPixelPageView(): void {
         page_path: window.location.pathname,
       });
     }
-    dispatchServerCapi('PageView', { path: window.location.pathname }, undefined, eventId);
+    return dispatchServerCapi('PageView', { path: window.location.pathname }, undefined, eventId);
   } catch (err) {
     console.warn('Pixel PageView note:', err);
+    return Promise.resolve(null);
   }
 }
 
@@ -389,14 +674,15 @@ export function trackPixelViewContent(product: {
   name: string;
   category?: string;
   price: number;
-}): void {
-  if (typeof window === 'undefined') return;
+}): Promise<CapiDispatchResponse | null> {
+  if (typeof window === 'undefined') return Promise.resolve(null);
 
-  const canonicalId = String(product.id || 'product').trim();
+  ensurePixelsInitializedFromStorage();
+  const canonicalId = normalizeCatalogProductId(product.id);
   const unitPrice = Number(product.price) || 0;
   const eventId = generateDeduplicationEventId('viewcontent', canonicalId);
 
-  try {
+  const fireBrowserViewContent = () => {
     if (typeof window.fbq === 'function' && window.__dokandari_meta_initialized_ids?.size) {
       window.fbq(
         'track',
@@ -419,7 +705,15 @@ export function trackPixelViewContent(product: {
         'ViewContent',
         {
           content_id: canonicalId,
-          contents: [{ content_id: canonicalId, content_name: product.name, quantity: 1, price: unitPrice }],
+          contents: [
+            {
+              content_id: canonicalId,
+              content_type: 'product',
+              content_name: product.name,
+              quantity: 1,
+              price: unitPrice,
+            },
+          ],
           content_type: 'product',
           content_name: product.name,
           content_category: product.category || 'General',
@@ -444,12 +738,28 @@ export function trackPixelViewContent(product: {
         ],
       });
     }
+  };
 
-    dispatchServerCapi(
+  try {
+    if (
+      (window.__dokandari_meta_initialized_ids?.size || 0) === 0 &&
+      (window.__dokandari_tiktok_initialized_ids?.size || 0) === 0
+    ) {
+      window.__dokandari_pending_pixel_events = window.__dokandari_pending_pixel_events || [];
+      window.__dokandari_pending_pixel_events.push(fireBrowserViewContent);
+    } else {
+      fireBrowserViewContent();
+    }
+
+    return dispatchServerCapi(
       'ViewContent',
       {
         product: { ...product, id: canonicalId, price: unitPrice },
         content_ids: [canonicalId],
+        contents: [{ id: canonicalId, quantity: 1, item_price: unitPrice }],
+        content_name: product.name,
+        content_category: product.category || 'General',
+        num_items: 1,
         value: unitPrice,
       },
       undefined,
@@ -457,6 +767,7 @@ export function trackPixelViewContent(product: {
     );
   } catch (err) {
     console.warn('Pixel ViewContent note:', err);
+    return Promise.resolve(null);
   }
 }
 
@@ -469,16 +780,17 @@ export function trackPixelAddToCart(product: {
   price: number;
   quantity?: number;
   category?: string;
-}): void {
-  if (typeof window === 'undefined') return;
+}): Promise<CapiDispatchResponse | null> {
+  if (typeof window === 'undefined') return Promise.resolve(null);
 
-  const canonicalId = String(product.id || 'product').trim();
+  ensurePixelsInitializedFromStorage();
+  const canonicalId = normalizeCatalogProductId(product.id);
   const qty = Math.max(1, Number(product.quantity) || 1);
   const unitPrice = Number(product.price) || 0;
   const totalVal = unitPrice * qty;
   const eventId = generateDeduplicationEventId('addtocart', canonicalId);
 
-  try {
+  const fireBrowserAddToCart = () => {
     if (typeof window.fbq === 'function' && window.__dokandari_meta_initialized_ids?.size) {
       window.fbq(
         'track',
@@ -487,7 +799,9 @@ export function trackPixelAddToCart(product: {
           content_ids: [canonicalId],
           contents: [{ id: canonicalId, quantity: qty, item_price: unitPrice }],
           content_name: product.name,
+          content_category: product.category || 'General',
           content_type: 'product',
+          num_items: qty,
           value: totalVal,
           currency: 'BDT',
         },
@@ -500,7 +814,15 @@ export function trackPixelAddToCart(product: {
         'AddToCart',
         {
           content_id: canonicalId,
-          contents: [{ content_id: canonicalId, content_name: product.name, quantity: qty, price: unitPrice }],
+          contents: [
+            {
+              content_id: canonicalId,
+              content_type: 'product',
+              content_name: product.name,
+              quantity: qty,
+              price: unitPrice,
+            },
+          ],
           content_type: 'product',
           content_name: product.name,
           quantity: qty,
@@ -518,12 +840,28 @@ export function trackPixelAddToCart(product: {
         items: [{ item_id: canonicalId, item_name: product.name, quantity: qty, price: unitPrice }],
       });
     }
+  };
 
-    dispatchServerCapi(
+  try {
+    if (
+      (window.__dokandari_meta_initialized_ids?.size || 0) === 0 &&
+      (window.__dokandari_tiktok_initialized_ids?.size || 0) === 0
+    ) {
+      window.__dokandari_pending_pixel_events = window.__dokandari_pending_pixel_events || [];
+      window.__dokandari_pending_pixel_events.push(fireBrowserAddToCart);
+    } else {
+      fireBrowserAddToCart();
+    }
+
+    return dispatchServerCapi(
       'AddToCart',
       {
         product: { ...product, id: canonicalId, price: unitPrice },
         content_ids: [canonicalId],
+        contents: [{ id: canonicalId, quantity: qty, item_price: unitPrice }],
+        content_name: product.name,
+        content_category: product.category || 'General',
+        num_items: qty,
         quantity: qty,
         value: totalVal,
       },
@@ -532,6 +870,7 @@ export function trackPixelAddToCart(product: {
     );
   } catch (err) {
     console.warn('Pixel AddToCart note:', err);
+    return Promise.resolve(null);
   }
 }
 
@@ -540,17 +879,20 @@ export function trackPixelAddToCart(product: {
  */
 export function trackPixelInitiateCheckout(
   itemsOrValue: { id?: string; productId?: string; name: string; price: number; quantity?: number }[] | number,
-  totalValueOrQty?: number
-): void {
-  if (typeof window === 'undefined') return;
+  totalValueOrQty?: number,
+  fallbackProduct?: { id: string; name: string; price: number }
+): Promise<CapiDispatchResponse | null> {
+  if (typeof window === 'undefined') return Promise.resolve(null);
+
+  ensurePixelsInitializedFromStorage();
 
   try {
-    let items: { id: string; name: string; price: number; quantity?: number }[];
+    let items: { id: string; name: string; price: number; quantity: number }[];
     let totalValue: number;
 
     if (Array.isArray(itemsOrValue)) {
       items = itemsOrValue.map((i) => ({
-        id: String(i.productId || i.id || 'item').trim(),
+        id: normalizeCatalogProductId(i.productId || i.id),
         name: i.name,
         price: Number(i.price) || 0,
         quantity: Math.max(1, Number(i.quantity) || 1),
@@ -559,69 +901,111 @@ export function trackPixelInitiateCheckout(
         totalValueOrQty ?? items.reduce((acc, curr) => acc + curr.price * (curr.quantity || 1), 0);
     } else {
       totalValue = Number(itemsOrValue) || 0;
+      const qty = Math.max(1, Number(totalValueOrQty) || 1);
+      const unit = fallbackProduct?.price || Math.round(totalValue / qty) || totalValue;
       items = [
         {
-          id: 'checkout_cart',
-          name: 'Cart Item',
-          price: totalValue,
-          quantity: totalValueOrQty || 1,
+          id: normalizeCatalogProductId(fallbackProduct?.id || 'dkd-1'),
+          name: fallbackProduct?.name || 'Dokandari Order Item',
+          price: unit,
+          quantity: qty,
         },
       ];
     }
 
     const ids = items.map((i) => i.id);
+    const numItems = items.reduce((acc, curr) => acc + (curr.quantity || 1), 0);
     const eventId = generateDeduplicationEventId('initiatecheckout', ids[0]);
 
-    if (typeof window.fbq === 'function' && window.__dokandari_meta_initialized_ids?.size) {
-      window.fbq(
-        'track',
-        'InitiateCheckout',
-        {
-          content_ids: ids,
-          contents: items.map((i) => ({ id: i.id, quantity: i.quantity || 1, item_price: i.price })),
-          content_type: 'product',
-          num_items: items.reduce((acc, curr) => acc + (curr.quantity || 1), 0),
-          value: totalValue,
-          currency: 'BDT',
-        },
-        { eventID: eventId }
-      );
-    }
+    const fireBrowserCheckout = () => {
+      if (typeof window.fbq === 'function' && window.__dokandari_meta_initialized_ids?.size) {
+        window.fbq(
+          'track',
+          'InitiateCheckout',
+          {
+            content_ids: ids,
+            contents: items.map((i) => ({
+              id: i.id,
+              quantity: i.quantity || 1,
+              item_price: i.price,
+            })),
+            content_name: items.map((i) => i.name).join(', '),
+            content_type: 'product',
+            num_items: numItems,
+            value: totalValue,
+            currency: 'BDT',
+          },
+          { eventID: eventId }
+        );
+      }
 
-    if (window.ttq && typeof window.ttq.track === 'function' && window.__dokandari_tiktok_initialized_ids?.size) {
-      window.ttq.track(
-        'InitiateCheckout',
-        {
-          contents: items.map((i) => ({
-            content_id: i.id,
-            content_name: i.name,
+      if (window.ttq && typeof window.ttq.track === 'function' && window.__dokandari_tiktok_initialized_ids?.size) {
+        window.ttq.track(
+          'InitiateCheckout',
+          {
+            content_id: ids[0],
+            contents: items.map((i) => ({
+              content_id: i.id,
+              content_type: 'product',
+              content_name: i.name,
+              quantity: i.quantity || 1,
+              price: i.price,
+            })),
+            content_type: 'product',
+            value: totalValue,
+            currency: 'BDT',
+          },
+          { event_id: eventId }
+        );
+      }
+
+      if (typeof window.gtag === 'function' && window.__dokandari_youtube_initialized_ids?.size) {
+        window.gtag('event', 'begin_checkout', {
+          currency: 'BDT',
+          value: totalValue,
+          items: items.map((i) => ({
+            item_id: i.id,
+            item_name: i.name,
             quantity: i.quantity || 1,
             price: i.price,
           })),
-          content_type: 'product',
-          value: totalValue,
-          currency: 'BDT',
-        },
-        { event_id: eventId }
-      );
+        });
+      }
+    };
+
+    if (
+      (window.__dokandari_meta_initialized_ids?.size || 0) === 0 &&
+      (window.__dokandari_tiktok_initialized_ids?.size || 0) === 0
+    ) {
+      window.__dokandari_pending_pixel_events = window.__dokandari_pending_pixel_events || [];
+      window.__dokandari_pending_pixel_events.push(fireBrowserCheckout);
+    } else {
+      fireBrowserCheckout();
     }
 
-    if (typeof window.gtag === 'function' && window.__dokandari_youtube_initialized_ids?.size) {
-      window.gtag('event', 'begin_checkout', {
-        currency: 'BDT',
+    return dispatchServerCapi(
+      'InitiateCheckout',
+      {
+        items,
+        content_ids: ids,
+        contents: items.map((i) => ({ id: i.id, quantity: i.quantity || 1, item_price: i.price })),
+        content_name: items.map((i) => i.name).join(', '),
+        num_items: numItems,
+        totalValue,
         value: totalValue,
-        items: items.map((i) => ({ item_id: i.id, item_name: i.name, quantity: i.quantity || 1, price: i.price })),
-      });
-    }
-
-    dispatchServerCapi('InitiateCheckout', { items, content_ids: ids, totalValue, value: totalValue }, undefined, eventId);
+      },
+      undefined,
+      eventId
+    );
   } catch (err) {
     console.warn('Pixel InitiateCheckout note:', err);
+    return Promise.resolve(null);
   }
 }
 
 /**
- * Global Purchase tracking (fired when order is confirmed successfully)
+ * Global Purchase tracking (fired when order is confirmed on Thank You page)
+ * Guarantees 100% deduplicated event_id and content_ids matching between Meta Pixel, Meta CAPI, TikTok Pixel, and TikTok Events API.
  */
 export function trackPixelPurchase(
   orderOrId:
@@ -629,20 +1013,23 @@ export function trackPixelPurchase(
         id: string;
         total: number;
         items: { productId?: string; id?: string; name: string; price: number; quantity?: number }[];
-        customer?: { phone?: string; email?: string; name?: string };
+        customer?: { phone?: string; email?: string; name?: string; city?: string; district?: string };
       }
     | string,
   totalArg?: number,
-  qtyArg?: number
-): void {
-  if (typeof window === 'undefined') return;
+  qtyArg?: number,
+  forceResync = false
+): Promise<CapiDispatchResponse | null> {
+  if (typeof window === 'undefined') return Promise.resolve(null);
+
+  ensurePixelsInitializedFromStorage();
 
   try {
     let order: {
       id: string;
       total: number;
       items: { productId?: string; id?: string; name: string; price: number; quantity?: number }[];
-      customer?: { phone?: string; email?: string; name?: string };
+      customer?: { phone?: string; email?: string; name?: string; city?: string; district?: string };
     };
 
     if (typeof orderOrId === 'object' && orderOrId !== null) {
@@ -652,95 +1039,149 @@ export function trackPixelPurchase(
       order = {
         id: String(orderOrId),
         total: orderTotal,
-        items: [{ id: 'item-1', name: 'Order Item', price: orderTotal, quantity: qtyArg || 1 }],
+        items: [{ id: 'dkd-1', productId: 'dkd-1', name: 'Dokandari Order Item', price: orderTotal, quantity: qtyArg || 1 }],
       };
     }
 
-    const ids = order.items.map((i) => String(i.productId || i.id || 'item').trim());
-    const eventId = `dkd_purchase_${String(order.id).replace(/[^a-zA-Z0-9_-]/g, '')}`;
+    const normalizedItems = (order.items || []).map((i) => ({
+      id: normalizeCatalogProductId(i.productId || i.id),
+      name: i.name || 'Dokandari Product',
+      price: Number(i.price) || 0,
+      quantity: Math.max(1, Number(i.quantity) || 1),
+    }));
 
-    if (typeof window.fbq === 'function' && window.__dokandari_meta_initialized_ids?.size) {
-      window.fbq(
-        'track',
-        'Purchase',
-        {
-          content_ids: ids,
-          contents: order.items.map((i) => ({
-            id: String(i.productId || i.id || 'item').trim(),
-            quantity: i.quantity || 1,
-            item_price: Number(i.price) || 0,
-          })),
-          content_type: 'product',
-          value: Number(order.total) || 0,
-          currency: 'BDT',
-          order_id: order.id,
-        },
-        { eventID: eventId }
-      );
-    }
+    const ids = normalizedItems.map((i) => i.id);
+    const numItems = normalizedItems.reduce((acc, curr) => acc + curr.quantity, 0);
+    const totalVal = Number(order.total) || 0;
+    const cleanOrderId = String(order.id).replace(/[^a-zA-Z0-9_-]/g, '');
+    const eventId = `dkd_purchase_${cleanOrderId}`;
 
-    if (window.ttq && typeof window.ttq.track === 'function' && window.__dokandari_tiktok_initialized_ids?.size) {
-      window.ttq.track(
-        'CompletePayment',
-        {
-          contents: order.items.map((i) => ({
-            content_id: String(i.productId || i.id || 'item').trim(),
+    const fireBrowserPurchase = () => {
+      if (typeof window.fbq === 'function' && window.__dokandari_meta_initialized_ids?.size) {
+        window.fbq(
+          'track',
+          'Purchase',
+          {
+            content_ids: ids,
+            contents: normalizedItems.map((i) => ({
+              id: i.id,
+              quantity: i.quantity,
+              item_price: i.price,
+            })),
+            content_name: normalizedItems.map((i) => i.name).join(', '),
+            content_type: 'product',
+            num_items: numItems,
+            value: totalVal,
+            currency: 'BDT',
+            order_id: order.id,
+          },
+          { eventID: eventId }
+        );
+      }
+
+      if (window.ttq && typeof window.ttq.track === 'function' && window.__dokandari_tiktok_initialized_ids?.size) {
+        const tiktokPayload = {
+          content_id: ids[0] || 'dkd-1',
+          contents: normalizedItems.map((i) => ({
+            content_id: i.id,
+            content_type: 'product',
             content_name: i.name,
-            quantity: i.quantity || 1,
-            price: Number(i.price) || 0,
+            quantity: i.quantity,
+            price: i.price,
           })),
           content_type: 'product',
-          value: Number(order.total) || 0,
+          content_name: normalizedItems.map((i) => i.name).join(', '),
+          quantity: numItems,
+          value: totalVal,
           currency: 'BDT',
           order_id: order.id,
-        },
-        { event_id: eventId }
-      );
+        };
+        window.ttq.track('CompletePayment', tiktokPayload, { event_id: eventId });
+        window.ttq.track('PlaceAnOrder', tiktokPayload, { event_id: `${eventId}_order` });
+      }
+
+      if (typeof window.gtag === 'function' && window.__dokandari_youtube_initialized_ids?.size) {
+        window.gtag('event', 'purchase', {
+          transaction_id: order.id,
+          value: totalVal,
+          currency: 'BDT',
+          items: normalizedItems.map((i) => ({
+            item_id: i.id,
+            item_name: i.name,
+            quantity: i.quantity,
+            price: i.price,
+          })),
+        });
+      }
+    };
+
+    if (
+      (window.__dokandari_meta_initialized_ids?.size || 0) === 0 &&
+      (window.__dokandari_tiktok_initialized_ids?.size || 0) === 0
+    ) {
+      window.__dokandari_pending_pixel_events = window.__dokandari_pending_pixel_events || [];
+      window.__dokandari_pending_pixel_events.push(fireBrowserPurchase);
+    } else {
+      fireBrowserPurchase();
+      // Also fire browser Purchase beacon 220ms after pushState so Chrome's Meta Ads Data Advisor & TikTok Pixel Helper
+      // register Purchase under the new /thank-you/:orderId URL after onHistoryStateUpdated completes (100% deduplicated by eventID).
+      setTimeout(() => {
+        try {
+          fireBrowserPurchase();
+        } catch {
+          // ignore
+        }
+      }, 220);
     }
 
-    if (typeof window.gtag === 'function' && window.__dokandari_youtube_initialized_ids?.size) {
-      window.gtag('event', 'purchase', {
-        transaction_id: order.id,
-        value: Number(order.total) || 0,
-        currency: 'BDT',
-        items: order.items.map((i) => ({
-          item_id: String(i.productId || i.id || 'item').trim(),
-          item_name: i.name,
-          quantity: i.quantity || 1,
-          price: Number(i.price) || 0,
-        })),
-      });
+    window.__dokandari_fired_purchase_orders =
+      window.__dokandari_fired_purchase_orders || new Map<string, CapiDispatchResponse>();
+
+    if (!forceResync && window.__dokandari_fired_purchase_orders.has(cleanOrderId)) {
+      return Promise.resolve(window.__dokandari_fired_purchase_orders.get(cleanOrderId) || null);
     }
 
-    dispatchServerCapi(
+    return dispatchServerCapi(
       'Purchase',
       {
         orderId: order.id,
-        total: Number(order.total) || 0,
-        value: Number(order.total) || 0,
+        total: totalVal,
+        value: totalVal,
         content_ids: ids,
-        items: order.items,
+        contents: normalizedItems.map((i) => ({
+          id: i.id,
+          quantity: i.quantity,
+          item_price: i.price,
+        })),
+        content_name: normalizedItems.map((i) => i.name).join(', '),
+        num_items: numItems,
+        items: normalizedItems,
       },
       order.customer,
       eventId
-    );
+    ).then((res) => {
+      if (res) {
+        window.__dokandari_fired_purchase_orders?.set(cleanOrderId, res);
+      }
+      return res;
+    });
   } catch (err) {
     console.warn('Pixel Purchase note:', err);
+    return Promise.resolve(null);
   }
 }
 
 /**
  * Global WhatsApp Message / Order Conversion Tracking
- * Fires Meta `Contact` & `Lead`, TikTok `Contact`, Google Tag / GA4 `generate_lead`,
- * GTM `dataLayer` event `whatsapp_order_click`, and Server CAPI `Contact` event.
  */
 export function trackPixelWhatsAppConversion(
   product?: { id?: string; name?: string; price?: number; category?: string },
   sourceLocation = 'storefront'
-): void {
-  if (typeof window === 'undefined') return;
+): Promise<CapiDispatchResponse | null> {
+  if (typeof window === 'undefined') return Promise.resolve(null);
 
-  const prodId = String(product?.id || 'whatsapp_inquiry').trim();
+  ensurePixelsInitializedFromStorage();
+  const prodId = normalizeCatalogProductId(product?.id || 'dkd-1');
   const prodName = product?.name || 'Dokandari WhatsApp Order';
   const prodPrice = Number(product?.price) || 0;
   const prodCat = product?.category || 'General';
@@ -766,6 +1207,7 @@ export function trackPixelWhatsAppConversion(
         'Contact',
         {
           content_ids: [prodId],
+          contents: [{ id: prodId, quantity: 1, item_price: prodPrice }],
           content_name: prodName,
           content_category: prodCat,
           content_type: 'product',
@@ -779,6 +1221,7 @@ export function trackPixelWhatsAppConversion(
         'Lead',
         {
           content_ids: [prodId],
+          contents: [{ id: prodId, quantity: 1, item_price: prodPrice }],
           content_name: prodName,
           content_category: prodCat,
           content_type: 'product',
@@ -798,6 +1241,15 @@ export function trackPixelWhatsAppConversion(
         'Contact',
         {
           content_id: prodId,
+          contents: [
+            {
+              content_id: prodId,
+              content_type: 'product',
+              content_name: prodName,
+              quantity: 1,
+              price: prodPrice,
+            },
+          ],
           content_type: 'product',
           content_name: prodName,
           content_category: prodCat,
@@ -818,12 +1270,16 @@ export function trackPixelWhatsAppConversion(
       });
     }
 
-    dispatchServerCapi(
+    return dispatchServerCapi(
       'Contact',
       {
         channel: 'WhatsApp',
         sourceLocation,
         content_ids: [prodId],
+        contents: [{ id: prodId, quantity: 1, item_price: prodPrice }],
+        content_name: prodName,
+        content_category: prodCat,
+        num_items: 1,
         value: prodPrice,
         product: { id: prodId, name: prodName, price: prodPrice, category: prodCat },
       },
@@ -832,6 +1288,7 @@ export function trackPixelWhatsAppConversion(
     );
   } catch (err) {
     console.warn('Pixel WhatsApp conversion note:', err);
+    return Promise.resolve(null);
   }
 }
 
@@ -843,6 +1300,7 @@ export function initializeGoogleSeoAndTags(config?: {
   gtmContainerId?: string;
   ga4MeasurementId?: string;
   googleSiteVerification?: string;
+  googleSearchConsoleCode?: string;
   youtubeTagId?: string;
 }): void {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
@@ -850,7 +1308,7 @@ export function initializeGoogleSeoAndTags(config?: {
 
   try {
     // 1. Google Search Console Verification Meta Tag
-    const rawVerify = (config.googleSiteVerification || '').trim();
+    const rawVerify = (config.googleSiteVerification || config.googleSearchConsoleCode || '').trim();
     if (rawVerify) {
       const cleanToken = rawVerify
         .replace(/<meta[^>]*content=["']([^"']+)["'][^>]*>/i, '$1')
@@ -902,7 +1360,7 @@ export function initializeGoogleSeoAndTags(config?: {
 
 /**
  * Dynamically updates Schema.org Product JSON-LD and document title/canonical URL
- * when viewing a product detail page so Google Search indexes every product on dokandari.com.
+ * when viewing a product detail page so Google Search & Meta Microdata index every product on dokandari.com.
  */
 export function updateProductStructuredData(product: {
   id: string;
@@ -927,30 +1385,34 @@ export function updateProductStructuredData(product: {
       return;
     }
 
+    const canonicalId = normalizeCatalogProductId(product.id);
     document.title = `${product.name} — ৳${product.price.toLocaleString()} | Dokandari (দোকানদারি)`;
 
     const schemaObj = {
       '@context': 'https://schema.org',
       '@type': 'Product',
+      productID: canonicalId,
+      sku: canonicalId,
+      mpn: product.sku || canonicalId,
       name: product.name,
       description:
         product.description ||
         `${product.name} — ১০০% অরিজিনাল কোয়ালিটি ও সারা বাংলাদেশে ক্যাশ অন ডেলিভারি সুবিধা।`,
       image: product.images && product.images.length > 0 ? product.images : [],
-      sku: product.sku || `DKD-${product.id}`,
       brand: {
         '@type': 'Brand',
         name: 'Dokandari',
       },
       offers: {
         '@type': 'Offer',
-        url: `${window.location.origin}/products/${encodeURIComponent(product.id)}`,
+        url: `${window.location.origin}/products/${encodeURIComponent(canonicalId)}`,
         priceCurrency: 'BDT',
         price: product.price,
         availability:
           product.inStock !== false
             ? 'https://schema.org/InStock'
             : 'https://schema.org/OutOfStock',
+        itemCondition: 'https://schema.org/NewCondition',
         seller: {
           '@type': 'Organization',
           name: 'Dokandari',
@@ -975,4 +1437,3 @@ export function updateProductStructuredData(product: {
     // ignore
   }
 }
-

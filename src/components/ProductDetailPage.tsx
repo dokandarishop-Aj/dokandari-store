@@ -56,6 +56,7 @@ import {
 } from '../lib/gemini';
 import { OfficialWhatsAppIcon, OfficialYouTubeIcon } from './OfficialIcons';
 import {
+  trackPixelPageView,
   trackPixelViewContent,
   trackPixelAddToCart,
   trackPixelInitiateCheckout,
@@ -67,7 +68,8 @@ import { captureAbandonedLeadDebounced, markLeadConverted } from '../lib/leadRec
 
 interface ProductDetailPageProps {
   product: Product;
-  initialStep?: 'product' | 'checkout';
+  initialStep?: 'product' | 'checkout' | 'thank_you';
+  initialCompletedOrder?: Order | null;
   onBack: () => void;
   onOpenEdit: (product: Product) => void;
   onOrderSuccess: (orderId: string) => void;
@@ -91,6 +93,7 @@ interface ReviewItem {
 export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   product,
   initialStep = 'product',
+  initialCompletedOrder = null,
   onBack,
   onOpenEdit,
   onOrderSuccess,
@@ -110,7 +113,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   // 'checkout'  -> Separate Instant Checkout Page (Product Summary -> Add to Cart & WhatsApp buttons -> Order Form)
   // 'thank_you' -> Dedicated Thank You Page (Order ID, invoice summary, live tracking & WhatsApp support)
   const [viewStep, setViewStep] = useState<'product' | 'checkout' | 'thank_you'>(initialStep);
-  const [completedOrder, setCompletedOrder] = useState<Order | null>(null);
+  const [completedOrder, setCompletedOrder] = useState<Order | null>(initialCompletedOrder);
   const [addedToCartToast, setAddedToCartToast] = useState(false);
 
   const [selectedImage, setSelectedImage] = useState(0);
@@ -121,12 +124,19 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   const [quantity, setQuantity] = useState(1);
   const [linkCopied, setLinkCopied] = useState(false);
 
-  // Sync initialStep & reset video facade states when product changes
+  // Sync initialStep & reset video facade states when product changes (preserve thank_you if active on /thank-you/ URL)
   useEffect(() => {
-    setViewStep(initialStep);
+    if (typeof window !== 'undefined' && window.location.pathname.startsWith('/thank-you/')) {
+      setViewStep('thank_you');
+    } else {
+      setViewStep(initialStep);
+    }
+    if (initialCompletedOrder) {
+      setCompletedOrder(initialCompletedOrder);
+    }
     setSelectedVideoInHero(null);
     setActivatedVideos({});
-  }, [initialStep, product.id]);
+  }, [initialStep, initialCompletedOrder, product.id]);
 
   // In-place 1-click URL refresh, multi-photo upload & AI Photo Auto-Fill state
   const [showRefreshBar, setShowRefreshBar] = useState(false);
@@ -170,8 +180,27 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   const [customerPhone, setCustomerPhone] = useState(userProfile?.phone || '');
   const [customerAddress, setCustomerAddress] = useState(userProfile?.address || '');
   const [deliveryArea, setDeliveryArea] = useState<'dhaka' | 'outside_dhaka'>('dhaka');
+  const [customerScreenshot, setCustomerScreenshot] = useState<string>('');
+  const [isUploadingScreenshot, setIsUploadingScreenshot] = useState(false);
   const [isOrdering, setIsOrdering] = useState(false);
   const [orderError, setOrderError] = useState('');
+
+  const handleCustomerScreenshotUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploadingScreenshot(true);
+    try {
+      const compressed = await compressImageFileToDataUrl(file, 640, 0.72);
+      if (compressed) {
+        setCustomerScreenshot(compressed);
+      }
+    } catch (err) {
+      console.warn('Customer screenshot upload note:', err);
+    } finally {
+      setIsUploadingScreenshot(false);
+      e.target.value = '';
+    }
+  };
 
   // Reviews state
   const [reviews, setReviews] = useState<ReviewItem[]>([
@@ -215,17 +244,65 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
 
   // Track ViewContent for Meta, TikTok, GA4, GTM & inject Schema.org Product JSON-LD
   useEffect(() => {
-    trackPixelViewContent({
-      id: product.id,
-      name: product.name,
-      category: product.category,
-      price: product.price,
-    });
+    if (viewStep === 'product') {
+      trackPixelViewContent({
+        id: product.id,
+        name: product.name,
+        category: product.category,
+        price: product.price,
+      });
+    } else if (viewStep === 'checkout') {
+      trackPixelInitiateCheckout(
+        [
+          {
+            id: product.id,
+            productId: product.id,
+            name: product.name,
+            price: product.price,
+            quantity,
+            category: product.category,
+          },
+        ],
+        product.price * quantity
+      );
+    } else if (viewStep === 'thank_you' && completedOrder) {
+      trackPixelPurchase({
+        id: completedOrder.id,
+        total: completedOrder.total,
+        items: completedOrder.items,
+        customer: {
+          phone: completedOrder.customer?.phone,
+          name: completedOrder.customer?.name,
+          email: completedOrder.customer?.email || userProfile?.email,
+        },
+      }).then((capiRes) => {
+        if (capiRes && !completedOrder.pixelTracking?.capiDispatched) {
+          const updatedWithTracking: Order = {
+            ...completedOrder,
+            pixelTracking: {
+              eventId: capiRes.eventId || `dkd_purchase_${completedOrder.id}`,
+              browserFired: true,
+              capiDispatched: Boolean(capiRes.capiResults && capiRes.capiResults.length > 0),
+              capiStatus:
+                Array.isArray(capiRes.capiResults) && capiRes.capiResults.length > 0
+                  ? capiRes.capiResults.map((r) => `${r.platform}: ${r.status}`).join(' | ')
+                  : 'Browser Pixel Fired',
+              metaPixels: capiRes.metaPixels,
+              tiktokPixels: capiRes.tiktokPixels,
+              contentIds: capiRes.contentIds,
+              capiResults: capiRes.capiResults,
+              updatedAt: Date.now(),
+            },
+          };
+          saveOrderPersisted(updatedWithTracking).catch(() => null);
+        }
+      });
+    }
     updateProductStructuredData(product);
     return () => {
       updateProductStructuredData(null);
     };
-  }, [product]);
+  }, [product, viewStep, completedOrder]);
 
   const discountPercent = product.originalPrice
     ? Math.round(((product.originalPrice - product.price) / product.originalPrice) * 100)
@@ -317,8 +394,6 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
 
   // Transition to Separate Instant Checkout Page
   const handleGoToInstantCheckout = () => {
-    trackPixelInitiateCheckout(subtotalPrice, quantity);
-    setViewStep('checkout');
     try {
       window.history.pushState(
         null,
@@ -328,6 +403,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     } catch {
       // ignore
     }
+    setViewStep('checkout');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -362,10 +438,11 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
           address: customerAddress.trim(),
           city: deliveryArea === 'dhaka' ? 'Dhaka' : 'Outside Dhaka',
           district: deliveryArea === 'dhaka' ? 'ঢাকা' : 'সারা বাংলাদেশ',
+          email: userProfile?.email || undefined,
         },
         items: [
           {
-            id: `${product.id}-${selectedColor}-${selectedSize}`,
+            id: product.id,
             productId: product.id,
             name: product.name,
             price: product.price,
@@ -383,7 +460,17 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
         paymentMethod: 'cod',
         status: 'pending',
         userId: firebaseUser?.uid || null,
+        customerScreenshot: customerScreenshot || undefined,
         createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+
+      const eventId = `dkd_purchase_${orderId}`;
+      newOrder.pixelTracking = {
+        eventId,
+        browserFired: true,
+        capiDispatched: false,
+        capiStatus: 'Browser Pixel Fired (Dispatching Server CAPI...)',
         updatedAt: Date.now(),
       };
 
@@ -392,12 +479,46 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
       // Mark the captured lead as converted
       markLeadConverted(customerPhone, orderId);
 
-      // Track Purchase event across all active pixels
+      // CRITICAL: Change URL to /thank-you/:orderId FIRST before firing PageView + Purchase
+      // so Meta Ads Data Advisor & TikTok Pixel Helper associate Purchase with the /thank-you/ URL!
+      try {
+        window.history.pushState(null, '', `/thank-you/${encodeURIComponent(orderId)}?brand=dokandari`);
+      } catch {
+        // ignore
+      }
+
+      setCompletedOrder(newOrder);
+      setViewStep('thank_you');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+
+      trackPixelPageView();
       trackPixelPurchase({
         id: orderId,
         total: totalPrice,
         items: newOrder.items,
         customer: { phone: customerPhone, name: customerName, email: userProfile?.email },
+      }).then((capiRes) => {
+        if (capiRes) {
+          const updatedWithTracking: Order = {
+            ...newOrder,
+            pixelTracking: {
+              eventId: capiRes.eventId || eventId,
+              browserFired: true,
+              capiDispatched: Boolean(capiRes.capiResults && capiRes.capiResults.length > 0),
+              capiStatus:
+                Array.isArray(capiRes.capiResults) && capiRes.capiResults.length > 0
+                  ? capiRes.capiResults.map((r) => `${r.platform}: ${r.status}`).join(' | ')
+                  : 'Browser Pixel Active',
+              metaPixels: capiRes.metaPixels,
+              tiktokPixels: capiRes.tiktokPixels,
+              contentIds: capiRes.contentIds,
+              capiResults: capiRes.capiResults,
+              updatedAt: Date.now(),
+            },
+          };
+          setCompletedOrder(updatedWithTracking);
+          saveOrderPersisted(updatedWithTracking).catch(() => null);
+        }
       });
 
       try {
@@ -405,15 +526,6 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
       } catch {
         // ignore
       }
-
-      setCompletedOrder(newOrder);
-      setViewStep('thank_you');
-      try {
-        window.history.pushState(null, '', `/thank-you/${encodeURIComponent(orderId)}?brand=dokandari`);
-      } catch {
-        // ignore
-      }
-      window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
       console.error('Direct order failed', err);
       setOrderError('অর্ডার প্রসেস করতে সমস্যা হয়েছে। অনুগ্রহ করে আবার চেষ্টা করুন।');
@@ -993,44 +1105,44 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               <GuaranteeBadgesRow />
             </div>
 
-            {/* Right Column (7 cols on Desktop): Full-Width Instant Checkout Order Form */}
-            <div className="lg:col-span-7 bg-white rounded-2xl border-2 border-rose-300 p-4 sm:p-7 shadow-md space-y-4">
-              <div className="bg-[#FFF0F3] p-3.5 sm:p-4 rounded-xl border border-rose-200">
+            {/* Right Column (7 cols on Desktop): Compact & Attractive Separate Order Form */}
+            <div className="lg:col-span-7 bg-white rounded-2xl border-2 border-rose-300 p-4 sm:p-6 shadow-md space-y-3.5">
+              <div className="bg-[#FFF0F3] p-3 rounded-xl border border-rose-200 flex items-center justify-between gap-2 flex-wrap">
                 <h3 className="text-sm sm:text-base font-extrabold text-rose-950 flex items-center gap-2">
-                  <Sparkles className="w-5 h-5 text-[#E11D48] shrink-0" />
-                  <span>অর্ডার কনফার্ম করতে নিচের ফর্মটি পূরণ করুন (ক্যাশ অন ডেলিভারি)</span>
+                  <ShoppingBag className="w-4 h-4 text-[#E11D48] shrink-0" />
+                  <span>অর্ডার কনফার্ম ফর্ম</span>
                 </h3>
-                <p className="text-xs text-rose-800 mt-1">
-                  ১ টাকাও অগ্রিম দিতে হবে না। পার্সেল হাতে পেয়ে ডেলিভারি ম্যানের সামনে দেখে পেমেন্ট করুন।
-                </p>
+                <span className="text-[11px] font-bold text-emerald-700 bg-white px-2.5 py-1 rounded-full border border-emerald-200">
+                  ✓ পণ্য হাতে পেয়ে মূল্য পরিশোধ
+                </span>
               </div>
 
               {orderError && (
-                <div className="p-3 bg-rose-100 border border-rose-300 text-xs sm:text-sm font-bold text-rose-900 rounded-xl">
+                <div className="p-2.5 bg-rose-100 border border-rose-300 text-xs font-bold text-rose-900 rounded-xl">
                   ⚠️ {orderError}
                 </div>
               )}
 
-              <form onSubmit={handleDirectOrder} className="space-y-4 text-xs sm:text-sm">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              <form onSubmit={handleDirectOrder} className="space-y-3 text-xs sm:text-sm">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-stone-800 font-extrabold mb-1.5 flex items-center gap-1.5">
-                      <User className="w-4 h-4 text-[#E11D48]" />
-                      <span>আপনার সম্পূর্ণ নাম *</span>
+                    <label className="block text-stone-800 font-extrabold mb-1 flex items-center gap-1.5">
+                      <User className="w-3.5 h-3.5 text-[#E11D48]" />
+                      <span>আপনার নাম *</span>
                     </label>
                     <input
                       type="text"
                       required
                       value={customerName}
                       onChange={(e) => setCustomerName(e.target.value)}
-                      placeholder="যেমন: ফাতেমা আক্তার / মো: রাকিব হোসেন"
-                      className="w-full px-4 py-3 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:border-[#E11D48] focus:bg-white font-medium"
+                      placeholder="আপনার সম্পূর্ণ নাম লিখুন"
+                      className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:border-[#E11D48] focus:bg-white font-medium"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-stone-800 font-extrabold mb-1.5 flex items-center gap-1.5">
-                      <Phone className="w-4 h-4 text-[#E11D48]" />
+                    <label className="block text-stone-800 font-extrabold mb-1 flex items-center gap-1.5">
+                      <Phone className="w-3.5 h-3.5 text-[#E11D48]" />
                       <span>মোবাইল নম্বর (১১ ডিজিট) *</span>
                     </label>
                     <input
@@ -1039,113 +1151,135 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                       value={customerPhone}
                       onChange={(e) => setCustomerPhone(e.target.value)}
                       placeholder="01XXXXXXXXX"
-                      className="w-full px-4 py-3 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:border-[#E11D48] focus:bg-white font-mono font-bold"
+                      className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:border-[#E11D48] focus:bg-white font-mono font-bold"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-stone-800 font-extrabold mb-1.5 flex items-center gap-1.5">
-                    <MapPin className="w-4 h-4 text-[#E11D48]" />
+                  <label className="block text-stone-800 font-extrabold mb-1 flex items-center gap-1.5">
+                    <MapPin className="w-3.5 h-3.5 text-[#E11D48]" />
                     <span>সম্পূর্ণ ডেলিভারি ঠিকানা *</span>
                   </label>
-                  <textarea
+                  <input
+                    type="text"
                     required
-                    rows={2}
                     value={customerAddress}
                     onChange={(e) => setCustomerAddress(e.target.value)}
-                    placeholder="বাসা নম্বর, রোড নম্বর, বাজার/এলাকা, থানা ও জেলা..."
-                    className="w-full px-4 py-3 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:border-[#E11D48] focus:bg-white resize-none"
+                    placeholder="বাসা/রোড, বাজার/এলাকা, থানা ও জেলা লিখুন..."
+                    className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:border-[#E11D48] focus:bg-white"
                   />
                 </div>
 
-                {/* Delivery Location Selection (Always adds +70 Inside Dhaka or +120 Outside Dhaka) */}
-                <div>
-                  <label className="block text-stone-800 font-extrabold mb-1.5">
-                    ডেলিভারি এরিয়া নির্বাচন করুন (পণ্যের দামের সাথে যুক্ত হবে):
-                  </label>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setDeliveryArea('dhaka')}
-                      className={`p-3.5 rounded-xl border-2 text-left transition-all cursor-pointer flex items-center justify-between ${
-                        deliveryArea === 'dhaka'
-                          ? 'border-[#E11D48] bg-[#FFF0F3] text-[#E11D48] font-extrabold shadow-xs'
-                          : 'border-stone-200 bg-stone-50 text-stone-700 font-semibold hover:border-rose-200'
-                      }`}
-                    >
-                      <div>
-                        <div className="text-xs sm:text-sm font-extrabold">
-                          {deliveryArea === 'dhaka' ? '✓ ' : ''}ঢাকার ভেতরে (Inside Dhaka)
-                        </div>
-                        <div className="text-[11px] text-stone-600 mt-0.5">
-                          হোম ডেলিভারি চার্জ: + ৳৭০
-                        </div>
-                      </div>
-                      <span className="text-sm sm:text-base font-mono font-black bg-white px-2.5 py-1 rounded-lg border border-rose-200 text-[#E11D48]">
-                        ৳৭০
-                      </span>
-                    </button>
+                {/* Delivery Area Selector */}
+                <div className="grid grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setDeliveryArea('dhaka')}
+                    className={`p-2.5 rounded-xl border-2 text-left transition-all cursor-pointer flex items-center justify-between ${
+                      deliveryArea === 'dhaka'
+                        ? 'border-[#E11D48] bg-[#FFF0F3] text-[#E11D48] font-extrabold'
+                        : 'border-stone-200 bg-stone-50 text-stone-700 font-semibold hover:border-rose-200'
+                    }`}
+                  >
+                    <span className="text-xs font-extrabold">
+                      {deliveryArea === 'dhaka' ? '✓ ' : ''}ঢাকার ভেতরে
+                    </span>
+                    <span className="text-xs font-mono font-black bg-white px-2 py-0.5 rounded border border-rose-200 text-[#E11D48]">
+                      ৳৭০
+                    </span>
+                  </button>
 
-                    <button
-                      type="button"
-                      onClick={() => setDeliveryArea('outside_dhaka')}
-                      className={`p-3.5 rounded-xl border-2 text-left transition-all cursor-pointer flex items-center justify-between ${
-                        deliveryArea === 'outside_dhaka'
-                          ? 'border-[#E11D48] bg-[#FFF0F3] text-[#E11D48] font-extrabold shadow-xs'
-                          : 'border-stone-200 bg-stone-50 text-stone-700 font-semibold hover:border-rose-200'
-                      }`}
-                    >
-                      <div>
-                        <div className="text-xs sm:text-sm font-extrabold">
-                          {deliveryArea === 'outside_dhaka' ? '✓ ' : ''}ঢাকার বাইরে (Outside Dhaka)
-                        </div>
-                        <div className="text-[11px] text-stone-600 mt-0.5">
-                          সারা বাংলাদেশ কুরিয়ার: + ৳১২০
-                        </div>
+                  <button
+                    type="button"
+                    onClick={() => setDeliveryArea('outside_dhaka')}
+                    className={`p-2.5 rounded-xl border-2 text-left transition-all cursor-pointer flex items-center justify-between ${
+                      deliveryArea === 'outside_dhaka'
+                        ? 'border-[#E11D48] bg-[#FFF0F3] text-[#E11D48] font-extrabold'
+                        : 'border-stone-200 bg-stone-50 text-stone-700 font-semibold hover:border-rose-200'
+                    }`}
+                  >
+                    <span className="text-xs font-extrabold">
+                      {deliveryArea === 'outside_dhaka' ? '✓ ' : ''}ঢাকার বাইরে
+                    </span>
+                    <span className="text-xs font-mono font-black bg-white px-2 py-0.5 rounded border border-rose-200 text-[#E11D48]">
+                      ৳১২০
+                    </span>
+                  </button>
+                </div>
+
+                {/* Customer Screenshot Upload Box (Sent Directly with Order to Admin Panel) */}
+                <div className="p-3 rounded-xl bg-stone-50 border border-dashed border-rose-300 flex items-center justify-between gap-3 flex-wrap">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    {customerScreenshot ? (
+                      <img
+                        src={customerScreenshot}
+                        alt="কাস্টমার স্ক্রিনশট"
+                        className="w-12 h-12 rounded-lg object-cover border border-rose-300 shrink-0"
+                      />
+                    ) : (
+                      <div className="w-10 h-10 rounded-lg bg-rose-100 text-[#E11D48] flex items-center justify-center shrink-0">
+                        <Upload className="w-4 h-4" />
                       </div>
-                      <span className="text-sm sm:text-base font-mono font-black bg-white px-2.5 py-1 rounded-lg border border-rose-200 text-[#E11D48]">
-                        ৳১২০
-                      </span>
-                    </button>
+                    )}
+                    <div className="min-w-0">
+                      <p className="text-xs font-extrabold text-stone-900">
+                        {customerScreenshot
+                          ? '✅ স্ক্রিনশট যুক্ত হয়েছে (অ্যাডমিন প্যানেলে অর্ডারের সাথে যাবে)'
+                          : '📸 প্রোডাক্ট বা অর্ডারের স্ক্রিনশট দিন (ঐচ্ছিক)'}
+                      </p>
+                      <p className="text-[10.5px] text-stone-500">
+                        স্ক্রিনশট দিলে তা সরাসরি অ্যাডমিন প্যানেলে আপনার অর্ডারের সাথে যুক্ত হবে
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {customerScreenshot && (
+                      <button
+                        type="button"
+                        onClick={() => setCustomerScreenshot('')}
+                        className="px-2.5 py-1.5 text-[11px] font-bold text-rose-700 bg-rose-100 rounded-lg cursor-pointer"
+                      >
+                        মুছুন
+                      </button>
+                    )}
+                    <label className="px-3 py-1.5 bg-white hover:bg-rose-50 text-[#E11D48] border border-rose-300 rounded-lg text-xs font-extrabold cursor-pointer transition-colors shrink-0">
+                      {isUploadingScreenshot
+                        ? 'আপলোড হচ্ছে...'
+                        : customerScreenshot
+                        ? 'পরিবর্তন করুন'
+                        : '+ স্ক্রিনশট দিন'}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleCustomerScreenshotUpload}
+                        className="hidden"
+                      />
+                    </label>
                   </div>
                 </div>
 
-                {/* Bill Summary */}
-                <div className="p-4 bg-[#FFF0F3]/70 rounded-xl space-y-2 text-xs sm:text-sm border border-rose-200">
-                  <div className="flex justify-between text-stone-700 font-semibold">
-                    <span>পণ্যের দাম ({quantity} টি):</span>
-                    <span className="font-mono font-bold text-stone-900">
-                      ৳{subtotalPrice.toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-stone-700 font-semibold">
-                    <span>
-                      ডেলিভারি চার্জ ({deliveryArea === 'dhaka' ? 'ঢাকার ভেতরে ৳৭০' : 'ঢাকার বাইরে ৳১২০'}):
-                    </span>
-                    <span className="font-mono font-extrabold text-[#E11D48]">
-                      + ৳{finalShipping}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-stone-900 font-extrabold text-base sm:text-lg pt-2 border-t border-rose-200">
-                    <span>সর্বমোট প্রদেয় বিল (ক্যাশ অন ডেলিভারি):</span>
-                    <span className="font-mono text-[#E11D48]">
-                      ৳{totalPrice.toLocaleString()}
-                    </span>
-                  </div>
+                {/* Compact Total Summary */}
+                <div className="px-3.5 py-2.5 bg-[#FFF0F3]/80 rounded-xl flex items-center justify-between border border-rose-200">
+                  <span className="text-xs font-bold text-stone-800">
+                    মোট বিল ({quantity}টি পণ্য + ডেলিভারি ৳{finalShipping}):
+                  </span>
+                  <span className="text-base sm:text-lg font-mono font-black text-[#E11D48]">
+                    ৳{totalPrice.toLocaleString()}
+                  </span>
                 </div>
 
-                {/* Animated Confirm Order Submit Button */}
+                {/* Confirm Order Submit Button */}
                 <button
                   type="submit"
                   disabled={isOrdering}
-                  className="w-full py-4 px-5 bg-gradient-to-r from-[#E11D48] via-[#F43F5E] to-[#BE123C] hover:from-[#BE123C] hover:to-[#9F1239] active:scale-[0.99] disabled:bg-stone-400 text-white rounded-xl text-sm sm:text-base font-extrabold shadow-md ring-2 ring-rose-300/70 transition-all cursor-pointer flex items-center justify-center gap-2"
+                  className="w-full py-3.5 px-5 bg-gradient-to-r from-[#E11D48] via-[#F43F5E] to-[#BE123C] hover:from-[#BE123C] hover:to-[#9F1239] active:scale-[0.99] disabled:bg-stone-400 text-white rounded-xl text-sm sm:text-base font-extrabold shadow-md ring-2 ring-rose-300/70 transition-all cursor-pointer flex items-center justify-center gap-2"
                 >
-                  <ShoppingBag className="w-5 h-5 animate-bounce" />
+                  <ShoppingBag className="w-5 h-5" />
                   <span>
                     {isOrdering
                       ? 'অর্ডার প্রসেস হচ্ছে...'
-                      : `অর্ডার কনফার্ম করুন — ৳${totalPrice.toLocaleString()} (ডেলিভারি চার্জসহ)`}
+                      : `অর্ডার কনফার্ম করুন — ৳${totalPrice.toLocaleString()}`}
                   </span>
                 </button>
               </form>
@@ -1912,181 +2046,69 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                 </div>
               </div>
 
-              {/* FULL-WIDTH INLINE INSTANT CHECKOUT & ORDER FORM ON PRODUCT PAGE (Desktop & Mobile) */}
-              <div className="pt-4 border-t-2 border-rose-100 space-y-4">
-                <div className="bg-[#FFF0F3] p-3.5 rounded-xl border border-rose-200">
-                  <h3 className="text-xs sm:text-sm font-extrabold text-rose-950 flex items-center gap-1.5">
-                    <Sparkles className="w-4 h-4 text-[#E11D48] shrink-0" />
-                    <span>ইনস্ট্যান্ট চেকআউট ও ক্যাশ অন ডেলিভারি অর্ডার ফর্ম</span>
-                  </h3>
-                  <p className="text-[11px] text-rose-800 mt-0.5">
-                    নিচের ফর্মে আপনার নাম, মোবাইল নম্বর ও ঠিকানা লিখে সরাসরি অর্ডার কনফার্ম করুন।
-                  </p>
-                </div>
-
-                {orderError && (
-                  <div className="p-3 bg-rose-100 border border-rose-300 text-xs font-bold text-rose-900 rounded-xl">
-                    ⚠️ {orderError}
-                  </div>
-                )}
-
-                <form onSubmit={handleDirectOrder} className="space-y-3.5 text-xs sm:text-sm">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-stone-800 font-extrabold mb-1 flex items-center gap-1">
-                        <User className="w-3.5 h-3.5 text-[#E11D48]" />
-                        <span>আপনার সম্পূর্ণ নাম *</span>
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={customerName}
-                        onChange={(e) => setCustomerName(e.target.value)}
-                        placeholder="যেমন: ফাতেমা আক্তার / মো: রাকিব হোসেন"
-                        className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:border-[#E11D48] focus:bg-white font-medium"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-stone-800 font-extrabold mb-1 flex items-center gap-1">
-                        <Phone className="w-3.5 h-3.5 text-[#E11D48]" />
-                        <span>মোবাইল নম্বর (১১ ডিজিট) *</span>
-                      </label>
-                      <input
-                        type="tel"
-                        required
-                        value={customerPhone}
-                        onChange={(e) => setCustomerPhone(e.target.value)}
-                        placeholder="01XXXXXXXXX"
-                        className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:border-[#E11D48] focus:bg-white font-mono font-bold"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-stone-800 font-extrabold mb-1 flex items-center gap-1">
-                      <MapPin className="w-3.5 h-3.5 text-[#E11D48]" />
-                      <span>সম্পূর্ণ ডেলিভারি ঠিকানা *</span>
-                    </label>
-                    <textarea
-                      required
-                      rows={2}
-                      value={customerAddress}
-                      onChange={(e) => setCustomerAddress(e.target.value)}
-                      placeholder="বাসা নম্বর, রোড নম্বর, বাজার/এলাকা, থানা ও জেলা..."
-                      className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:border-[#E11D48] focus:bg-white resize-none"
-                    />
-                  </div>
-
-                  {/* Shipping Charge Selector: Always adds ৳70 or ৳120 to Product Price */}
-                  <div>
-                    <label className="block text-stone-800 font-extrabold mb-1.5">
-                      ডেলিভারি এরিয়া নির্বাচন করুন (পণ্যের দামের সাথে যুক্ত হবে):
-                    </label>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                      <button
-                        type="button"
-                        onClick={() => setDeliveryArea('dhaka')}
-                        className={`p-3 rounded-xl border-2 text-left transition-all cursor-pointer flex items-center justify-between ${
-                          deliveryArea === 'dhaka'
-                            ? 'border-[#E11D48] bg-[#FFF0F3] text-[#E11D48] font-extrabold shadow-2xs'
-                            : 'border-stone-200 bg-stone-50 text-stone-700 font-semibold hover:border-rose-200'
-                        }`}
-                      >
-                        <div>
-                          <div className="text-xs sm:text-sm font-extrabold">
-                            {deliveryArea === 'dhaka' ? '✓ ' : ''}ঢাকার ভেতরে (Inside Dhaka)
-                          </div>
-                          <div className="text-[10.5px] text-stone-600">ডেলিভারি চার্জ: + ৳৭০</div>
-                        </div>
-                        <span className="text-xs sm:text-sm font-mono font-black bg-white px-2.5 py-1 rounded-lg border border-rose-200 text-[#E11D48]">
-                          ৳৭০
-                        </span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setDeliveryArea('outside_dhaka')}
-                        className={`p-3 rounded-xl border-2 text-left transition-all cursor-pointer flex items-center justify-between ${
-                          deliveryArea === 'outside_dhaka'
-                            ? 'border-[#E11D48] bg-[#FFF0F3] text-[#E11D48] font-extrabold shadow-2xs'
-                            : 'border-stone-200 bg-stone-50 text-stone-700 font-semibold hover:border-rose-200'
-                        }`}
-                      >
-                        <div>
-                          <div className="text-xs sm:text-sm font-extrabold">
-                            {deliveryArea === 'outside_dhaka' ? '✓ ' : ''}ঢাকার বাইরে (Outside Dhaka)
-                          </div>
-                          <div className="text-[10.5px] text-stone-600">ডেলিভারি চার্জ: + ৳১২০</div>
-                        </div>
-                        <span className="text-xs sm:text-sm font-mono font-black bg-white px-2.5 py-1 rounded-lg border border-rose-200 text-[#E11D48]">
-                          ৳১২০
-                        </span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Bill Breakdown */}
-                  <div className="p-3.5 bg-[#FFF0F3]/60 rounded-xl space-y-1.5 text-xs border border-rose-200">
-                    <div className="flex justify-between text-stone-700 font-semibold">
-                      <span>পণ্যের দাম ({quantity} টি):</span>
-                      <span className="font-mono font-bold text-stone-900">
-                        ৳{subtotalPrice.toLocaleString()}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-stone-700 font-semibold">
-                      <span>
-                        ডেলিভারি চার্জ ({deliveryArea === 'dhaka' ? 'ঢাকার ভেতরে ৳৭০' : 'ঢাকার বাইরে ৳১২০'}):
-                      </span>
-                      <span className="font-mono font-extrabold text-[#E11D48]">
-                        + ৳{finalShipping}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-stone-900 font-extrabold text-sm sm:text-base pt-1.5 border-t border-rose-200">
-                      <span>সর্বমোট প্রদেয় বিল:</span>
-                      <span className="font-mono text-[#E11D48]">
-                        ৳{totalPrice.toLocaleString()}
-                      </span>
-                    </div>
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={isOrdering}
-                    className="w-full py-3.5 px-4 bg-gradient-to-r from-[#E11D48] via-[#F43F5E] to-[#BE123C] hover:from-[#BE123C] hover:to-[#9F1239] active:scale-[0.99] disabled:bg-stone-400 text-white rounded-xl text-sm sm:text-base font-extrabold shadow-md ring-2 ring-rose-300/70 transition-all cursor-pointer flex items-center justify-center gap-2"
-                  >
-                    <ShoppingBag className="w-5 h-5 animate-bounce" />
-                    <span>
-                      {isOrdering
-                        ? 'অর্ডার প্রসেস হচ্ছে...'
-                        : `অর্ডার কনফার্ম করুন — ৳${totalPrice.toLocaleString()} (ডেলিভারি চার্জসহ)`}
-                    </span>
-                  </button>
-                </form>
-              </div>
-
               {/* 4-COLUMN GUARANTEE BADGES ON MOBILE & DESKTOP */}
               <div className="pt-2 border-t border-stone-100">
                 <GuaranteeBadgesRow />
               </div>
             </div>
 
-            {/* Description & Specification Tabs */}
-            <div className="bg-white rounded-2xl border border-stone-200 p-4 sm:p-6 shadow-xs space-y-3">
-              <h3 className="text-xs sm:text-sm font-extrabold text-stone-900 border-b border-stone-100 pb-2">
-                পণ্যের বিস্তারিত বিবরণ
-              </h3>
-              <p className="text-xs text-stone-600 leading-relaxed">{product.description}</p>
+            {/* Complete Full Product Details, Specifications & Features Section */}
+            <div className="bg-white rounded-2xl border border-stone-200 p-4 sm:p-6 shadow-xs space-y-4">
+              <div className="flex items-center justify-between border-b border-stone-100 pb-2.5 flex-wrap gap-2">
+                <h3 className="text-sm sm:text-base font-extrabold text-stone-900 flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-[#E11D48]" />
+                  <span>পণ্যের সম্পূর্ণ বিবরণ ও স্পেসিফিকেশন (Full Details)</span>
+                </h3>
+                {product.sku && (
+                  <span className="text-[11px] font-mono font-bold text-stone-500 bg-stone-100 px-2.5 py-0.5 rounded-md">
+                    SKU: {product.sku}
+                  </span>
+                )}
+              </div>
 
-              {product.features && (
-                <ul className="space-y-1.5 text-xs text-stone-700">
-                  {product.features.map((f, i) => (
-                    <li key={i} className="flex items-center gap-2">
-                      <span className="w-1.5 h-1.5 rounded-full bg-[#E11D48] shrink-0" />
-                      <span>{f}</span>
-                    </li>
-                  ))}
-                </ul>
+              <p className="text-xs sm:text-sm text-stone-700 leading-relaxed whitespace-pre-line">
+                {product.description}
+              </p>
+
+              {/* Key Specifications Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                <div className="p-3 rounded-xl bg-stone-50 border border-stone-200/80 flex items-center justify-between text-xs">
+                  <span className="text-stone-500 font-semibold">ক্যাটাগরি:</span>
+                  <span className="font-bold text-stone-900">{categoryNameBn}</span>
+                </div>
+                {product.fabric && (
+                  <div className="p-3 rounded-xl bg-stone-50 border border-stone-200/80 flex items-center justify-between text-xs">
+                    <span className="text-stone-500 font-semibold">ম্যাটেরিয়াল / কোয়ালিটি:</span>
+                    <span className="font-bold text-stone-900">{product.fabric}</span>
+                  </div>
+                )}
+                <div className="p-3 rounded-xl bg-stone-50 border border-stone-200/80 flex items-center justify-between text-xs">
+                  <span className="text-stone-500 font-semibold">স্টক স্ট্যাটাস:</span>
+                  <span className="font-bold text-emerald-700">✓ ইন-স্টক (রেডি টু শিপ)</span>
+                </div>
+                <div className="p-3 rounded-xl bg-stone-50 border border-stone-200/80 flex items-center justify-between text-xs">
+                  <span className="text-stone-500 font-semibold">রিটার্ন পলিসি:</span>
+                  <span className="font-bold text-stone-900">৭ দিনের সহজ রিটার্ন ও এক্সচেঞ্জ</span>
+                </div>
+              </div>
+
+              {product.features && product.features.length > 0 && (
+                <div className="pt-2 space-y-2">
+                  <h4 className="text-xs sm:text-sm font-extrabold text-stone-900">
+                    মূল বৈশিষ্ট্যসমূহ (Key Features):
+                  </h4>
+                  <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-stone-700">
+                    {product.features.map((f, i) => (
+                      <li
+                        key={i}
+                        className="flex items-start gap-2 p-2.5 rounded-xl bg-[#FFF0F3]/50 border border-rose-100"
+                      >
+                        <CheckCircle2 className="w-4 h-4 text-[#E11D48] shrink-0 mt-0.5" />
+                        <span className="font-medium text-stone-800">{f}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
             </div>
           </div>

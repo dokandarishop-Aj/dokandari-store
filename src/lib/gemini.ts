@@ -35,7 +35,7 @@ export interface AICampaignOutput {
   smsCopy: string;
 }
 
-// Curated authentic product galleries for all 11 official categories
+// Curated authentic product galleries for all 11 official categories (100% verified files in /public/uploads/product/)
 export const VERIFIED_IMAGE_GALLERIES: Record<string, string[]> = {
   home_decor: [
     '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg',
@@ -45,40 +45,43 @@ export const VERIFIED_IMAGE_GALLERIES: Record<string, string[]> = {
     '/uploads/product/1792322524-gemini_generated_image_6tydck6tydck6tyd.jpg',
   ],
   gadgets_electronics: [
-    '/uploads/product/1789984768-HJ-5060-Rechargeable-LED-Desk-Lamp-with-Smart-Display-Pen-Holder.webp',
-    '/uploads/product/1789984733-JOY-SUPER-B10-Rechargeable-Emergency-Bulb-15W.webp',
-    '/uploads/product/1789984688-Colmi-KW77-Smart-Watch-2-Straps.webp',
+    '/uploads/product/1777788637-1.webp',
+    '/uploads/product/1776523954-20516.jpg',
+    '/uploads/product/1777098758-eq34-plus-02-500x500.webp',
+    '/uploads/product/1777788826-1776932024-smart-watch-1.webp',
   ],
   fashion_clothing: [
-    '/uploads/product/1789984712-Livo-Instant-Hair-Color-Shampoo-3-in-1.webp',
+    '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg',
   ],
   beauty_personal_care: [
-    '/uploads/product/1789984863-Dear-Hair-Tonic-Cleanser-1.jpg',
-    '/uploads/product/1789984852-Lafz-10-in-1-Advanced-Essential-Hair-Oil.webp',
-    '/uploads/product/1789984839-Skin-Cafe-Silky-Tresses-Moisturizing-Conditioner-120ml.webp',
+    '/uploads/product/1776151737-untitled-design-49.webp',
+    '/uploads/product/1769861519-10_in_1_ess_advanced_hair_oil_100ml_1-(1).webp',
+    '/uploads/product/1769861471-skin-cafe-silky-tresses-moisturizing-conditioner-1-2-(1).webp',
+    '/uploads/product/1769861435-1-1.webp',
   ],
   home_kitchen: [
-    '/uploads/product/1789984677-Mini-Multifunctional-Household-Electric-Sewing-Machine.webp',
-    '/uploads/product/1789984665-Food-Safety-7-Plus-Combo-Pack.webp',
+    '/uploads/product/1776319126-1732248160-1722670821-sellmart_54.jpg',
+    '/uploads/product/1776324094-5-layer-food-safety-cover-150x150.jpg',
   ],
   mobile_accessories: [
-    '/uploads/product/1789984745-M11-TWS-True-Wireless-Earbuds-with-Power-Bank-LED-Display.webp',
-    '/uploads/product/1789984699-Hoco-EQ2-True-Wireless-BT-Headset.webp',
+    '/uploads/product/1777098758-eq34-plus-02-500x500.webp',
+    '/uploads/product/1777788826-1776932024-smart-watch-1.webp',
   ],
   lifestyle: [
-    '/uploads/product/1789984781-Portable-Handheld-Cooling-Fan-with-Night-Light.webp',
+    '/uploads/product/1777788637-1.webp',
+    '/uploads/product/1777788043-hp-turbo-fan.webp',
   ],
   travel_outdoor: [
-    '/uploads/product/1789984722-Thunder-2-in-1-Rechargeable-LED-Emergency-Light-XST-836.webp',
+    '/uploads/product/1776508057-1753857716-1753706738-10001.webp',
   ],
   health_fitness: [
-    '/uploads/product/1789984665-Food-Safety-7-Plus-Combo-Pack.webp',
+    '/uploads/product/1776324094-5-layer-food-safety-cover-150x150.jpg',
   ],
   kids_baby: [
     '/uploads/product/1792322524-gemini_generated_image_6tydck6tydck6tyd.jpg',
   ],
   office_essentials: [
-    '/uploads/product/1789984768-HJ-5060-Rechargeable-LED-Desk-Lamp-with-Smart-Display-Pen-Holder.webp',
+    '/uploads/product/1776523954-20516.jpg',
   ],
 };
 
@@ -280,8 +283,37 @@ export function exportProductsToCSV(products: Product[]): string {
 }
 
 /**
+ * Extracts a clean human-readable title from any product URL slug if network fails
+ */
+function extractReadableTitleFromInput(rawInput: string): string {
+  try {
+    const parsed = new URL(rawInput.startsWith('http') ? rawInput : `https://${rawInput}`);
+    const segs = decodeURIComponent(parsed.pathname)
+      .split('/')
+      .map((s) => s.replace(/\.(html?|php|aspx?)$/i, '').trim())
+      .filter(
+        (s) =>
+          s.length > 2 &&
+          !['product', 'products', 'item', 'items', 'detail', 'product-detail', 'dp', 'gp', 'shop', 'collections', 'p'].includes(
+            s.toLowerCase()
+          )
+      );
+    const best = segs.sort((a, b) => b.length - a.length)[0] || '';
+    const cleaned = best
+      .replace(/[-_]+/g, ' ')
+      .replace(/\b\d{8,}\b/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (cleaned.length >= 3) return cleaned;
+  } catch {
+    // not a URL
+  }
+  return rawInput.trim().slice(0, 120) || 'প্রিমিয়াম অরিজিনাল প্রোডাক্ট';
+}
+
+/**
  * Intelligent Smart Product Importer & Bengali SEO Copywriter via Server-Side Gemini 3.8 Flash
- * Scrapes actual webpage metadata/images on the server and formats products across all 11 categories
+ * Scrapes actual webpage metadata/images on the server and preserves the real product's identity.
  */
 export async function smartImportOrAnalyzeProduct(
   input: string,
@@ -294,9 +326,8 @@ export async function smartImportOrAnalyzeProduct(
   const directVideos = extractDirectVideos(input);
 
   try {
-    // Enforce a strict 12-second client timeout so AI never stalls beyond 10-15 seconds
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 12000);
+    const timer = setTimeout(() => controller.abort(), 28000);
 
     const response = await fetch('/api/gemini/import-product', {
       method: 'POST',
@@ -311,29 +342,34 @@ export async function smartImportOrAnalyzeProduct(
     }
 
     const data = await response.json();
-    const catKey = data.category in VERIFIED_IMAGE_GALLERIES ? data.category : 'home_decor';
+    const catKey = data.category in VERIFIED_IMAGE_GALLERIES ? data.category : 'gadgets_electronics';
 
     const combinedImages = Array.from(
-      new Set([...directImages, ...(Array.isArray(data.scrapedImages) ? data.scrapedImages : [])])
+      new Set([
+        ...directImages,
+        ...(Array.isArray(data.scrapedImages) ? data.scrapedImages : []),
+        ...(Array.isArray(data.images) ? data.images : []),
+      ])
     ).filter((u) => !isBlockedOrErrorProductImageUrl(u));
     const combinedVideos = Array.from(
       new Set([...directVideos, ...(Array.isArray(data.scrapedVideos) ? data.scrapedVideos : [])])
     );
 
-    const singlePrice = Number(data.price) || 1650;
-    const cleanBn = cleanProductTitle(data.titleBn || 'প্রিমিয়াম ইমপোর্টেড লাইফস্টাইল প্রোডাক্ট');
+    const singlePrice = Number(data.price) || 1450;
+    const extractedName = extractReadableTitleFromInput(input);
+    const cleanBn = cleanProductTitle(data.titleBn || data.titleEn || extractedName);
 
     return {
       titleBn: cleanBn,
-      titleEn: data.titleEn || 'Premium Imported Product',
+      titleEn: data.titleEn || extractedName,
       category: catKey,
       price: singlePrice,
-      originalPrice: Number(data.originalPrice) || singlePrice + 550,
+      originalPrice: Number(data.originalPrice) || Math.round(singlePrice * 1.25),
       description:
         data.description ||
-        'Dokandari আন্তর্জাতিক মানের মাল্টি-ক্যাটাগরি পণ্য। ১০০% অরিজিনাল কোয়ালিটি গ্যারান্টি, ক্যাশ অন ডেলিভারি ও পার্সেল খুলে দেখে মূল্য পরিশোধের সুবিধা।',
-      fabric: data.fabric || 'ইমপোর্টেড হাই-গ্রেড মেটেরিয়াল',
-      colors: Array.isArray(data.colors) && data.colors.length > 0 ? data.colors : ['Standard Color'],
+        `${cleanBn} — Dokandari অফিশিয়াল স্টোরের ১০০% অরিজিনাল কোয়ালিটি পণ্য। সারা বাংলাদেশে ক্যাশ অন ডেলিভারি ও পার্সেল খুলে দেখে মূল্য পরিশোধের সুবিধা।`,
+      fabric: data.fabric || '১০০% অরিজিনাল ইমপোর্টেড হাই-গ্রেড মেটেরিয়াল',
+      colors: Array.isArray(data.colors) && data.colors.length > 0 ? data.colors : ['Original Picture Color'],
       sizes: Array.isArray(data.sizes) && data.sizes.length > 0 ? data.sizes : ['Standard Size'],
       features:
         Array.isArray(data.features) && data.features.length > 0
@@ -343,10 +379,7 @@ export async function smartImportOrAnalyzeProduct(
               'সারা দেশে ক্যাশ অন ডেলিভারি',
               'ডেলিভারি ম্যানের সামনে দেখে নেওয়ার সুবিধা',
             ],
-      images:
-        combinedImages.length > 0
-          ? combinedImages
-          : VERIFIED_IMAGE_GALLERIES[catKey] || VERIFIED_IMAGE_GALLERIES.home_decor,
+      images: combinedImages,
       videos: combinedVideos,
       comboOffers: data.comboOffers || {
         singlePrice,
@@ -355,210 +388,40 @@ export async function smartImportOrAnalyzeProduct(
       },
       seoKeywords: Array.isArray(data.seoKeywords)
         ? data.seoKeywords
-        : ['Dokandari', 'অনলাইন শপিং', 'ক্যাশ অন ডেলিভারি', 'বাংলাদেশ'],
+        : ['Dokandari', 'অনলাইন শপিং', 'ক্যাশ অন ডেলিভারি', 'বাংলাদেশ', cleanBn],
     };
   } catch (error) {
     console.warn('Server AI Smart Import fallback note:', error);
-
-    const lower = input.toLowerCase();
-    let cat = 'home_decor';
-    let basePrice = 1650;
-    let titleBn = 'মডার্ন ফ্রেমলেস ফুল লেন্থ ওয়াল মিরর - ঘরের সৌন্দর্য বাড়াতে প্রিমিয়াম চয়েস';
-    let titleEn = 'Modern Frameless Full Length Wall Mirror';
-    let fabric = 'HD ক্লিয়ার ফ্লোট গ্লাস উইথ অ্যান্টি-শাটার কোটিং';
-    let colors = ['Beveled Edges (মায়াবী ফ্রেমলেস)', 'Arch Curve (খিলান কাট)'];
-    let sizes = ['Standard Size (24x60 ইঞ্চি)', '20x35 Inch'];
-
-    if (
-      (lower.includes('arch') || lower.includes('unbreakable')) &&
-      (lower.includes('mirror') || lower.includes('espejo') || lower.includes('decor'))
-    ) {
+    const extractedTitle = extractReadableTitleFromInput(input);
+    const lower = `${input} ${extractedTitle}`.toLowerCase();
+    let cat = 'gadgets_electronics';
+    if (lower.includes('mirror') || lower.includes('bookshelf') || lower.includes('wall art') || lower.includes('vase')) {
       cat = 'home_decor';
-      basePrice = 1650;
-      titleBn = 'খিলান আকৃতির আনব্রেকেবল সেলফ-অ্যাডহেসিভ অ্যাক্রিলিক ওয়াল মিরর - হোম ডেকোর';
-      titleEn = 'Arch Unbreakable Mirror Home Wall Decor Self-Adhesive Acrylic Mirror';
-      fabric = 'HD আনব্রেকেবল অ্যাক্রিলিক মিরর ও ওয়াটারপ্রুফ ব্যাক অ্যাডহেসিভ';
-      colors = ['Frameless HD Silver (ফ্রেমলেস সিলভার)', 'Warm Gold Border'];
-      sizes = ['20x60 cm (Standard Arch)', '30x90 cm (Medium Arch)', '40x120 cm (Full Length)'];
-    } else if (lower.includes('sticker') || lower.includes('decal') || lower.includes('vinyl') || lower.includes('3d wall')) {
-      cat = 'home_decor';
-      basePrice = 1650;
-      titleBn = '৩ডি ওয়াটারপ্রুফ অ্যাক্রিলিক ডেকোরেটিভ ওয়াল স্টিকার সেট';
-      titleEn = '3D Waterproof Acrylic Decorative Wall Sticker Art';
-      fabric = 'ওয়াটারপ্রুফ প্রিমিয়াম অ্যাক্রিলিক শিট';
-      colors = ['Mirror Silver (সিলভার)', 'Luxury Gold (গোল্ড)', 'Glossy Black (কালো)'];
-      sizes = ['Set of 12 Pcs', 'Set of 24 Pcs', 'Standard Wall Layout'];
-    } else if (
-      lower.includes('mirror') ||
-      lower.includes('espejo') ||
-      lower.includes('specchio') ||
-      lower.includes('miroir') ||
-      lower.includes('decor') ||
-      lower.includes('glass') ||
-      lower.includes('frame') ||
-      lower.includes('wall art') ||
-      lower.includes('clock')
-    ) {
-      cat = 'home_decor';
-      basePrice = 1650;
-      titleBn = 'লাক্সারি রাউন্ড ডেকোরেটিভ ওয়াল মিরর - বেভেলড এজ এইচডি রিফ্লেকশন';
-      titleEn = 'Modern Frameless Decorative Wall Mirror';
-      fabric = 'HD ক্লিয়ার ফ্লোট গ্লাস উইথ অ্যান্টি-শাটার কোটিং';
-      colors = ['Frameless Beveled Edge', 'Gold Metal Frame', 'Black Alloy Frame'];
-      sizes = ['Standard 18x24 Inch', 'Medium 24x36 Inch', 'Full Length 24x60 Inch'];
-    } else if (
-      lower.includes('earbud') ||
-      lower.includes('headphone') ||
-      lower.includes('smartwatch') ||
-      lower.includes('watch') ||
-      lower.includes('electronic') ||
-      lower.includes('gadget') ||
-      lower.includes('audio') ||
-      lower.includes('speaker')
-    ) {
-      cat = 'gadgets_electronics';
-      basePrice = 2450;
-      titleBn = 'প্রো ট্রু ওয়্যারলেস ব্লুটুথ ইয়ারবাডস ও স্মার্ট গ্যাজেট - অ্যাক্টিভ নয়েজ ক্যান্সেলেশন';
-      titleEn = 'Pro TWS Wireless ANC Earbuds & Smart Audio Gadget';
-      fabric = 'অ্যালুমিনিয়াম অ্যালয় ও ম্যাট পলিমার';
-      colors = ['Space Grey', 'Matte Black', 'Pearl White'];
-      sizes = ['Universal Fit'];
-    } else if (
-      lower.includes('apparel') ||
-      lower.includes('clothing') ||
-      lower.includes('hoodie') ||
-      lower.includes('shirt') ||
-      lower.includes('pant') ||
-      lower.includes('dress') ||
-      lower.includes('abaya') ||
-      lower.includes('hijab') ||
-      lower.includes('salwar') ||
-      lower.includes('kameez')
-    ) {
-      cat = 'fashion_clothing';
-      basePrice = 1850;
-      titleBn = 'প্রিমিয়াম ফ্যাশন ও লাইফস্টাইল অ্যাপারেল কালেকশন - আরামদায়ক ও স্টাইলিশ ফিট';
-      titleEn = 'Premium Fashion & Apparel Collection';
-      fabric = '১০০% কম্বড প্রিমিয়াম সফট কটন';
-      colors = ['Midnight Black', 'Olive Green', 'Maroon', 'Off White'];
-      sizes = ['M', 'L', 'XL', 'Free Size'];
-    } else if (
-      lower.includes('skin') ||
-      lower.includes('soap') ||
-      lower.includes('serum') ||
-      lower.includes('cream') ||
-      lower.includes('beauty') ||
-      lower.includes('cleanser')
-    ) {
+    } else if (lower.includes('skin') || lower.includes('hair') || lower.includes('oil') || lower.includes('serum') || lower.includes('cream') || lower.includes('tonic') || lower.includes('shampoo') || lower.includes('beauty') || lower.includes('wash')) {
       cat = 'beauty_personal_care';
-      basePrice = 699;
-      titleBn = 'কিউবাই সেভেন হোয়াইট হারবাল স্কিন ব্রাইটেনিং ও ডিপ ক্লেন্সিং কেয়ার';
-      titleEn = 'Seven White Herbs & Centella Deep Cleansing Skincare';
-      fabric = '১০০% ন্যাচারাল হারবাল এক্সট্র্যাক্ট';
-      colors = ['১ পিস রেগুলার', '২ পিস কম্বো প্যাক'];
-      sizes = ['100g Pack'];
-    } else if (
-      lower.includes('chopper') ||
-      lower.includes('blender') ||
-      lower.includes('kitchen') ||
-      lower.includes('cook') ||
-      lower.includes('pot')
-    ) {
+    } else if (lower.includes('dress') || lower.includes('saree') || lower.includes('abaya') || lower.includes('hijab') || lower.includes('shirt') || lower.includes('pant') || lower.includes('kameez') || lower.includes('clothing')) {
+      cat = 'fashion_clothing';
+    } else if (lower.includes('kitchen') || lower.includes('chopper') || lower.includes('blender') || lower.includes('sewing') || lower.includes('food')) {
       cat = 'home_kitchen';
-      basePrice = 1650;
-      titleBn = 'মাল্টিফাংশন ৪-ব্লেড ইলেকট্রিক ফুড চপার ও কিচেন কুকার';
-      titleEn = 'Stainless Steel Multifunctional Kitchen Appliance';
-      fabric = 'ফুড গ্রেড ৩০৪ স্টেইনলেস স্টিল বোল';
-      colors = ['Silver Stainless Steel', 'Crimson Edition'];
-      sizes = ['2.0 Litre Capacity'];
-    } else if (
-      lower.includes('powerbank') ||
-      lower.includes('charger') ||
-      lower.includes('cable') ||
-      lower.includes('case') ||
-      lower.includes('mobile')
-    ) {
+    } else if (lower.includes('charger') || lower.includes('cable') || lower.includes('powerbank') || lower.includes('case') || lower.includes('mobile')) {
       cat = 'mobile_accessories';
-      basePrice = 1950;
-      titleBn = 'ম্যাগনেটিক ওয়্যারলেস ফাস্ট চার্জিং পাওয়ার ব্যাংক ১০০০০ mAh';
-      titleEn = '10000mAh Magnetic Wireless Fast Charging Power Bank 20W PD';
-      fabric = 'ফায়ারপ্রুফ পলিকার্বনেট ও ম্যাগনেটিক রিং';
-      colors = ['Titanium Grey', 'Matte White', 'Navy Blue'];
-      sizes = ['10,000 mAh Ultra Slim'];
-    } else if (lower.includes('flask') || lower.includes('bottle') || lower.includes('lifestyle')) {
-      cat = 'lifestyle';
-      basePrice = 890;
-      titleBn = 'স্মার্ট টেম্পারেচার ডিসপ্লে ভ্যাকুয়াম ইনসুলেটেড থার্মাল ফ্লাস্ক বোতল';
-      titleEn = 'Smart LED Temperature Display Vacuum Insulated Flask 750ml';
-      fabric = 'ফুড-গ্রেড ৩০৪ স্টেইনলেস স্টিল';
-      colors = ['Matte Black', 'Emerald Green', 'Crimson Red'];
-      sizes = ['750ml Standard'];
-    } else if (
-      lower.includes('backpack') ||
-      lower.includes('bag') ||
-      lower.includes('travel') ||
-      lower.includes('outdoor')
-    ) {
+    } else if (lower.includes('bag') || lower.includes('backpack') || lower.includes('travel')) {
       cat = 'travel_outdoor';
-      basePrice = 2750;
-      titleBn = 'ওয়াটারপ্রুফ অ্যান্টি-থেফট এক্সপান্ডেবল ট্রাভেল ও ল্যাপটপ ব্যাকপ্যাক';
-      titleEn = 'Waterproof Expandable 40L Carry-On Travel Backpack';
-      fabric = 'হাই-ডেনসিটি ওয়াটারপ্রুফ অক্সফোর্ড';
-      colors = ['Charcoal Black', 'Navy Blue', 'Olive Green'];
-      sizes = ['40L Expandable'];
-    } else if (
-      lower.includes('massage') ||
-      lower.includes('fitness') ||
-      lower.includes('gym') ||
-      lower.includes('health')
-    ) {
-      cat = 'health_fitness';
-      basePrice = 2250;
-      titleBn = 'প্রফেশনাল ডিপ টিস্যু পারকাশন ম্যাসাজ গান - ৬ স্পিড';
-      titleEn = 'Professional Deep Tissue Percussion Muscle Massage Gun';
-      fabric = 'শক-অ্যাবজরবিং সিলিকন ও অ্যালয় বডি';
-      colors = ['Carbon Black', 'Metallic Red'];
-      sizes = ['Pro Edition'];
-    } else if (lower.includes('baby') || lower.includes('kids') || lower.includes('toy') || lower.includes('child')) {
-      cat = 'kids_baby';
-      basePrice = 1950;
-      titleBn = 'এরগনোমিক মাল্টি-পজিশন ব্রিদেবল বেবি ক্যারিয়ার উইথ হিপ সিট';
-      titleEn = 'Ergonomic 6-in-1 Baby Hip Seat Carrier with Lumbar Support';
-      fabric = '১০০% ব্রিদেবল ৩ডি মেশ ও ন্যাচারাল কটন';
-      colors = ['Soft Mint Green', 'Classic Denim Blue'];
-      sizes = ['Universal Adjustable'];
-    } else if (
-      lower.includes('cushion') ||
-      lower.includes('chair') ||
-      lower.includes('desk') ||
-      lower.includes('office')
-    ) {
-      cat = 'office_essentials';
-      basePrice = 1350;
-      titleBn = 'এরগনোমিক মেমোরি ফোম লাম্বার সাপোর্ট ব্যাক কুশন';
-      titleEn = 'Ergonomic Memory Foam Back Lumbar Support Cushion';
-      fabric = '১০০% হাই-ডেনসিটি মেমোরি ফোম';
-      colors = ['Executive Black', 'Navy Blue'];
-      sizes = ['Standard Ergonomic Contour'];
     }
 
-    const assignedImages =
-      directImages.length > 0
-        ? directImages
-        : VERIFIED_IMAGE_GALLERIES[cat] || VERIFIED_IMAGE_GALLERIES.home_decor;
+    const basePrice = 1450;
 
     return {
-      titleBn,
-      titleEn,
+      titleBn: extractedTitle,
+      titleEn: extractedTitle,
       category: cat,
       price: basePrice,
-      originalPrice: basePrice + 500,
-      description:
-        'Dokandari আন্তর্জাতিক মানের মাল্টি-ক্যাটাগরি পণ্য। ১০০% অরিজিনাল কোয়ালিটি গ্যারান্টি, ক্যাশ অন ডেলিভারি ও পার্সেল খুলে দেখে মূল্য পরিশোধের সুবিধা।',
-      fabric,
-      colors,
-      sizes,
-      images: assignedImages,
+      originalPrice: Math.round(basePrice * 1.25),
+      description: `${extractedTitle} — Dokandari অফিশিয়াল স্টোরের ১০০% অরিজিনাল কোয়ালিটি গ্যারান্টি, সারা বাংলাদেশে ক্যাশ অন ডেলিভারি ও পার্সেল খুলে দেখে মূল্য পরিশোধের সুবিধা।`,
+      fabric: '১০০% অরিজিনাল ইমপোর্টেড প্রিমিয়াম মেটেরিয়াল',
+      colors: ['Original Picture Color'],
+      sizes: ['Standard Size'],
+      images: directImages,
       videos: directVideos,
       features: [
         '১০০% অরিজিনাল পণ্যের নিশ্চয়তা',
@@ -570,7 +433,7 @@ export async function smartImportOrAnalyzeProduct(
         doublePrice: basePrice * 2 - 100,
         triplePrice: basePrice * 3 - 200,
       },
-      seoKeywords: ['Dokandari', 'অনলাইন শপিং', 'ক্যাশ অন ডেলিভারি', 'বাংলাদেশ', titleEn],
+      seoKeywords: ['Dokandari', 'অনলাইন শপিং', 'ক্যাশ অন ডেলিভারি', 'বাংলাদেশ', extractedTitle],
     };
   }
 }
@@ -675,19 +538,15 @@ export async function askAiShoppingAssistant(
  * Converts AI Analysis into a full production-ready Product
  */
 export function convertAnalysisToProduct(analysis: AIProductAnalysis, inputUrl?: string): Product {
-  const catKey = (analysis.category in VERIFIED_IMAGE_GALLERIES ? analysis.category : 'home_decor') as string;
+  const catKey = (analysis.category in VERIFIED_IMAGE_GALLERIES ? analysis.category : 'gadgets_electronics') as string;
   const prodName = cleanProductTitle(analysis.titleBn);
   const rawImgs =
     analysis.images && analysis.images.length > 0
       ? analysis.images.filter((u) => !isBlockedOrErrorProductImageUrl(u))
       : [];
-  const baseImgs =
-    rawImgs.length > 0
-      ? rawImgs
-      : VERIFIED_IMAGE_GALLERIES[catKey] || VERIFIED_IMAGE_GALLERIES.home_decor;
 
   const prodId = `dkd-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
-  const safeImgs = baseImgs.map((u, idx) =>
+  const safeImgs = rawImgs.map((u, idx) =>
     resolveSafeProductImageUrl(u, { id: prodId, name: prodName, titleEn: analysis.titleEn, category: catKey }, idx)
   );
 
@@ -695,7 +554,7 @@ export function convertAnalysisToProduct(analysis: AIProductAnalysis, inputUrl?:
     id: prodId,
     name: prodName,
     titleEn: analysis.titleEn,
-    category: analysis.category || 'home_decor',
+    category: analysis.category || 'gadgets_electronics',
     price: Number(analysis.price),
     originalPrice: Number(analysis.originalPrice),
     description: analysis.description,

@@ -4,16 +4,19 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { X, CheckCircle2, ShieldCheck, Truck, ArrowRight, Zap, Trash2, Plus, Minus } from 'lucide-react';
+import { X, CheckCircle2, ShieldCheck, Truck, ArrowRight, Zap, Trash2, Plus, Minus, Upload } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import { CustomerInfo, Order } from '../types';
-import { trackPixelInitiateCheckout, trackPixelPurchase } from '../lib/pixelManager';
+import { trackPixelPageView, trackPixelInitiateCheckout, trackPixelPurchase } from '../lib/pixelManager';
 import { captureAbandonedLeadDebounced, markLeadConverted } from '../lib/leadRecovery';
-import { resolveSafeProductImageUrl, handleProductImageError, saveOrderPersisted } from '../lib/storeSync';
+import {
+  resolveSafeProductImageUrl,
+  handleProductImageError,
+  saveOrderPersisted,
+  compressImageFileToDataUrl,
+} from '../lib/storeSync';
 
 interface CheckoutModalProps {
   isOpen: boolean;
@@ -26,7 +29,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   onClose,
   onOrderSuccess,
 }) => {
-  const { items, subtotal, shippingFee, total, updateQuantity, removeFromCart, clearCart, deliveryZone, setDeliveryZone } = useCart();
+  const { items, subtotal, updateQuantity, removeFromCart, clearCart, deliveryZone, setDeliveryZone } = useCart();
   const { firebaseUser, userProfile } = useAuth();
 
   const initialCustomerName =
@@ -36,13 +39,31 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [customerName, setCustomerName] = useState(initialCustomerName);
   const [customerPhone, setCustomerPhone] = useState(userProfile?.phone || '');
   const [customerAddress, setCustomerAddress] = useState(userProfile?.address || '');
-  const [deliveryNotes, setDeliveryNotes] = useState('');
+  const [customerScreenshot, setCustomerScreenshot] = useState<string>('');
+  const [isUploadingScreenshot, setIsUploadingScreenshot] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [completedOrder, setCompletedOrder] = useState<Order | null>(null);
 
   const currentShippingFee = deliveryZone === 'dhaka' ? 70 : 120;
   const currentTotal = subtotal + currentShippingFee;
+
+  const handleScreenshotUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploadingScreenshot(true);
+    try {
+      const compressed = await compressImageFileToDataUrl(file, 640, 0.72);
+      if (compressed) {
+        setCustomerScreenshot(compressed);
+      }
+    } catch (err) {
+      console.warn('Screenshot upload note:', err);
+    } finally {
+      setIsUploadingScreenshot(false);
+      e.target.value = '';
+    }
+  };
 
   // Track InitiateCheckout cleanly when modal opens
   useEffect(() => {
@@ -101,10 +122,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         address: customerAddress.trim(),
         city: deliveryZone === 'dhaka' ? 'Dhaka' : 'Outside Dhaka',
         district: deliveryZone === 'dhaka' ? 'Dhaka' : 'Bangladesh',
-        deliveryNotes: deliveryNotes.trim() || undefined,
         email: userProfile?.email || undefined,
       };
 
+      const eventId = `dkd_purchase_${orderId}`;
       const newOrder: Order = {
         id: orderId,
         customer,
@@ -116,6 +137,14 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         paymentMethod: 'cod',
         status: 'pending',
         userId: firebaseUser ? firebaseUser.uid : null,
+        customerScreenshot: customerScreenshot || undefined,
+        pixelTracking: {
+          eventId,
+          browserFired: true,
+          capiDispatched: false,
+          capiStatus: 'Browser Pixel Fired (Dispatching Server CAPI...)',
+          updatedAt: Date.now(),
+        },
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
@@ -126,12 +155,44 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       // Mark abandoned lead as successfully converted
       markLeadConverted(customerPhone, orderId);
 
-      // Track Purchase event across all active pixels
+      try {
+        window.history.pushState(null, '', `/thank-you/${encodeURIComponent(orderId)}?brand=dokandari`);
+      } catch {
+        // ignore
+      }
+
+      setCompletedOrder(newOrder);
+      clearCart();
+
+      trackPixelPageView();
+      // Track Purchase event across all active pixels & update Firestore order with CAPI receipt
       trackPixelPurchase({
         id: orderId,
         total: currentTotal,
         items,
         customer: { phone: customerPhone, name: customerName, email: userProfile?.email },
+      }).then((capiRes) => {
+        if (capiRes) {
+          const updatedWithTracking: Order = {
+            ...newOrder,
+            pixelTracking: {
+              eventId: capiRes.eventId || eventId,
+              browserFired: true,
+              capiDispatched: Boolean(capiRes.capiResults && capiRes.capiResults.length > 0),
+              capiStatus:
+                Array.isArray(capiRes.capiResults) && capiRes.capiResults.length > 0
+                  ? capiRes.capiResults.map((r) => `${r.platform}: ${r.status}`).join(' | ')
+                  : 'Browser Pixel Active',
+              metaPixels: capiRes.metaPixels,
+              tiktokPixels: capiRes.tiktokPixels,
+              contentIds: capiRes.contentIds,
+              capiResults: capiRes.capiResults,
+              updatedAt: Date.now(),
+            },
+          };
+          setCompletedOrder(updatedWithTracking);
+          saveOrderPersisted(updatedWithTracking).catch(() => null);
+        }
       });
 
       try {
@@ -141,12 +202,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           origin: { y: 0.6 },
           colors: ['#E11D48', '#BE123C', '#25D366', '#F59E0B'],
         });
-      } catch (e) {
+      } catch {
         // confetti error ignored
       }
-
-      setCompletedOrder(newOrder);
-      clearCart();
     } catch (err) {
       console.error('Order error:', err);
       setErrorMsg('অর্ডার সাবমিট করতে সমস্যা হয়েছে। আবার চেষ্টা করুন।');
@@ -163,15 +221,15 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       onClick={onClose}
     >
       <div
-        className="relative bg-white rounded-3xl max-w-3xl w-full max-h-[92vh] overflow-y-auto shadow-2xl border border-rose-100 flex flex-col"
+        className="relative bg-white rounded-3xl max-w-2xl w-full max-h-[92vh] overflow-y-auto shadow-2xl border border-rose-100 flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Top Header matching image_89df9fa6.png */}
-        <div className="bg-gradient-to-r from-rose-600 via-[#E11D48] to-pink-600 text-white p-4 sm:p-5 rounded-t-3xl flex items-center justify-between shrink-0">
+        {/* Top Header */}
+        <div className="bg-gradient-to-r from-rose-600 via-[#E11D48] to-pink-600 text-white p-3.5 sm:p-4 rounded-t-3xl flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-white animate-pulse" />
             <h3 className="font-extrabold text-sm sm:text-base">
-              {completedOrder ? 'অর্ডার সফলভাবে সম্পন্ন হয়েছে!' : `${items.reduce((s, i) => s + i.quantity, 0)} টি আইটেম ব্যাগে সংরক্ষিত`}
+              {completedOrder ? 'অর্ডার সফলভাবে সম্পন্ন হয়েছে!' : 'অর্ডার কনফার্ম ফর্ম'}
             </h3>
           </div>
           <button
@@ -214,7 +272,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               </div>
               <div className="flex justify-between">
                 <span className="text-stone-600">পেমেন্ট মেথড:</span>
-                <span className="font-bold text-emerald-700">ক্যাশ অন ডেলিভারি (১০০% পণ্য দেখে পেমেন্ট)</span>
+                <span className="font-bold text-emerald-700">ক্যাশ অন ডেলিভারি (পণ্য দেখে পেমেন্ট)</span>
               </div>
               <div className="flex justify-between font-bold pt-2 border-t border-rose-200 text-stone-900 text-sm">
                 <span>সর্বমোট প্রদেয় মূল্য:</span>
@@ -242,25 +300,24 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             </div>
           </div>
         ) : (
-          /* Order Checkout Form matching image_89df9fa6.png */
-          <form onSubmit={handlePlaceOrder} className="p-5 sm:p-6 space-y-5 text-xs">
-            
+          /* Compact & Attractive Order Form */
+          <form onSubmit={handlePlaceOrder} className="p-4 sm:p-5 space-y-3.5 text-xs">
             {/* Items Summary in Bag */}
-            <div className="space-y-3">
+            <div className="space-y-2">
               <div className="flex items-center justify-between pb-1 border-b border-stone-100">
                 <span className="font-bold text-stone-900">
-                  অর্ডারের আইটেমসমূহ ({items.length})
+                  নির্বাচিত পণ্য ({items.length})
                 </span>
                 <span className="text-xs font-bold text-[#E11D48] font-mono">
                   সাবটোটাল: ৳{subtotal.toLocaleString()}
                 </span>
               </div>
 
-              <div className="space-y-2 max-h-36 overflow-y-auto pr-1">
+              <div className="space-y-2 max-h-32 overflow-y-auto pr-1">
                 {items.map((item) => (
                   <div
                     key={item.id}
-                    className="p-2.5 rounded-xl border border-stone-200 bg-stone-50/70 flex items-center justify-between gap-3"
+                    className="p-2 rounded-xl border border-stone-200 bg-stone-50/70 flex items-center justify-between gap-2.5"
                   >
                     <img
                       src={resolveSafeProductImageUrl(item.image, {
@@ -276,21 +333,17 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                           category: item.category,
                         })
                       }
-                      className="w-12 h-12 rounded-lg object-cover border border-stone-200 shrink-0"
+                      className="w-11 h-11 rounded-lg object-cover border border-stone-200 shrink-0"
                     />
                     <div className="flex-1 min-w-0">
                       <h4 className="font-bold text-stone-900 truncate">{item.name}</h4>
-                      <div className="flex items-center gap-2 text-[11px] text-stone-500 mt-0.5">
-                        {item.selectedSize && <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-sm">সাইজ: {item.selectedSize}</span>}
-                        {item.selectedColor && <span className="bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded-sm">{item.selectedColor}</span>}
-                      </div>
-                      <span className="text-xs font-bold text-[#E11D48] font-mono mt-0.5 block">
+                      <span className="text-xs font-bold text-[#E11D48] font-mono block">
                         ৳{item.price.toLocaleString()}
                       </span>
                     </div>
 
                     {/* Quantity Controls */}
-                    <div className="flex items-center gap-1.5 bg-white border border-stone-300 rounded-lg p-1 shrink-0">
+                    <div className="flex items-center gap-1 bg-white border border-stone-300 rounded-lg p-1 shrink-0">
                       <button
                         type="button"
                         onClick={() => updateQuantity(item.id, item.quantity - 1)}
@@ -320,151 +373,145 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               </div>
             </div>
 
-            {/* Cash on Delivery Information Banner */}
-            <div className="flex items-center justify-between pt-1">
-              <div className="flex items-center gap-1.5 font-bold text-stone-900">
-                <span className="text-[#E11D48]">⚡</span>
-                <span>ক্যাশ অন ডেলিভারি তথ্য ও গ্রাহক একাউন্ট</span>
-              </div>
-              <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-200">
-                অগ্রিম টাকা লাগবে না
-              </span>
-            </div>
-
-            {/* Pink Notice Card matching image_89df9fa6.png */}
-            <div className="bg-[#FFF1F2] border border-rose-200 rounded-2xl p-3 sm:p-4 space-y-1">
-              <div className="flex items-center gap-1.5 font-bold text-[#BE123C] text-xs">
-                <span>🔒</span>
-                <span>১-ক্লিক ক্যাশ অন ডেলিভারি (পাসওয়ার্ড ছাড়াই দ্রুত অর্ডার):</span>
-              </div>
-              <p className="text-[11px] text-stone-700 leading-relaxed">
-                নাম, ১১ ডিজিটের মোবাইল নম্বর এবং ঠিকানা দিয়ে অর্ডার কনফার্ম করুন। পণ্য হাতে পেয়ে মূল্য পরিশোধ করবেন।
-              </p>
-            </div>
-
             {errorMsg && (
-              <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-semibold">
+              <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-semibold">
                 ⚠️ {errorMsg}
               </div>
             )}
 
-            {/* Input Fields */}
-            <div className="space-y-3">
+            {/* Compact Input Fields */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-stone-800 font-bold mb-1 flex items-center gap-1">
-                  <span>👤 আপনার সম্পূর্ণ নাম: *</span>
+                <label className="block text-stone-800 font-bold mb-1">
+                  👤 আপনার নাম *
                 </label>
                 <input
                   type="text"
                   required
                   value={customerName}
                   onChange={(e) => setCustomerName(e.target.value)}
-                  placeholder="যেমন: ফারহানা হক / ফাতেমা আক্তার"
-                  className="w-full px-3.5 py-2.5 bg-white border border-stone-300 rounded-xl text-xs focus:outline-none focus:border-[#E11D48] transition-colors"
+                  placeholder="আপনার সম্পূর্ণ নাম"
+                  className="w-full px-3.5 py-2.5 bg-white border border-stone-300 rounded-xl text-xs focus:outline-none focus:border-[#E11D48]"
                 />
               </div>
 
               <div>
-                <label className="block text-stone-800 font-bold mb-1 flex items-center gap-1">
-                  <span>📞 মোবাইল নম্বর (১১ ডিজিট): *</span>
+                <label className="block text-stone-800 font-bold mb-1">
+                  📞 মোবাইল নম্বর (১১ ডিজিট) *
                 </label>
                 <input
                   type="tel"
                   required
                   value={customerPhone}
                   onChange={(e) => setCustomerPhone(e.target.value)}
-                  placeholder="017XXXXXXXX (১১ ডিজিট)"
-                  className="w-full px-3.5 py-2.5 bg-white border border-stone-300 rounded-xl text-xs font-mono focus:outline-none focus:border-[#E11D48] transition-colors"
+                  placeholder="017XXXXXXXX"
+                  className="w-full px-3.5 py-2.5 bg-white border border-stone-300 rounded-xl text-xs font-mono focus:outline-none focus:border-[#E11D48]"
                 />
               </div>
+            </div>
 
-              {/* Delivery Area Selection Buttons matching image_89df9fa6.png */}
-              <div>
-                <label className="block text-stone-800 font-bold mb-1 flex items-center gap-1">
-                  <span>🚚 ডেলিভারি এরিয়া সিলেক্ট করুন:</span>
-                </label>
-                <div className="grid grid-cols-2 gap-3 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setDeliveryZone('dhaka')}
-                    className={`py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                      deliveryZone === 'dhaka'
-                        ? 'bg-[#E11D48] text-white shadow-md'
-                        : 'bg-white border border-stone-300 text-stone-700 hover:bg-stone-50'
-                    }`}
-                  >
-                    <span>{deliveryZone === 'dhaka' ? '✓ ' : ''}ঢাকার ভেতরে (+ ৳৭০)</span>
-                  </button>
+            <div>
+              <label className="block text-stone-800 font-bold mb-1">
+                📍 সম্পূর্ণ ডেলিভারি ঠিকানা *
+              </label>
+              <input
+                type="text"
+                required
+                value={customerAddress}
+                onChange={(e) => setCustomerAddress(e.target.value)}
+                placeholder="বাড়ি/রোড, এলাকা, থানা ও জেলা লিখুন..."
+                className="w-full px-3.5 py-2.5 bg-white border border-stone-300 rounded-xl text-xs focus:outline-none focus:border-[#E11D48]"
+              />
+            </div>
 
-                  <button
-                    type="button"
-                    onClick={() => setDeliveryZone('outside_dhaka')}
-                    className={`py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                      deliveryZone === 'outside_dhaka'
-                        ? 'bg-[#E11D48] text-white shadow-md'
-                        : 'bg-white border border-stone-300 text-stone-700 hover:bg-stone-50'
-                    }`}
-                  >
-                    <span>{deliveryZone === 'outside_dhaka' ? '✓ ' : ''}ঢাকার বাইরে (+ ৳১২০)</span>
-                  </button>
+            {/* Delivery Area Selection Buttons */}
+            <div className="grid grid-cols-2 gap-2.5">
+              <button
+                type="button"
+                onClick={() => setDeliveryZone('dhaka')}
+                className={`py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                  deliveryZone === 'dhaka'
+                    ? 'bg-[#E11D48] text-white shadow-xs'
+                    : 'bg-white border border-stone-300 text-stone-700 hover:bg-stone-50'
+                }`}
+              >
+                <span>{deliveryZone === 'dhaka' ? '✓ ' : ''}ঢাকার ভেতরে (+ ৳৭০)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setDeliveryZone('outside_dhaka')}
+                className={`py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                  deliveryZone === 'outside_dhaka'
+                    ? 'bg-[#E11D48] text-white shadow-xs'
+                    : 'bg-white border border-stone-300 text-stone-700 hover:bg-stone-50'
+                }`}
+              >
+                <span>{deliveryZone === 'outside_dhaka' ? '✓ ' : ''}ঢাকার বাইরে (+ ৳১২০)</span>
+              </button>
+            </div>
+
+            {/* Customer Screenshot Upload Box (Sent Directly to Admin Panel with Order) */}
+            <div className="p-2.5 rounded-xl bg-stone-50 border border-dashed border-rose-300 flex items-center justify-between gap-2.5 flex-wrap">
+              <div className="flex items-center gap-2 min-w-0">
+                {customerScreenshot ? (
+                  <img
+                    src={customerScreenshot}
+                    alt="স্ক্রিনশট"
+                    className="w-10 h-10 rounded-lg object-cover border border-rose-300 shrink-0"
+                  />
+                ) : (
+                  <div className="w-9 h-9 rounded-lg bg-rose-100 text-[#E11D48] flex items-center justify-center shrink-0">
+                    <Upload className="w-4 h-4" />
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <p className="text-[11.5px] font-extrabold text-stone-900">
+                    {customerScreenshot
+                      ? '✅ স্ক্রিনশট যুক্ত হয়েছে (অ্যাডমিন প্যানেলে যাবে)'
+                      : '📸 প্রোডাক্ট বা অর্ডারের স্ক্রিনশট দিন (ঐচ্ছিক)'}
+                  </p>
+                  <p className="text-[10px] text-stone-500">
+                    স্ক্রিনশট দিলে তা সরাসরি অ্যাডমিন প্যানেলে অর্ডারের সাথে যুক্ত হবে
+                  </p>
                 </div>
               </div>
-
-              <div>
-                <label className="block text-stone-800 font-bold mb-1 flex items-center gap-1">
-                  <span>📍 সম্পূর্ণ ডেলিভারি ঠিকানা: *</span>
-                </label>
-                <textarea
-                  rows={2}
-                  required
-                  value={customerAddress}
-                  onChange={(e) => setCustomerAddress(e.target.value)}
-                  placeholder="বাড়ি নং, রোড নং, এলাকা, থানা ও জেলা..."
-                  className="w-full px-3.5 py-2.5 bg-white border border-stone-300 rounded-xl text-xs focus:outline-none focus:border-[#E11D48] transition-colors"
-                />
-              </div>
-
-              <div>
-                <label className="block text-stone-600 font-medium mb-1">
-                  বিশেষ কোনো নির্দেশনা / নোট (ঐচ্ছিক):
-                </label>
+              <label className="px-3 py-1.5 bg-white hover:bg-rose-50 text-[#E11D48] border border-rose-300 rounded-lg text-[11px] font-extrabold cursor-pointer transition-colors shrink-0">
+                {isUploadingScreenshot
+                  ? 'আপলোড হচ্ছে...'
+                  : customerScreenshot
+                  ? 'পরিবর্তন'
+                  : '+ স্ক্রিনশট দিন'}
                 <input
-                  type="text"
-                  value={deliveryNotes}
-                  onChange={(e) => setDeliveryNotes(e.target.value)}
-                  placeholder="যেমন: বিকেলে ডেলিভারি দিলে ভালো হয়"
-                  className="w-full px-3.5 py-2 bg-white border border-stone-300 rounded-xl text-xs focus:outline-none focus:border-[#E11D48] transition-colors"
+                  type="file"
+                  accept="image/*"
+                  onChange={handleScreenshotUpload}
+                  className="hidden"
                 />
-              </div>
+              </label>
             </div>
 
-            {/* Price Calculations */}
-            <div className="bg-stone-50 p-3.5 rounded-2xl border border-stone-200 space-y-1.5 text-xs">
-              <div className="flex justify-between text-stone-600">
-                <span>প্রোডাক্ট সাবটোটাল:</span>
-                <span className="font-mono font-bold">৳{subtotal.toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between text-stone-600">
-                <span>ডেলিভারি চার্জ:</span>
-                <span className="font-mono font-bold">৳{currentShippingFee}</span>
-              </div>
-              <div className="flex justify-between text-sm font-extrabold text-[#E11D48] pt-2 border-t border-stone-200">
-                <span>সর্বমোট ক্যাশ অন ডেলিভারি:</span>
-                <span className="font-mono tabular-nums">৳{currentTotal.toLocaleString()}</span>
-              </div>
+            {/* Compact Price Summary */}
+            <div className="bg-[#FFF0F3]/80 px-3.5 py-2.5 rounded-xl border border-rose-200 flex items-center justify-between text-xs">
+              <span className="font-bold text-stone-800">
+                মোট প্রদেয় বিল (ডেলিভারি ৳{currentShippingFee} সহ):
+              </span>
+              <span className="text-base font-extrabold text-[#E11D48] font-mono tabular-nums">
+                ৳{currentTotal.toLocaleString()}
+              </span>
             </div>
 
-            {/* Big Vivid Crimson Button (NO BLACK BUTTON!) matching image_89df9fa6.png */}
+            {/* Submit Button */}
             <button
               type="submit"
               disabled={isSubmitting || items.length === 0}
               className="w-full py-3.5 px-6 bg-[#E11D48] hover:bg-[#BE123C] active:scale-[0.99] text-white rounded-2xl font-black text-sm shadow-lg shadow-rose-600/25 flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
             >
-              <Zap className="w-5 h-5 fill-white" />
+              <Zap className="w-4 h-4 fill-white" />
               <span>
                 {isSubmitting
                   ? 'অর্ডার প্রসেস হচ্ছে...'
-                  : `⚡ অর্ডার কনফার্ম করুন (৳${currentTotal.toLocaleString()}) - ক্যাশ অন ডেলিভারি`}
+                  : `অর্ডার কনফার্ম করুন — ৳${currentTotal.toLocaleString()}`}
               </span>
             </button>
 
