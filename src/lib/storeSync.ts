@@ -1116,16 +1116,52 @@ export function enrichProductFields(p: Product): Product {
   };
 }
 
+/**
+ * Filters out unplayable HEVC (-h265-) or temporary blob: streams and returns at most 1 single playable video
+ */
+export function cleanProductVideos(rawVideos?: string[]): string[] {
+  if (!Array.isArray(rawVideos) || rawVideos.length === 0) return [];
+  const valid = rawVideos
+    .map((v) => (typeof v === 'string' ? v.trim() : ''))
+    .filter(
+      (v) =>
+        v.length > 0 &&
+        !v.startsWith('blob:') &&
+        !v.toLowerCase().includes('-h265-') &&
+        !v.toLowerCase().includes('hevc')
+    );
+  if (valid.length === 0) return [];
+  const sorted = [...valid].sort((a, b) => {
+    const score = (u: string) =>
+      u.includes('-h264-hd') ? 4 : u.includes('-h264-sd') ? 3 : u.includes('-h264-') ? 2 : 1;
+    return score(b) - score(a);
+  });
+  return [sorted[0]];
+}
+
+const INITIAL_PRODUCT_MAP = new Map<string, Product>(INITIAL_PRODUCTS.map((ip) => [ip.id, ip]));
+
 function normalizeProductImages(p: Product): Product {
   const enriched = enrichProductFields(p);
-  const nonEmptyRaw = Array.isArray(enriched.images)
-    ? enriched.images.filter(
-        (img) =>
-          typeof img === 'string' &&
-          img.trim().length > 0 &&
-          !isBlockedOrErrorProductImageUrl(img)
-      )
-    : [];
+  const initMatch = INITIAL_PRODUCT_MAP.get(enriched.id);
+
+  let rawCandidateList = Array.isArray(enriched.images) ? enriched.images : [];
+
+  // If an initial catalog item has real /uploads/product/ photos in INITIAL_PRODUCTS, but Firestore still has old Unsplash placeholders, restore the real /uploads/product/ photos!
+  if (
+    initMatch &&
+    initMatch.images?.[0]?.startsWith('/uploads/product/') &&
+    rawCandidateList[0]?.includes('images.unsplash.com')
+  ) {
+    rawCandidateList = initMatch.images;
+  }
+
+  const nonEmptyRaw = rawCandidateList.filter(
+    (img) =>
+      typeof img === 'string' &&
+      img.trim().length > 0 &&
+      !isBlockedOrErrorProductImageUrl(img)
+  );
 
   // Filter out accidentally overwritten generic Unsplash URLs if the product has real images or is not prod-1/prod-2
   const realImagesOnly = nonEmptyRaw.filter((img) => !isOverwrittenGenericImage(img, enriched.id));
@@ -1152,6 +1188,7 @@ function normalizeProductImages(p: Product): Product {
     ...enriched,
     status: enriched.status === 'draft' ? 'draft' : 'published',
     images: safeImages,
+    videos: cleanProductVideos(enriched.videos),
   };
 }
 
@@ -1666,8 +1703,16 @@ export async function seedProductsIfEmpty(): Promise<void> {
       const healed = normalizeProductImages(data);
       const origImagesJson = JSON.stringify(data.images || []);
       const healedImagesJson = JSON.stringify(healed.images || []);
+      const origVideosJson = JSON.stringify(data.videos || []);
+      const healedVideosJson = JSON.stringify(healed.videos || []);
 
-      if (origImagesJson !== healedImagesJson || !data.status || !data.description || !data.fabric) {
+      if (
+        origImagesJson !== healedImagesJson ||
+        origVideosJson !== healedVideosJson ||
+        !data.status ||
+        !data.description ||
+        !data.fabric
+      ) {
         try {
           await setDoc(
             doc(db, 'products', id),
@@ -1677,6 +1722,38 @@ export async function seedProductsIfEmpty(): Promise<void> {
         } catch {
           // ignore individual doc heal warning
         }
+      }
+
+      // If an imported product (dkd-17...) still has external http/alicdn/wsrv.nl image URLs instead of self-contained data: URLs, inline them automatically!
+      if (
+        id.startsWith('dkd-17') &&
+        Array.isArray(healed.images) &&
+        healed.images.some((u) => u.startsWith('http') && !u.includes('images.unsplash.com'))
+      ) {
+        fetch('/api/catalog/inline-product-media', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            images: healed.images,
+            videos: healed.videos || [],
+            sourceUrl: data.sourceUrl || '',
+          }),
+        })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((inlined) => {
+            if (inlined && Array.isArray(inlined.images) && inlined.images.length > 0) {
+              setDoc(
+                doc(db, 'products', id),
+                sanitizeForFirestore({
+                  images: inlined.images,
+                  videos: Array.isArray(inlined.videos) ? inlined.videos : healed.videos || [],
+                  updatedAt: Date.now(),
+                }),
+                { merge: true }
+              ).catch(() => null);
+            }
+          })
+          .catch(() => null);
       }
     }
 

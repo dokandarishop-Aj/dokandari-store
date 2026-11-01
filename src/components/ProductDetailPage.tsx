@@ -43,6 +43,7 @@ import {
   saveProductPersisted,
   compressImageFileToDataUrl,
   enrichProductFields,
+  cleanProductVideos,
 } from '../lib/storeSync';
 import { Product, Order, OFFICIAL_CATEGORIES } from '../types';
 import { ProductCard } from './ProductCard';
@@ -344,6 +345,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   ]);
 
   const displayTitle = cleanProductTitle(product.name);
+  const cleanVideos = cleanProductVideos(product.videos);
   const categoryMeta = OFFICIAL_CATEGORIES.find((c) => c.id === product.category);
   const categoryNameBn = categoryMeta?.nameBn || 'অরিজিনাল কালেকশন';
 
@@ -1647,9 +1649,9 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
           {/* Left Column: Image Gallery & Responsive Non-Blocking YouTube IFrame Embed Player (5 cols) */}
           <div className="lg:col-span-5 space-y-3 sm:space-y-4">
             <div className="relative aspect-square w-full rounded-2xl overflow-hidden bg-white border border-stone-200 shadow-xs">
-              {selectedVideoInHero !== null && product.videos?.[selectedVideoInHero] ? (
+              {selectedVideoInHero !== null && cleanVideos[selectedVideoInHero] ? (
                 (() => {
-                  const heroEmbed = parseEmbedVideoUrl(product.videos[selectedVideoInHero]);
+                  const heroEmbed = parseEmbedVideoUrl(cleanVideos[selectedVideoInHero]);
                   return (
                     <div className="w-full h-full bg-stone-950 flex items-center justify-center relative">
                       {heroEmbed.type === 'iframe' ? (
@@ -1712,7 +1714,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
             </div>
 
             {/* Thumbnail Carousel (Images + Video Thumbnails) */}
-            {(product.images.length > 1 || (product.videos && product.videos.length > 0)) && (
+            {(product.images.length > 1 || cleanVideos.length > 0) && (
               <div className="flex gap-2 overflow-x-auto pb-1">
                 {product.images.map((img, idx) => (
                   <button
@@ -1740,54 +1742,57 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                   </button>
                 ))}
 
-                {product.videos &&
-                  product.videos.map((vid, vIdx) => {
-                    const thumbInfo = parseEmbedVideoUrl(vid);
-                    return (
-                      <button
-                        key={`vid-thumb-${vIdx}`}
-                        type="button"
-                        onClick={() => setSelectedVideoInHero(vIdx)}
-                        title="ভিডিও প্লে করুন"
-                        className={`relative w-14 h-14 sm:w-16 sm:h-16 rounded-xl overflow-hidden border-2 transition-all cursor-pointer shrink-0 bg-stone-950 ${
-                          selectedVideoInHero === vIdx
-                            ? 'border-[#FF0000] ring-2 ring-red-200'
-                            : 'border-stone-300 opacity-90 hover:opacity-100'
-                        }`}
-                      >
-                        <img
-                          src={thumbInfo.thumbnailUrl || product.images[0]}
-                          alt="Video Thumbnail"
-                          loading="lazy"
-                          decoding="async"
-                          referrerPolicy="no-referrer"
-                          className="w-full h-full object-cover opacity-75"
-                        />
-                        <div className="absolute inset-0 flex items-center justify-center bg-black/35">
-                          <span className="w-6 h-6 rounded-full bg-[#FF0000] text-white flex items-center justify-center shadow-sm">
-                            <Play className="w-3 h-3 fill-white ml-0.5" />
-                          </span>
-                        </div>
-                      </button>
-                    );
-                  })}
+                {cleanVideos.map((vid, vIdx) => {
+                  const thumbInfo = parseEmbedVideoUrl(vid);
+                  return (
+                    <button
+                      key={`vid-thumb-${vIdx}`}
+                      type="button"
+                      onClick={() => setSelectedVideoInHero(vIdx)}
+                      title="ভিডিও প্লে করুন"
+                      className={`relative w-14 h-14 sm:w-16 sm:h-16 rounded-xl overflow-hidden border-2 transition-all cursor-pointer shrink-0 bg-stone-950 ${
+                        selectedVideoInHero === vIdx
+                          ? 'border-[#FF0000] ring-2 ring-red-200'
+                          : 'border-stone-300 opacity-90 hover:opacity-100'
+                      }`}
+                    >
+                      <img
+                        src={resolveSafeProductImageUrl(
+                          thumbInfo.thumbnailUrl || product.images[0],
+                          product,
+                          0
+                        )}
+                        alt="Video Thumbnail"
+                        loading="lazy"
+                        decoding="async"
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover opacity-75"
+                      />
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/35">
+                        <span className="w-6 h-6 rounded-full bg-[#FF0000] text-white flex items-center justify-center shadow-sm">
+                          <Play className="w-3 h-3 fill-white ml-0.5" />
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             )}
 
-            {/* Official YouTube IFrame Embed API Player (Responsive 16:9 + High-Performance Non-Blocking Facade) */}
-            {product.videos && product.videos.length > 0 && (
+            {/* Official YouTube / H.264 Single Video Player (Responsive 16:9 + High-Performance Non-Blocking Facade) */}
+            {cleanVideos.length > 0 && (
               <div className="bg-white rounded-2xl p-3 sm:p-3.5 border border-rose-200 shadow-2xs space-y-2.5">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-xs font-extrabold text-[#E11D48] flex items-center gap-1.5">
                     <OfficialYouTubeIcon className="w-4 h-4 text-[#FF0000] shrink-0" />
-                    <span>অরিজিনাল প্রোডাক্ট ভিডিও ({product.videos.length})</span>
+                    <span>অরিজিনাল প্রোডাক্ট ভিডিও</span>
                   </span>
                   <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                    YouTube HD প্লেয়ার
+                    HD ভিডিও প্লেয়ার
                   </span>
                 </div>
 
-                {product.videos.map((vid, vIdx) => {
+                {cleanVideos.map((vid, vIdx) => {
                   const embedInfo = parseEmbedVideoUrl(vid);
                   const isActivated = Boolean(activatedVideos[vIdx]);
 

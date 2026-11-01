@@ -357,29 +357,48 @@ function parseAlibabaHtmlIntoResult(
     }
   }
 
-  // 3. Extract main product gallery thumbnails first (data-testid="main-image-thumbnail" orproduct gallery images)
+  // 3. Extract main product gallery thumbnails first (data-testid="main-image-thumbnail" or _960x960 / _720x720 / _80x80 gallery images)
+  const seenKf = new Set<string>();
+  const galleryImgs: string[] = [];
+  const pushKf = (id: string, ext: string) => {
+    const key = `${id}.${ext.toLowerCase()}`;
+    if (!seenKf.has(key)) {
+      seenKf.add(key);
+      galleryImgs.push(`https://s.alicdn.com/@sc04/kf/${id}.${ext}_720x720q80.jpg`);
+    }
+  };
+
   const thumbRegex =
     /data-testid=["']main-image-thumbnail["'][^>]*style=["'][^"']*url\((?:https?:)?\/\/(?:s\.alicdn\.com\/@sc0[1-4]|sc0[1-4]\.alicdn\.com)\/kf\/([A-Za-z0-9_-]{18,})\.(jpg|jpeg|png)/gi;
-  const galleryImgs: string[] = [];
   for (const m of html.matchAll(thumbRegex)) {
-    galleryImgs.push(`https://sc04.alicdn.com/kf/${m[1]}.${m[2]}`);
+    pushKf(m[1], m[2]);
   }
+
+  // Also match Alibaba gallery image tags that carry _960x960, _720x720, _640x640, or _80x80 suffixes
+  const sizedGalleryRegex =
+    /(?:s\.alicdn\.com\/@sc0[1-4]|sc0[1-4]\.alicdn\.com)\/kf\/([A-Za-z0-9_-]{18,})\.(jpg|jpeg|png)_(?:960x960|720x720|640x640|80x80)/gi;
+  for (const m of html.matchAll(sizedGalleryRegex)) {
+    pushKf(m[1], m[2]);
+  }
+
   if (galleryImgs.length === 0) {
     const kfRegex = /(?:s\.alicdn\.com\/@sc0[1-4]|sc0[1-4]\.alicdn\.com)\/kf\/([A-Za-z0-9_-]{20,})\.(jpg|jpeg|png)/gi;
     for (const m of html.matchAll(kfRegex)) {
-      galleryImgs.push(`https://sc04.alicdn.com/kf/${m[1]}.${m[2]}`);
+      pushKf(m[1], m[2]);
     }
   }
   if (galleryImgs.length > 0) {
     result.images.push(...galleryImgs);
   }
 
-  // 4. Extract Alibaba product videos (.mp4)
+  // 4. Extract Alibaba product videos (.mp4) — filter out HEVC (-h265-) and pick the single best H.264 stream
   const vidMatches = Array.from(
     html.matchAll(/https?:\/\/(?:gv\.videocdn\.alibaba\.com|cloud\.video\.taobao\.com)[^\s"'<>\\]+\.mp4/gi)
-  ).map((m) => m[0]);
+  )
+    .map((m) => m[0])
+    .filter((v) => !v.toLowerCase().includes('-h265-') && !v.toLowerCase().includes('hevc'));
   if (vidMatches.length > 0) {
-    result.videos.push(...vidMatches);
+    result.videos.push(...deduplicateAndPickSingleVideo(vidMatches));
   }
 
   // 5. Extract wholesale price hint (strictly require currency symbol before number so MOQ quantities like "1,000 pieces" are never mistaken for price)
@@ -392,6 +411,136 @@ function parseAlibabaHtmlIntoResult(
       result.priceHint = priceMatch;
     }
   }
+}
+
+/**
+ * Filters out unplayable HEVC (-h265-) or temporary blob: streams and returns at most 1 single playable video
+ * (preferring H.264 HD or H.264 SD over LD so duplicate transcodes of the same video never appear).
+ */
+function deduplicateAndPickSingleVideo(rawVideos: string[]): string[] {
+  if (!Array.isArray(rawVideos) || rawVideos.length === 0) return [];
+  const valid = rawVideos
+    .map((v) => (typeof v === 'string' ? v.trim() : ''))
+    .filter(
+      (v) =>
+        v.length > 0 &&
+        !v.startsWith('blob:') &&
+        !v.toLowerCase().includes('-h265-') &&
+        !v.toLowerCase().includes('hevc')
+    );
+  if (valid.length === 0) return [];
+  const sorted = [...valid].sort((a, b) => {
+    const score = (u: string) =>
+      u.includes('-h264-hd') ? 4 : u.includes('-h264-sd') ? 3 : u.includes('-h264-') ? 2 : 1;
+    return score(b) - score(a);
+  });
+  return [sorted[0]];
+}
+
+/**
+ * Converts scraped remote product image URLs into compact, self-contained `data:image/jpeg;base64,...` strings
+ * (~35KB-60KB each, total <680KB for up to 6 gallery images) so they save directly inside Firestore
+ * and render 100% identically on both AI Studio Preview and the live domain (dokandari.com)
+ * without ever failing due to wsrv.nl double-wrapping, Referer hotlink blocks, or CDN errors.
+ */
+async function convertRemoteImagesToDataUrls(
+  rawUrls: string[],
+  maxImages = 6
+): Promise<string[]> {
+  if (!Array.isArray(rawUrls) || rawUrls.length === 0) return [];
+  const candidates = rawUrls
+    .map((u) => (typeof u === 'string' ? u.trim() : ''))
+    .filter((u) => u.length > 0 && isValidScrapedProductImage(u))
+    .slice(0, maxImages * 2);
+
+  const converted = await Promise.all(
+    candidates.map(async (rawUrl) => {
+      if (rawUrl.startsWith('data:') || rawUrl.startsWith('/uploads/')) {
+        return rawUrl;
+      }
+
+      // Unwrap any wsrv.nl layers first
+      let cleanUrl = rawUrl;
+      let unwrapCount = 0;
+      while (unwrapCount < 5 && cleanUrl.toLowerCase().includes('wsrv.nl')) {
+        unwrapCount++;
+        try {
+          const parsed = new URL(cleanUrl.startsWith('//') ? `https:${cleanUrl}` : cleanUrl);
+          const inner = parsed.searchParams.get('url');
+          if (inner) {
+            cleanUrl = decodeURIComponent(inner).trim();
+          } else {
+            break;
+          }
+        } catch {
+          break;
+        }
+      }
+      if (cleanUrl.startsWith('//')) cleanUrl = `https:${cleanUrl}`;
+      if (!isSafeExternalUrl(cleanUrl)) return '';
+
+      // Extract Alibaba /kf/ base file if applicable
+      const kfMatch = cleanUrl.match(/\/kf\/([A-Za-z0-9_-]{18,}\.(?:jpg|jpeg|png))/i);
+      const tryUrls = kfMatch
+        ? [
+            `https://s.alicdn.com/@sc04/kf/${kfMatch[1]}_720x720q80.jpg`,
+            `https://s.alicdn.com/@sc04/kf/${kfMatch[1]}_960x960q80.jpg`,
+            `https://wsrv.nl/?url=${encodeURIComponent(`https://sc04.alicdn.com/kf/${kfMatch[1]}`)}&w=560&q=74&output=jpg`,
+            `https://sc04.alicdn.com/kf/${kfMatch[1]}`,
+          ]
+        : [
+            `https://wsrv.nl/?url=${encodeURIComponent(cleanUrl)}&w=560&q=74&output=jpg`,
+            cleanUrl,
+          ];
+
+      for (const fetchTarget of tryUrls) {
+        try {
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 3800);
+          const resp = await fetch(fetchTarget, {
+            signal: ctrl.signal,
+            headers: {
+              'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+              Accept: 'image/jpeg,image/webp,image/png,image/*,*/*;q=0.8',
+            },
+          });
+          clearTimeout(timer);
+          if (resp.ok) {
+            const cType = (resp.headers.get('content-type') || 'image/jpeg').split(';')[0].trim();
+            if (cType.startsWith('image/')) {
+              const buf = Buffer.from(await resp.arrayBuffer());
+              if (buf.length > 400 && buf.length <= 135000) {
+                return `data:${cType};base64,${buf.toString('base64')}`;
+              }
+            }
+          }
+        } catch {
+          // try next candidate URL
+        }
+      }
+
+      // Drop candidate if all endpoints returned 404 or failed
+      return '';
+    })
+  );
+
+  // Enforce total payload budget (<720KB) and maxImages limit so Firestore 1MB limit is never exceeded
+  const finalImages: string[] = [];
+  let totalChars = 0;
+  for (const img of converted) {
+    if (!img || finalImages.length >= maxImages) continue;
+    if (img.startsWith('data:')) {
+      if (totalChars + img.length <= 720000 || finalImages.length < 2) {
+        finalImages.push(img);
+        totalChars += img.length;
+      }
+    } else {
+      finalImages.push(img);
+    }
+  }
+
+  return finalImages;
 }
 
 /**
@@ -509,7 +658,7 @@ async function scrapeWebpageMetadata(targetUrl: string): Promise<{
     }
 
     result.images = Array.from(new Set(result.images.filter((u) => isValidScrapedProductImage(u)))).slice(0, 8);
-    result.videos = Array.from(new Set(result.videos)).slice(0, 4);
+    result.videos = deduplicateAndPickSingleVideo(result.videos);
     if (result.images.length === 0 && result.title) {
       const webImgs = await searchRealProductImagesOnWeb(result.title);
       if (webImgs.length > 0) result.images = webImgs;
@@ -730,7 +879,7 @@ async function scrapeWebpageMetadata(targetUrl: string): Promise<{
         )
       ).map((m) => m[0].replace(/\\u002F/g, '/').replace(/\\/g, ''));
 
-      result.videos = Array.from(new Set([...youtubeMatches, ...videoMatches])).slice(0, 4);
+      result.videos = deduplicateAndPickSingleVideo([...youtubeMatches, ...videoMatches]);
 
       // Extract price hints if not already extracted from JSON-LD
       if (!result.priceHint) {
@@ -1279,6 +1428,10 @@ async function synthesizeProductFromScraped(
     validScrapedImages = await searchRealProductImagesOnWeb(effectiveTitleEn);
   }
 
+  // Convert remote product images to self-contained base64 data URLs so they render 100% reliably on live dokandari.com
+  const inlinedImages = await convertRemoteImagesToDataUrls(validScrapedImages, 6);
+  const singleCleanVideo = deduplicateAndPickSingleVideo(scraped.videos);
+
   return {
     titleBn,
     titleEn: effectiveTitleEn,
@@ -1295,8 +1448,8 @@ async function synthesizeProductFromScraped(
       'Dokandari ১০০% অরিজিনাল ও ভেরিফাইড কোয়ালিটি পণ্য',
       'সারা বাংলাদেশে ক্যাশ অন ডেলিভারি ও দেখে নেওয়ার সুবিধা',
     ],
-    scrapedImages: validScrapedImages,
-    scrapedVideos: scraped.videos,
+    scrapedImages: inlinedImages,
+    scrapedVideos: singleCleanVideo,
     comboOffers: {
       singlePrice: price,
       doublePrice: price * 2 - 100,
@@ -1373,6 +1526,30 @@ async function startServer() {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'SAMEORIGIN');
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    next();
+  });
+
+  // Legacy upload filename map so any cached or legacy /uploads/product/:filename resolves to a verified 200 OK image
+  const SERVER_LEGACY_UPLOAD_MAP: Record<string, string> = {
+    '1792219337-ha7e0aa8d05a44d73b82d68816420d174s.jpg': '1792322764-whatsapp-image-2026-10-14-at-12.59.53.jpeg',
+    'flexible-mirror-sheet.jpg': '1792322764-whatsapp-image-2026-10-14-at-12.59.53.jpeg',
+    '1792218995-hb38f48c0a8b7454ebad69790a214b4f5s.jpg': 'Gemini_Generated_Image_vid5cyvid5cyvid5.jpg',
+    'round-vanity-mirror.jpg': 'Gemini_Generated_Image_vid5cyvid5cyvid5.jpg',
+    '1792218499-h2d83f5b4372f4cf69c8441815d239ae5j.jpg': 'Gemini_Generated_Image_dsg9pjdsg9pjdsg9.jpeg',
+    '3d-butterfly-mirror.jpg': 'Gemini_Generated_Image_dsg9pjdsg9pjdsg9.jpeg',
+    'heart-mirror-sticker.jpg': '1792322414-gemini_generated_image_b9teg6b9teg6b9te.jpg',
+    'cat-led-bookshelf.jpg': '1792322524-gemini_generated_image_6tydck6tydck6tyd.jpg',
+    '1789984863-Dear-Hair-Tonic-Cleanser-1.jpg': '1776151737-untitled-design-49.webp',
+    'dear-hair-tonic.jpg': '1776151737-untitled-design-49.webp',
+  };
+
+  app.get(['/uploads/product/:fname', '/public/uploads/product/:fname'], (req, res, next) => {
+    const fname = req.params.fname;
+    const mapped = SERVER_LEGACY_UPLOAD_MAP[fname];
+    if (mapped) {
+      res.sendFile(path.join(__dirname, 'public', 'uploads', 'product', mapped));
+      return;
+    }
     next();
   });
 
@@ -1505,6 +1682,34 @@ async function startServer() {
     }
 
     res.json({ recovered });
+  });
+
+  // 0.3 Convert remote/proxied product images into self-contained base64 data URLs & deduplicate videos to 1 H.264 stream
+  app.post('/api/catalog/inline-product-media', async (req, res) => {
+    const { images = [], videos = [], sourceUrl = '' } = req.body as {
+      images?: string[];
+      videos?: string[];
+      sourceUrl?: string;
+    };
+    try {
+      let targetImages = Array.isArray(images) ? images : [];
+      let targetVideos = Array.isArray(videos) ? videos : [];
+
+      if (sourceUrl && sourceUrl.startsWith('http') && targetImages.length === 0) {
+        const scraped = await scrapeWebpageMetadata(sourceUrl);
+        if (scraped.images.length > 0) targetImages = scraped.images;
+        if (scraped.videos.length > 0 && targetVideos.length === 0) targetVideos = scraped.videos;
+      }
+
+      const inlinedImages = await convertRemoteImagesToDataUrls(targetImages, 6);
+      const cleanVideos = deduplicateAndPickSingleVideo(targetVideos);
+      res.json({
+        images: inlinedImages,
+        videos: cleanVideos,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to inline product media' });
+    }
   });
 
   // 1. Health & Gemini API Status Endpoint
@@ -1662,7 +1867,7 @@ titleBn, titleEn, category, price, originalPrice, description, fabric, colors, s
         price: singlePrice,
         originalPrice: Number(parsed.originalPrice) || Math.round(singlePrice * 1.25),
         scrapedImages: synthesizedFallback.scrapedImages,
-        scrapedVideos: scraped.videos,
+        scrapedVideos: synthesizedFallback.scrapedVideos,
         comboOffers: {
           singlePrice,
           doublePrice: singlePrice * 2 - 100,
