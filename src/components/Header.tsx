@@ -22,6 +22,7 @@ interface HeaderProps {
   searchQuery: string;
   onSearchChange: (q: string) => void;
   isAdmin?: boolean;
+  isOrganicGreen?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -37,6 +38,7 @@ export const Header: React.FC<HeaderProps> = ({
   searchQuery,
   onSearchChange,
   isAdmin = false,
+  isOrganicGreen = false,
 }) => {
   const { itemCount, setIsCartOpen } = useCart();
   const { userProfile } = useAuth();
@@ -46,7 +48,11 @@ export const Header: React.FC<HeaderProps> = ({
   const brandLogoUrl = '/assets/aistudio/Gemini_Generated_Image_4bi49x4bi49x4bi4_b4aaa34e.jpg';
 
   return (
-    <header className="sticky top-0 z-40 bg-white border-b border-rose-100 shadow-xs">
+    <header
+      className={`sticky top-0 z-40 bg-white border-b shadow-xs ${
+        isOrganicGreen ? 'border-emerald-200' : 'border-rose-100'
+      }`}
+    >
       {/* Main Navigation Bar */}
       <div className="w-full px-2.5 sm:px-6 lg:px-8 py-2.5 sm:py-3">
         <div className="flex items-center justify-between gap-2 sm:gap-4">
@@ -71,13 +77,21 @@ export const Header: React.FC<HeaderProps> = ({
                     onError={() => setLogoFailed(true)}
                   />
                 ) : (
-                  <span className="text-lg sm:text-2xl font-black text-[#E11D48] tracking-tight">
+                  <span
+                    className={`text-lg sm:text-2xl font-black tracking-tight ${
+                      isOrganicGreen ? 'text-[#16A34A]' : 'text-[#E11D48]'
+                    }`}
+                  >
                     Dokandari
                   </span>
                 )}
               </div>
-              <span className="text-[10px] sm:text-[11px] font-medium text-rose-600 tracking-tight mt-0.5 truncate max-w-[165px] sm:max-w-none">
-                আপনার সৌন্দর্য আমাদের ঐতিহ্য
+              <span
+                className={`text-[10px] sm:text-[11px] font-medium tracking-tight mt-0.5 truncate max-w-[165px] sm:max-w-none ${
+                  isOrganicGreen ? 'text-[#15803D]' : 'text-rose-600'
+                }`}
+              >
+                {isOrganicGreen ? '১০০% খাঁটি অর্গানিক ও ন্যাচারাল ফুড' : 'আপনার সৌন্দর্য আমাদের ঐতিহ্য'}
               </span>
             </a>
           </div>
@@ -86,7 +100,9 @@ export const Header: React.FC<HeaderProps> = ({
           <nav className="hidden xl:flex items-center gap-2 text-xs font-semibold">
             <button
               onClick={onGoHome}
-              className="px-3.5 py-1.5 rounded-full bg-[#E11D48] text-white shadow-xs transition-colors cursor-pointer"
+              className={`px-3.5 py-1.5 rounded-full text-white shadow-xs transition-colors cursor-pointer ${
+                isOrganicGreen ? 'bg-[#16A34A] hover:bg-[#15803D]' : 'bg-[#E11D48] hover:bg-[#BE123C]'
+              }`}
             >
               হোম
             </button>
@@ -208,7 +224,11 @@ export const Header: React.FC<HeaderProps> = ({
               type="button"
               onClick={onOpenMenu}
               aria-label="সম্পূর্ণ মেনু খুলুন"
-              className="px-3 sm:px-4 py-2 rounded-xl bg-[#E11D48] hover:bg-[#BE123C] active:scale-95 text-white text-xs font-extrabold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer shrink-0"
+              className={`px-3 sm:px-4 py-2 rounded-xl active:scale-95 text-white text-xs font-extrabold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer shrink-0 ${
+                isOrganicGreen
+                  ? 'bg-[#16A34A] hover:bg-[#15803D]'
+                  : 'bg-[#E11D48] hover:bg-[#BE123C]'
+              }`}
             >
               <MenuIcon className="w-4 h-4 text-white shrink-0" />
               <span>মেনু</span>
@@ -220,12 +240,22 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* Web App Quick Navigation Bar (Visible on Mobile, Tablet & Desktop) */}
-      <div className="bg-[#FFF5F7] border-t border-rose-100/80 px-2.5 sm:px-6 lg:px-8 py-1.5 overflow-x-auto no-scrollbar">
+      <div
+        className={`border-t px-2.5 sm:px-6 lg:px-8 py-1.5 overflow-x-auto no-scrollbar ${
+          isOrganicGreen
+            ? 'bg-[#F0FDF4] border-emerald-200/80'
+            : 'bg-[#FFF5F7] border-rose-100/80'
+        }`}
+      >
         <div className="flex items-center gap-1.5 sm:gap-2 min-w-max text-[11px] sm:text-xs font-bold">
           <button
             type="button"
             onClick={onGoHome}
-            className="px-2.5 py-1 rounded-lg bg-white hover:bg-[#E11D48] text-stone-800 hover:text-white border border-rose-200/80 transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
+            className={`px-2.5 py-1 rounded-lg bg-white text-stone-800 hover:text-white border transition-colors cursor-pointer flex items-center gap-1 shadow-2xs ${
+              isOrganicGreen
+                ? 'hover:bg-[#16A34A] border-emerald-200/80'
+                : 'hover:bg-[#E11D48] border-rose-200/80'
+            }`}
           >
             <span>🏠 হোমপেজ</span>
           </button>

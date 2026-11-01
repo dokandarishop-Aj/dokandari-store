@@ -72,7 +72,7 @@ export const FounderEditModal: React.FC<FounderEditModalProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const compressed = await compressImageFileToDataUrl(file, 700, 0.84);
+      const compressed = await compressImageFileToDataUrl(file, 480, 0.78);
       setPhoto(compressed);
     } catch (err) {
       console.warn('Founder photo upload error:', err);

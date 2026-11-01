@@ -63,11 +63,25 @@ function normalizeCategoryId(cat: string, productName = ''): string {
   if (officialIds.has(cat as any)) return cat;
 
   const lowerName = productName.toLowerCase();
+  if (
+    lowerName.includes('মধু') ||
+    lowerName.includes('honey') ||
+    lowerName.includes('ঘি') ||
+    lowerName.includes('ghee') ||
+    lowerName.includes('অর্গানিক') ||
+    lowerName.includes('organic') ||
+    lowerName.includes('খেজুর') ||
+    lowerName.includes('চিয়া')
+  ) {
+    return 'organic_food';
+  }
   if (lowerName.includes('মিরর') || lowerName.includes('mirror') || lowerName.includes('ডেকোর')) {
     return 'home_decor';
   }
   if (cat === 'skincare') return 'beauty_personal_care';
-  if (cat === 'abaya' || cat === 'festive' || cat === 'hijab') return 'fashion_clothing';
+  if (cat === 'fashion_clothing' || cat === 'abaya' || cat === 'festive' || cat === 'hijab') {
+    return 'organic_food';
+  }
   return 'home_decor';
 }
 
@@ -110,7 +124,15 @@ function StoreMain() {
       const saved = localStorage.getItem('dokandari_category_order');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const migrated = parsed.map((id: string) =>
+            id === 'fashion_clothing' ? 'organic_food' : id
+          );
+          if (!migrated.includes('organic_food')) {
+            migrated.splice(2, 0, 'organic_food');
+          }
+          return Array.from(new Set(migrated));
+        }
       }
     } catch {
       // ignore
@@ -297,10 +319,29 @@ function StoreMain() {
       }
     );
 
+    const unsubFounderProfile = onSnapshot(
+      doc(db, 'settings', 'founder_profile'),
+      (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          if (data?.founder) {
+            setFounderData((prev) => ({ ...prev, ...data.founder }));
+          }
+          if (data?.pageContent) {
+            setPageContent((prev) => ({ ...prev, ...data.pageContent }));
+          }
+        }
+      },
+      (err) => {
+        console.warn('Realtime founder_profile listener note', err);
+      }
+    );
+
     return () => {
       unsubProducts();
       unsubDeletedProducts();
       unsubSettings();
+      unsubFounderProfile();
       unsubCredentials();
     };
   }, []);
@@ -666,10 +707,15 @@ function StoreMain() {
     }
   };
 
+  const isOrganicGreenActive =
+    (activeCategoryPage === 'organic_food' && !detailedProduct && !isAboutOpen && !isAdminOpen && !isPolicyOpen && !isVideoGalleryOpen && !isTrackingOpen) ||
+    Boolean(detailedProduct && detailedProduct.category === 'organic_food');
+
   return (
     <div className="min-h-screen flex flex-col bg-[#FAF9F6] overflow-x-hidden w-full">
       {/* Top Header with Ticker, Dokandari Logo & Navigation */}
       <Header
+        isOrganicGreen={isOrganicGreenActive}
         onGoHome={() => {
           setActiveCategory('all');
           setActiveCategoryPage(null);
@@ -827,6 +873,12 @@ function StoreMain() {
             }}
             onEditFounder={() => setIsFounderEditOpen(true)}
             onRemoveFounderPhoto={handleRemoveFounderPhoto}
+            onFounderDirectSaved={(updatedFounder, updatedStore) => {
+              setFounderData(updatedFounder);
+              if (updatedStore) {
+                handleApplyStoreContentUpdate(updatedStore);
+              }
+            }}
           />
         ) : isVideoGalleryOpen ? (
           <VideoGalleryPage
@@ -925,12 +977,47 @@ function StoreMain() {
             }}
             onInstantOrder={handleInstantOrder}
             onEditProduct={isAdminAuthenticated ? (p) => setEditingProduct(p) : undefined}
+            onAddNewProduct={
+              isAdminAuthenticated
+                ? (catId) => {
+                    const blankProd: Product = {
+                      id: `dkd-${catId}-${Date.now()}`,
+                      sku: `DKD-ORG-${Math.floor(1000 + Math.random() * 9000)}`,
+                      name: 'নতুন অর্গানিক প্রোডাক্ট',
+                      titleEn: 'New Organic Product',
+                      category: catId as any,
+                      price: 550,
+                      originalPrice: 700,
+                      images: ['/uploads/product/organic-sundarban-honey.jpg'],
+                      description:
+                        '১০০% খাঁটি ও প্রাকৃতিক অর্গানিক ফুড। কোনো কেমিক্যাল বা ভেজাল নেই। ডেলিভারিম্যানের সামনে চেক করে মূল্য পরিশোধের সুবিধা।',
+                      fabric: '১০০% ন্যাচারাল ও কেমিক্যালমুক্ত অর্গানিক ফুড',
+                      features: [
+                        '১০০% খাঁটি ও প্রাকৃতিক উপাদান',
+                        'কোনো কৃত্রিম রঙ বা প্রিজারভেটিভ নেই',
+                        'ওপেন পার্সেল ক্যাশ অন ডেলিভারি',
+                      ],
+                      variants: {
+                        sizes: ['500g', '1 Kg'],
+                        colors: ['100% Pure Organic'],
+                      },
+                      rating: 5.0,
+                      reviewsCount: 15,
+                      inStock: true,
+                      status: 'published',
+                      createdAt: Date.now(),
+                      updatedAt: Date.now(),
+                    };
+                    setEditingProduct(blankProd);
+                  }
+                : undefined
+            }
           />
         ) : (
           <>
-            {/* Responsive Hero Banner Carousel (Speed selector hidden on customer homepage, controlled in Admin Panel) */}
+            {/* 100% Light Rose/Cream Hero Banner Carousel — Zero Dark Background */}
             <section
-              className="relative w-full bg-stone-900 overflow-hidden aspect-16/9 sm:aspect-24/9 max-h-[380px] select-none"
+              className="relative w-full bg-gradient-to-br from-[#FFF5F7] via-[#FFF0F3] to-[#FFE4E8] border-b border-rose-200 overflow-hidden py-5 sm:py-8 px-4 sm:px-8 lg:px-14 select-none"
               onTouchStart={(e) => {
                 touchStartX.current = e.touches[0].clientX;
               }}
@@ -947,68 +1034,90 @@ function StoreMain() {
                 touchStartX.current = null;
               }}
             >
-              {heroSlides.map((slide, idx) => (
-                <div
-                  key={slide.id || idx}
-                  className={`absolute inset-0 transition-opacity duration-700 ${
-                    currentSlide === idx ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'
-                  }`}
-                >
-                  <img
-                    src={slide.image}
-                    alt={slide.title}
-                    className="w-full h-full object-cover object-center"
-                    referrerPolicy="no-referrer"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-r from-stone-950/85 via-stone-950/45 to-transparent flex flex-col justify-center px-5 sm:px-14 max-w-2xl text-white">
-                    <span className="inline-block w-fit text-[10px] sm:text-[11px] font-bold bg-[#E11D48] text-white px-2.5 py-0.5 rounded-md uppercase tracking-wider mb-2">
-                      {slide.tag}
-                    </span>
-                    <h2 className="text-lg sm:text-3xl font-extrabold leading-tight text-white line-clamp-2">
-                      {slide.title}
-                    </h2>
-                    <p className="text-xs sm:text-sm text-stone-200 mt-1.5 sm:mt-2 font-medium line-clamp-2">
-                      {slide.subtitle}
-                    </p>
-                    <div className="mt-3 sm:mt-4">
-                      <button
-                        onClick={() => {
-                          const elem = document.getElementById('products-section');
-                          if (elem) elem.scrollIntoView({ behavior: 'smooth' });
-                        }}
-                        className="px-4 sm:px-5 py-2 sm:py-2.5 bg-[#E11D48] hover:bg-[#BE123C] text-white text-xs font-bold rounded-xl shadow-md transition-all cursor-pointer"
-                      >
-                        {slide.ctaText || 'কালেকশন দেখুন'} &rarr;
-                      </button>
+              <div className="max-w-7xl mx-auto relative min-h-[210px] sm:min-h-[260px] flex items-center">
+                {heroSlides.map((slide, idx) => (
+                  <div
+                    key={slide.id || idx}
+                    className={`w-full transition-opacity duration-500 ${
+                      currentSlide === idx
+                        ? 'opacity-100 relative z-10'
+                        : 'opacity-0 absolute inset-0 z-0 pointer-events-none'
+                    }`}
+                  >
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-8 items-center">
+                      <div className="lg:col-span-7 space-y-2.5 sm:space-y-3.5 text-left">
+                        <span className="inline-block w-fit text-[10px] sm:text-xs font-extrabold bg-white text-[#E11D48] border border-rose-200 px-3 py-1 rounded-full uppercase tracking-wider shadow-2xs">
+                          {slide.tag}
+                        </span>
+                        <h2 className="text-xl sm:text-3xl lg:text-4xl font-black leading-tight text-stone-900 line-clamp-2">
+                          {slide.title}
+                        </h2>
+                        <p className="text-xs sm:text-base text-stone-700 font-medium line-clamp-2 max-w-2xl">
+                          {slide.subtitle}
+                        </p>
+                        <div className="pt-1 flex flex-wrap items-center gap-2.5">
+                          <button
+                            onClick={() => {
+                              const elem = document.getElementById('products-section');
+                              if (elem) elem.scrollIntoView({ behavior: 'smooth' });
+                            }}
+                            className="px-5 py-2.5 bg-[#E11D48] hover:bg-[#BE123C] text-white text-xs sm:text-sm font-extrabold rounded-xl shadow-sm transition-all cursor-pointer"
+                          >
+                            {slide.ctaText || 'কালেকশন দেখুন'} &rarr;
+                          </button>
+                          <button
+                            onClick={() => {
+                              setActiveCategory('organic_food');
+                              setActiveCategoryPage('organic_food');
+                              window.history.pushState(null, '', '/catalog/organic_food');
+                              window.scrollTo({ top: 0, behavior: 'smooth' });
+                            }}
+                            className="px-4 py-2.5 bg-[#ECFDF5] hover:bg-[#16A34A] text-[#15803D] hover:text-white border border-emerald-300 text-xs sm:text-sm font-extrabold rounded-xl shadow-2xs transition-all cursor-pointer"
+                          >
+                            🌿 অর্গানিক ফুড দেখুন &rarr;
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="lg:col-span-5">
+                        <div className="relative rounded-2xl overflow-hidden border-2 border-white shadow-md bg-white aspect-16/9 sm:aspect-16/8 max-h-[220px] w-full">
+                          <img
+                            src={slide.image}
+                            alt={slide.title}
+                            className="w-full h-full object-cover object-center"
+                            referrerPolicy="no-referrer"
+                          />
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
 
               {/* Manual Previous / Next Controls */}
               <button
                 onClick={() => setCurrentSlide((prev) => (prev - 1 + heroSlides.length) % heroSlides.length)}
                 aria-label="Previous slide"
-                className="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 z-20 w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-white/85 hover:bg-white text-[#E11D48] flex items-center justify-center shadow-md transition-all cursor-pointer"
+                className="absolute left-1.5 sm:left-3 top-1/2 -translate-y-1/2 z-20 w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-white hover:bg-rose-50 text-[#E11D48] border border-rose-200 flex items-center justify-center shadow-sm transition-all cursor-pointer"
               >
                 <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
               <button
                 onClick={() => setCurrentSlide((prev) => (prev + 1) % heroSlides.length)}
                 aria-label="Next slide"
-                className="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 z-20 w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-white/85 hover:bg-white text-[#E11D48] flex items-center justify-center shadow-md transition-all cursor-pointer"
+                className="absolute right-1.5 sm:right-3 top-1/2 -translate-y-1/2 z-20 w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-white hover:bg-rose-50 text-[#E11D48] border border-rose-200 flex items-center justify-center shadow-sm transition-all cursor-pointer"
               >
                 <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
 
               {/* Slider Dots */}
-              <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex gap-2">
+              <div className="flex justify-center gap-2 pt-3">
                 {heroSlides.map((_, idx) => (
                   <button
                     key={idx}
                     onClick={() => setCurrentSlide(idx)}
                     className={`h-2 rounded-full transition-all cursor-pointer ${
-                      currentSlide === idx ? 'w-6 bg-[#E11D48]' : 'w-2 bg-white/70'
+                      currentSlide === idx ? 'w-6 bg-[#E11D48]' : 'w-2 bg-rose-300'
                     }`}
                   />
                 ))}
@@ -1019,9 +1128,9 @@ function StoreMain() {
                 <button
                   type="button"
                   onClick={() => setIsHeroAiModalOpen(true)}
-                  className="absolute top-3 right-3 z-20 px-3 py-1.5 rounded-xl bg-stone-950/80 hover:bg-[#E11D48] text-white text-[11px] font-bold border border-white/20 backdrop-blur-xs flex items-center gap-1.5 shadow-md cursor-pointer transition-all"
+                  className="absolute top-3 right-3 z-20 px-3 py-1.5 rounded-xl bg-white hover:bg-[#E11D48] text-[#E11D48] hover:text-white text-[11px] font-bold border border-rose-300 flex items-center gap-1.5 shadow-xs cursor-pointer transition-all"
                 >
-                  <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                  <Sparkles className="w-3.5 h-3.5" />
                   <span>✨ AI ব্যানার এডিট</span>
                 </button>
               )}
@@ -1245,31 +1354,52 @@ function StoreMain() {
                       (p) => p.category === cat.id || normalizeCategoryId(p.category, p.name) === cat.id
                     );
                     if (catProducts.length === 0) return null;
+                    const isOrganicCat = cat.id === 'organic_food';
 
                     return (
                       <div key={cat.id} className="space-y-3">
-                        <div className="bg-white border border-rose-200/80 rounded-2xl p-3 sm:p-4 flex items-center justify-between shadow-2xs">
+                        <div
+                          className={`rounded-2xl p-3 sm:p-4 flex items-center justify-between shadow-2xs border ${
+                            isOrganicCat
+                              ? 'bg-[#F0FDF4] border-emerald-200'
+                              : 'bg-white border-rose-200/80'
+                          }`}
+                        >
                           <div className="flex items-center gap-2.5">
                             <img
                               src={cat.image}
                               alt={cat.nameBn}
-                              className="w-10 h-10 rounded-xl object-cover border border-rose-200 shrink-0"
+                              className={`w-10 h-10 rounded-xl object-cover border shrink-0 ${
+                                isOrganicCat ? 'border-emerald-300' : 'border-rose-200'
+                              }`}
                               referrerPolicy="no-referrer"
                             />
                             <div>
                               <div className="flex items-center gap-2 flex-wrap">
-                                <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded bg-[#E11D48] text-white">
+                                <span
+                                  className={`text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded text-white ${
+                                    isOrganicCat ? 'bg-[#16A34A]' : 'bg-[#E11D48]'
+                                  }`}
+                                >
                                   ক্যাটালগ #{idx + 1}
                                 </span>
                                 <h2 className="text-sm sm:text-lg font-extrabold text-stone-900">
                                   {cat.nameBn}
                                 </h2>
-                                <span className="text-xs font-bold text-[#E11D48] bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200">
+                                <span
+                                  className={`text-xs font-bold px-2 py-0.5 rounded-full border ${
+                                    isOrganicCat
+                                      ? 'text-[#15803D] bg-white border-emerald-200'
+                                      : 'text-[#E11D48] bg-rose-50 border-rose-200'
+                                  }`}
+                                >
                                   {catProducts.length} টি পণ্য
                                 </span>
                               </div>
-                              <p className="text-[11px] text-stone-500 line-clamp-1 mt-0.5">
-                                {cat.nameBn} — প্রিমিয়াম কালেকশন ও সরাসরি ক্যাশ অন ডেলিভারি
+                              <p className="text-[11px] text-stone-600 line-clamp-1 mt-0.5">
+                                {isOrganicCat
+                                  ? `${cat.nameBn} — ১০০% খাঁটি ও কেমিক্যালমুক্ত অর্গানিক ফুড কালেকশন`
+                                  : `${cat.nameBn} — প্রিমিয়াম কালেকশন ও সরাসরি ক্যাশ অন ডেলিভারি`}
                               </p>
                             </div>
                           </div>
@@ -1281,9 +1411,13 @@ function StoreMain() {
                               window.history.pushState(null, '', `/catalog/${encodeURIComponent(cat.id)}`);
                               window.scrollTo({ top: 0, behavior: 'smooth' });
                             }}
-                            className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl bg-[#FFF1F2] hover:bg-[#E11D48] text-[#E11D48] hover:text-white border border-rose-200 text-xs font-bold transition-all cursor-pointer shrink-0"
+                            className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl border text-xs font-bold transition-all cursor-pointer shrink-0 ${
+                              isOrganicCat
+                                ? 'bg-[#16A34A] hover:bg-[#15803D] text-white border-[#16A34A]'
+                                : 'bg-[#FFF1F2] hover:bg-[#E11D48] text-[#E11D48] hover:text-white border-rose-200'
+                            }`}
                           >
-                            সব দেখুন &rarr;
+                            {isOrganicCat ? 'অর্গানিক শপ দেখুন →' : 'সব দেখুন →'}
                           </button>
                         </div>
 
@@ -1293,6 +1427,7 @@ function StoreMain() {
                             <ProductCard
                               key={product.id}
                               product={product}
+                              greenTheme={isOrganicCat}
                               onOpenDetail={(p) => {
                                 setDetailedProductStep('product');
                                 setDetailedProduct(p);
@@ -1440,6 +1575,7 @@ function StoreMain() {
 
       {/* Footer */}
       <Footer
+        isOrganicGreen={isOrganicGreenActive}
         socialLinks={socialLinks}
         whatsappNumber={whatsappNumber}
         hotlineNumber={hotlineNumber}

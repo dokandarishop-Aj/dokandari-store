@@ -47,6 +47,7 @@ interface FooterProps {
   };
   founderAddress?: string;
   onUpdateStoreContent?: (updated: StoreContent) => void;
+  isOrganicGreen?: boolean;
 }
 
 export const Footer: React.FC<FooterProps> = ({
@@ -65,6 +66,7 @@ export const Footer: React.FC<FooterProps> = ({
   pageContent,
   founderAddress,
   onUpdateStoreContent,
+  isOrganicGreen = false,
 }) => {
   const brandLogoUrl = '/assets/aistudio/Gemini_Generated_Image_4bi49x4bi49x4bi4_b4aaa34e.jpg';
   const activeSocials = socialLinks || DEFAULT_STORE_CONTENT.socialLinks!;
@@ -168,7 +170,13 @@ export const Footer: React.FC<FooterProps> = ({
   };
 
   return (
-    <footer className="bg-white border-t border-stone-200 text-stone-700 pt-12 pb-8 relative">
+    <footer
+      className={`border-t text-stone-700 pt-12 pb-8 relative ${
+        isOrganicGreen
+          ? 'bg-[#F0FDF4]/60 border-emerald-200'
+          : 'bg-white border-stone-200'
+      }`}
+    >
       {/* Admin-Only Quick Edit Bar in Footer */}
       {isAdmin && (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-6">
@@ -616,13 +624,31 @@ export const Footer: React.FC<FooterProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center justify-center gap-2">
-            <span className="bg-[#FFF1F2] text-[#E11D48] font-bold px-3 py-1 rounded-full text-[11px]">
+            <span
+              className={`font-bold px-3 py-1 rounded-full text-[11px] ${
+                isOrganicGreen
+                  ? 'bg-[#ECFDF5] text-[#15803D] border border-emerald-200'
+                  : 'bg-[#FFF1F2] text-[#E11D48]'
+              }`}
+            >
               ক্যাশ অন ডেলিভারি
             </span>
-            <span className="bg-[#FFF1F2] text-[#E11D48] font-bold px-3 py-1 rounded-full text-[11px]">
+            <span
+              className={`font-bold px-3 py-1 rounded-full text-[11px] ${
+                isOrganicGreen
+                  ? 'bg-[#ECFDF5] text-[#15803D] border border-emerald-200'
+                  : 'bg-[#FFF1F2] text-[#E11D48]'
+              }`}
+            >
               ফাস্ট এক্সপ্রেস ডেলিভারি
             </span>
-            <span className="bg-[#FFF1F2] text-[#E11D48] font-bold px-3 py-1 rounded-full text-[11px]">
+            <span
+              className={`font-bold px-3 py-1 rounded-full text-[11px] ${
+                isOrganicGreen
+                  ? 'bg-[#ECFDF5] text-[#15803D] border border-emerald-200'
+                  : 'bg-[#FFF1F2] text-[#E11D48]'
+              }`}
+            >
               সারা দেশে হোম ডেলিভারি
             </span>
 

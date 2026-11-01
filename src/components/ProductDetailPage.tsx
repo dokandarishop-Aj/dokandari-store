@@ -348,6 +348,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   const cleanVideos = cleanProductVideos(product.videos);
   const categoryMeta = OFFICIAL_CATEGORIES.find((c) => c.id === product.category);
   const categoryNameBn = categoryMeta?.nameBn || 'অরিজিনাল কালেকশন';
+  const isOrganic = product.category === 'organic_food';
 
   // WhatsApp order click (available on Product Page, Instant Checkout & Thank You pages)
   const handleWhatsAppOrder = () => {
@@ -974,20 +975,32 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                 }
                 window.scrollTo({ top: 0, behavior: 'smooth' });
               }}
-              className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-stone-700 hover:text-[#E11D48] bg-white px-4 py-2.5 rounded-xl border border-stone-200 shadow-2xs cursor-pointer"
+              className={`inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-stone-700 bg-white px-4 py-2.5 rounded-xl border border-stone-200 shadow-2xs cursor-pointer ${
+                isOrganic ? 'hover:text-[#16A34A]' : 'hover:text-[#E11D48]'
+              }`}
             >
               <ArrowLeft className="w-4 h-4" />
               <span>&larr; প্রোডাক্ট পেইজে ফিরে যান</span>
             </button>
 
-            <span className="text-xs font-extrabold text-[#E11D48] bg-rose-50 px-3.5 py-1.5 rounded-full border border-rose-200">
+            <span
+              className={`text-xs font-extrabold px-3.5 py-1.5 rounded-full border ${
+                isOrganic
+                  ? 'text-[#15803D] bg-[#ECFDF5] border-emerald-200'
+                  : 'text-[#E11D48] bg-rose-50 border-rose-200'
+              }`}
+            >
               ⚡ ফুল ইনস্ট্যান্ট চেকআউট ও ক্যাশ অন ডেলিভারি (Dokandari.com)
             </span>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
             {/* Left Column (5 cols on Desktop): Selected Product Summary + Quantity + Add to Cart + WhatsApp */}
-            <div className="lg:col-span-5 bg-white rounded-2xl border-2 border-rose-200 p-4 sm:p-6 shadow-xs space-y-4">
+            <div
+              className={`lg:col-span-5 bg-white rounded-2xl border-2 p-4 sm:p-6 shadow-xs space-y-4 ${
+                isOrganic ? 'border-emerald-200' : 'border-rose-200'
+              }`}
+            >
               <div className="flex items-start gap-3.5">
                 <img
                   src={resolveSafeProductImageUrl(
@@ -1001,14 +1014,24 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                   referrerPolicy="no-referrer"
                 />
                 <div className="flex-1 min-w-0 space-y-1.5">
-                  <span className="text-[10px] sm:text-xs font-bold text-[#E11D48] bg-rose-50 px-2.5 py-0.5 rounded border border-rose-200 inline-block">
+                  <span
+                    className={`text-[10px] sm:text-xs font-bold px-2.5 py-0.5 rounded border inline-block ${
+                      isOrganic
+                        ? 'text-[#15803D] bg-[#ECFDF5] border-emerald-200'
+                        : 'text-[#E11D48] bg-rose-50 border-rose-200'
+                    }`}
+                  >
                     {categoryNameBn}
                   </span>
                   <h2 className="text-sm sm:text-lg font-extrabold text-stone-900 leading-snug">
                     {displayTitle}
                   </h2>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-base sm:text-xl font-extrabold text-[#E11D48] font-mono">
+                    <span
+                      className={`text-base sm:text-xl font-extrabold font-mono ${
+                        isOrganic ? 'text-[#15803D]' : 'text-[#E11D48]'
+                      }`}
+                    >
                       ৳{product.price.toLocaleString()}
                     </span>
                     {selectedColor && (
@@ -1050,7 +1073,13 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               </div>
 
               {/* Live Price + Shipping Breakdown */}
-              <div className="p-3.5 rounded-xl bg-[#FFF0F3] border border-rose-200 space-y-1.5 text-xs sm:text-sm">
+              <div
+                className={`p-3.5 rounded-xl border space-y-1.5 text-xs sm:text-sm ${
+                  isOrganic
+                    ? 'bg-[#F0FDF4] border-emerald-200'
+                    : 'bg-[#FFF0F3] border-rose-200'
+                }`}
+              >
                 <div className="flex justify-between text-stone-700 font-semibold">
                   <span>পণ্যের দাম ({quantity} টি):</span>
                   <span className="font-mono font-bold text-stone-900">
@@ -1061,16 +1090,30 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                   <span>
                     ডেলিভারি চার্জ ({deliveryArea === 'dhaka' ? 'ঢাকার ভেতরে' : 'ঢাকার বাইরে'}):
                   </span>
-                  <span className="font-mono font-extrabold text-[#E11D48]">+ ৳{finalShipping}</span>
+                  <span
+                    className={`font-mono font-extrabold ${
+                      isOrganic ? 'text-[#15803D]' : 'text-[#E11D48]'
+                    }`}
+                  >
+                    + ৳{finalShipping}
+                  </span>
                 </div>
-                <div className="flex justify-between text-stone-900 font-extrabold text-sm sm:text-base pt-2 border-t border-rose-200">
+                <div
+                  className={`flex justify-between text-stone-900 font-extrabold text-sm sm:text-base pt-2 border-t ${
+                    isOrganic ? 'border-emerald-200' : 'border-rose-200'
+                  }`}
+                >
                   <span>সর্বমোট বিল:</span>
-                  <span className="font-mono text-[#E11D48]">৳{totalPrice.toLocaleString()}</span>
+                  <span
+                    className={`font-mono ${isOrganic ? 'text-[#15803D]' : 'text-[#E11D48]'}`}
+                  >
+                    ৳{totalPrice.toLocaleString()}
+                  </span>
                 </div>
               </div>
 
               {/* Add to Cart & Official WhatsApp Buttons */}
-              <div className="pt-2 border-t border-rose-100 space-y-2">
+              <div className="pt-2 border-t border-stone-100 space-y-2">
                 <span className="text-[11px] font-bold text-stone-600 block">
                   একাধিক প্রোডাক্ট কার্টে যোগ করতে বা সরাসরি WhatsApp-এ অর্ডার করতে ক্লিক করুন:
                 </span>
@@ -1078,7 +1121,11 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                   <button
                     type="button"
                     onClick={handleAddToCartOnCheckout}
-                    className="py-3 px-4 bg-white hover:bg-rose-50 active:scale-95 border-2 border-[#E11D48] text-[#E11D48] rounded-xl text-xs sm:text-sm font-extrabold flex items-center justify-center gap-2 shadow-2xs transition-all cursor-pointer"
+                    className={`py-3 px-4 bg-white active:scale-95 border-2 rounded-xl text-xs sm:text-sm font-extrabold flex items-center justify-center gap-2 shadow-2xs transition-all cursor-pointer ${
+                      isOrganic
+                        ? 'hover:bg-[#ECFDF5] border-[#16A34A] text-[#15803D]'
+                        : 'hover:bg-rose-50 border-[#E11D48] text-[#E11D48]'
+                    }`}
                   >
                     {addedToCartToast ? (
                       <>
@@ -1087,7 +1134,11 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                       </>
                     ) : (
                       <>
-                        <ShoppingBag className="w-4 h-4 text-[#E11D48] shrink-0" />
+                        <ShoppingBag
+                          className={`w-4 h-4 shrink-0 ${
+                            isOrganic ? 'text-[#16A34A]' : 'text-[#E11D48]'
+                          }`}
+                        />
                         <span>অ্যাড টু কার্ট (কার্টে রাখুন)</span>
                       </>
                     )}
@@ -1108,10 +1159,28 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
             </div>
 
             {/* Right Column (7 cols on Desktop): Compact & Attractive Separate Order Form */}
-            <div className="lg:col-span-7 bg-white rounded-2xl border-2 border-rose-300 p-4 sm:p-6 shadow-md space-y-3.5">
-              <div className="bg-[#FFF0F3] p-3 rounded-xl border border-rose-200 flex items-center justify-between gap-2 flex-wrap">
-                <h3 className="text-sm sm:text-base font-extrabold text-rose-950 flex items-center gap-2">
-                  <ShoppingBag className="w-4 h-4 text-[#E11D48] shrink-0" />
+            <div
+              className={`lg:col-span-7 bg-white rounded-2xl border-2 p-4 sm:p-6 shadow-md space-y-3.5 ${
+                isOrganic ? 'border-emerald-300' : 'border-rose-300'
+              }`}
+            >
+              <div
+                className={`p-3 rounded-xl border flex items-center justify-between gap-2 flex-wrap ${
+                  isOrganic
+                    ? 'bg-[#ECFDF5] border-emerald-200'
+                    : 'bg-[#FFF0F3] border-rose-200'
+                }`}
+              >
+                <h3
+                  className={`text-sm sm:text-base font-extrabold flex items-center gap-2 ${
+                    isOrganic ? 'text-emerald-950' : 'text-rose-950'
+                  }`}
+                >
+                  <ShoppingBag
+                    className={`w-4 h-4 shrink-0 ${
+                      isOrganic ? 'text-[#16A34A]' : 'text-[#E11D48]'
+                    }`}
+                  />
                   <span>অর্ডার কনফার্ম ফর্ম</span>
                 </h3>
                 <span className="text-[11px] font-bold text-emerald-700 bg-white px-2.5 py-1 rounded-full border border-emerald-200">
@@ -1262,11 +1331,21 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                 </div>
 
                 {/* Compact Total Summary */}
-                <div className="px-3.5 py-2.5 bg-[#FFF0F3]/80 rounded-xl flex items-center justify-between border border-rose-200">
+                <div
+                  className={`px-3.5 py-2.5 rounded-xl flex items-center justify-between border ${
+                    isOrganic
+                      ? 'bg-[#ECFDF5] border-emerald-200'
+                      : 'bg-[#FFF0F3]/80 border-rose-200'
+                  }`}
+                >
                   <span className="text-xs font-bold text-stone-800">
                     মোট বিল ({quantity}টি পণ্য + ডেলিভারি ৳{finalShipping}):
                   </span>
-                  <span className="text-base sm:text-lg font-mono font-black text-[#E11D48]">
+                  <span
+                    className={`text-base sm:text-lg font-mono font-black ${
+                      isOrganic ? 'text-[#15803D]' : 'text-[#E11D48]'
+                    }`}
+                  >
                     ৳{totalPrice.toLocaleString()}
                   </span>
                 </div>
@@ -1275,7 +1354,11 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                 <button
                   type="submit"
                   disabled={isOrdering}
-                  className="w-full py-3.5 px-5 bg-gradient-to-r from-[#E11D48] via-[#F43F5E] to-[#BE123C] hover:from-[#BE123C] hover:to-[#9F1239] active:scale-[0.99] disabled:bg-stone-400 text-white rounded-xl text-sm sm:text-base font-extrabold shadow-md ring-2 ring-rose-300/70 transition-all cursor-pointer flex items-center justify-center gap-2"
+                  className={`w-full py-3.5 px-5 active:scale-[0.99] disabled:bg-stone-400 text-white rounded-xl text-sm sm:text-base font-extrabold shadow-md transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                    isOrganic
+                      ? 'bg-[#16A34A] hover:bg-[#15803D] ring-2 ring-emerald-300/70'
+                      : 'bg-gradient-to-r from-[#E11D48] via-[#F43F5E] to-[#BE123C] hover:from-[#BE123C] hover:to-[#9F1239] ring-2 ring-rose-300/70'
+                  }`}
                 >
                   <ShoppingBag className="w-5 h-5" />
                   <span>
@@ -1386,43 +1469,60 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
           </div>
         </div>
 
-        {/* Realistic Product Detail Hero Banner */}
-        <div className="relative rounded-2xl overflow-hidden bg-stone-900 border border-rose-200/60 shadow-sm">
-          <img
-            src={resolveSafeProductImageUrl(
-              activeHeroConfig.image || product.images[0],
-              product,
-              0
-            )}
-            alt={activeHeroConfig.title}
-            onError={(e) => handleProductImageError(e, product, 0)}
-            className="w-full h-28 sm:h-36 object-cover object-center opacity-45"
-            referrerPolicy="no-referrer"
-          />
-          <div className="absolute inset-0 bg-gradient-to-r from-stone-950/90 via-stone-950/65 to-stone-900/40 flex items-center justify-between px-4 sm:px-8">
-            <div className="space-y-1 max-w-2xl">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#E11D48] text-white text-[10px] font-bold uppercase tracking-wider">
-                  {activeHeroConfig.tag || categoryNameBn}
-                </span>
-                <span className="text-[11px] text-amber-300 font-bold">
-                  ✓ ১০০% অরিজিনাল কোয়ালিটি • সারা দেশে ক্যাশ অন ডেলিভারি
-                </span>
-              </div>
-              <h2 className="text-sm sm:text-xl font-extrabold text-white line-clamp-1">
-                {activeHeroConfig.title || `${categoryNameBn} — অফিশিয়াল কালেকশন`}
-              </h2>
-              <p className="text-[11px] sm:text-xs text-stone-200 line-clamp-1">
-                {activeHeroConfig.subtitle}
-              </p>
+        {/* 100% Light Theme Product Detail Hero Banner — Zero Dark Overlay */}
+        <div
+          className={`relative rounded-2xl overflow-hidden border shadow-2xs p-4 sm:p-6 flex items-center justify-between gap-4 ${
+            isOrganic
+              ? 'bg-gradient-to-r from-[#F0FDF4] via-[#ECFDF5] to-[#DCFCE7] border-emerald-200'
+              : 'bg-gradient-to-r from-[#FFF5F7] via-[#FFF0F3] to-[#FFE4E8] border-rose-200'
+          }`}
+        >
+          <div className="space-y-1.5 max-w-2xl flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span
+                className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-white text-[10px] font-bold uppercase tracking-wider ${
+                  isOrganic ? 'bg-[#16A34A]' : 'bg-[#E11D48]'
+                }`}
+              >
+                {activeHeroConfig.tag || categoryNameBn}
+              </span>
+              <span
+                className={`text-[11px] font-extrabold ${
+                  isOrganic ? 'text-[#15803D]' : 'text-[#BE123C]'
+                }`}
+              >
+                ✓ ১০০% অরিজিনাল কোয়ালিটি • সারা দেশে ক্যাশ অন ডেলিভারি
+              </span>
             </div>
+            <h2 className="text-sm sm:text-xl font-black text-stone-900 line-clamp-1">
+              {activeHeroConfig.title || `${categoryNameBn} — অফিশিয়াল কালেকশন`}
+            </h2>
+            <p className="text-[11px] sm:text-xs text-stone-700 font-medium line-clamp-1">
+              {activeHeroConfig.subtitle}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3 shrink-0">
+            <img
+              src={resolveSafeProductImageUrl(
+                activeHeroConfig.image || product.images[0],
+                product,
+                0
+              )}
+              alt={activeHeroConfig.title}
+              onError={(e) => handleProductImageError(e, product, 0)}
+              className={`w-16 h-16 sm:w-20 sm:h-20 rounded-2xl object-cover border-2 bg-white shadow-2xs hidden xs:block ${
+                isOrganic ? 'border-emerald-300' : 'border-rose-300'
+              }`}
+              referrerPolicy="no-referrer"
+            />
             {isAdmin && (
               <button
                 type="button"
                 onClick={() => setIsEditingHero(!isEditingHero)}
-                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-stone-950 text-xs font-extrabold shadow-md cursor-pointer shrink-0"
+                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-stone-50 text-stone-900 border border-stone-300 text-xs font-extrabold shadow-2xs cursor-pointer shrink-0"
               >
-                <Edit3 className="w-3.5 h-3.5" />
+                <Edit3 className="w-3.5 h-3.5 text-[#E11D48]" />
                 <span>হিরো ব্যানার এডিট</span>
               </button>
             )}
@@ -1859,11 +1959,21 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
 
           {/* Right Column: Compact Mobile Title, Price, High-Up Animated Order Button & 4-Column Guarantee Badges (7 cols) */}
           <div className="lg:col-span-7 space-y-4 sm:space-y-5">
-            <div className="bg-white rounded-2xl border border-stone-200 p-4 sm:p-7 shadow-xs space-y-3.5 sm:space-y-4">
+            <div
+              className={`bg-white rounded-2xl border p-4 sm:p-7 shadow-xs space-y-3.5 sm:space-y-4 ${
+                isOrganic ? 'border-emerald-200' : 'border-stone-200'
+              }`}
+            >
               {/* Compact Top Badges & Clean Mobile Product Title */}
               <div>
                 <div className="flex items-center gap-1.5 flex-wrap text-[10px] sm:text-xs mb-1.5">
-                  <span className="text-[#E11D48] font-bold bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
+                  <span
+                    className={`font-bold px-2 py-0.5 rounded border ${
+                      isOrganic
+                        ? 'text-[#15803D] bg-[#ECFDF5] border-emerald-200'
+                        : 'text-[#E11D48] bg-rose-50 border-rose-200'
+                    }`}
+                  >
                     {categoryNameBn}
                   </span>
                   <span className="text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
@@ -1874,10 +1984,13 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
 
                 {/* Smaller, cleaner font size on mobile so long titles look neat */}
                 <h1 className="text-sm sm:text-2xl font-extrabold text-stone-900 leading-snug">
-                  {displayTitle} | <span className="text-[#E11D48]">dokandari.com</span>
+                  {displayTitle} |{' '}
+                  <span className={isOrganic ? 'text-[#16A34A]' : 'text-[#E11D48]'}>
+                    dokandari.com
+                  </span>
                 </h1>
 
-                {/* Rating Row */}
+                {/* Verified Quality Row (No Review Section) */}
                 <div className="flex items-center gap-1.5 mt-1.5">
                   <div className="flex items-center text-amber-500">
                     {[...Array(5)].map((_, i) => (
@@ -1885,15 +1998,25 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                     ))}
                   </div>
                   <span className="text-[11px] font-bold text-stone-800">5.0</span>
-                  <span className="text-[11px] text-stone-400">
-                    ({reviews.length} টি ভেরিফাইড রিভিউ)
+                  <span className="text-[11px] font-semibold text-emerald-700">
+                    • ✓ ১০০% অরিজিনাল ও ভেরিফাইড কোয়ালিটি
                   </span>
                 </div>
               </div>
 
               {/* Compact Price Box */}
-              <div className="p-3 sm:p-4 rounded-xl bg-rose-50/60 border border-rose-100 flex items-baseline gap-2.5 flex-wrap">
-                <span className="text-lg sm:text-3xl font-extrabold text-[#E11D48] font-mono tabular-nums">
+              <div
+                className={`p-3 sm:p-4 rounded-xl border flex items-baseline gap-2.5 flex-wrap ${
+                  isOrganic
+                    ? 'bg-[#F0FDF4] border-emerald-200'
+                    : 'bg-rose-50/60 border-rose-100'
+                }`}
+              >
+                <span
+                  className={`text-lg sm:text-3xl font-extrabold font-mono tabular-nums ${
+                    isOrganic ? 'text-[#15803D]' : 'text-[#E11D48]'
+                  }`}
+                >
                   ৳{product.price.toLocaleString()}
                 </span>
                 {product.originalPrice && (
@@ -1901,7 +2024,13 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                     ৳{product.originalPrice.toLocaleString()}
                   </span>
                 )}
-                <span className="text-[10px] sm:text-xs font-bold text-[#E11D48] bg-white px-2 py-0.5 rounded border border-rose-200">
+                <span
+                  className={`text-[10px] sm:text-xs font-bold bg-white px-2 py-0.5 rounded border ${
+                    isOrganic
+                      ? 'text-[#15803D] border-emerald-200'
+                      : 'text-[#E11D48] border-rose-200'
+                  }`}
+                >
                   Save {discountPercent}%
                 </span>
               </div>
@@ -1909,7 +2038,10 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               {/* Fabric / Material Details */}
               {product.fabric && (
                 <div className="text-[11px] sm:text-xs text-stone-700 bg-stone-50 p-2.5 sm:p-3 rounded-xl border border-stone-200">
-                  <strong className="text-stone-900">ফ্যাব্রিক / মেটেরিয়াল:</strong> {product.fabric}
+                  <strong className="text-stone-900">
+                    {isOrganic ? 'উপাদান / বিশুদ্ধতা:' : 'ফ্যাব্রিক / মেটেরিয়াল:'}
+                  </strong>{' '}
+                  {product.fabric}
                 </div>
               )}
 
@@ -1918,7 +2050,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                 {product.variants.colors && product.variants.colors.length > 0 && (
                   <div>
                     <span className="block text-[11px] sm:text-xs font-bold text-stone-900 mb-1">
-                      কালার নির্বাচন করুন:
+                      {isOrganic ? 'ধরন / প্যাক নির্বাচন করুন:' : 'কালার নির্বাচন করুন:'}
                     </span>
                     <div className="flex flex-wrap gap-1.5">
                       {product.variants.colors.map((c) => (
@@ -1928,7 +2060,9 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                           onClick={() => setSelectedColor(c)}
                           className={`px-2.5 py-1 text-[11px] sm:text-xs font-bold rounded-lg border transition-all cursor-pointer ${
                             selectedColor === c
-                              ? 'bg-[#E11D48] text-white border-[#E11D48] shadow-2xs'
+                              ? isOrganic
+                                ? 'bg-[#16A34A] text-white border-[#16A34A] shadow-2xs'
+                                : 'bg-[#E11D48] text-white border-[#E11D48] shadow-2xs'
                               : 'bg-white text-stone-700 border-stone-200 hover:border-stone-400'
                           }`}
                         >
@@ -1942,7 +2076,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                 {product.variants.sizes && product.variants.sizes.length > 0 && (
                   <div>
                     <span className="block text-[11px] sm:text-xs font-bold text-stone-900 mb-1">
-                      সাইজ নির্বাচন করুন:
+                      {isOrganic ? 'ওজন / পরিমাণ নির্বাচন করুন:' : 'সাইজ নির্বাচন করুন:'}
                     </span>
                     <div className="flex flex-wrap gap-1.5">
                       {product.variants.sizes.map((s) => (
@@ -1952,7 +2086,9 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                           onClick={() => setSelectedSize(s)}
                           className={`px-3 py-1 text-[11px] sm:text-xs font-bold rounded-lg border transition-all cursor-pointer ${
                             selectedSize === s
-                              ? 'bg-[#E11D48] text-white border-[#E11D48] shadow-2xs'
+                              ? isOrganic
+                                ? 'bg-[#16A34A] text-white border-[#16A34A] shadow-2xs'
+                                : 'bg-[#E11D48] text-white border-[#E11D48] shadow-2xs'
                               : 'bg-white text-stone-700 border-stone-200 hover:border-stone-400'
                           }`}
                         >
@@ -1990,7 +2126,11 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
 
                   <div className="text-xs font-bold text-stone-700">
                     মোট মূল্য:{' '}
-                    <span className="text-sm sm:text-base font-extrabold font-mono text-[#E11D48]">
+                    <span
+                      className={`text-sm sm:text-base font-extrabold font-mono ${
+                        isOrganic ? 'text-[#15803D]' : 'text-[#E11D48]'
+                      }`}
+                    >
                       ৳{subtotalPrice.toLocaleString()}
                     </span>
                   </div>
@@ -2003,7 +2143,11 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                   <button
                     type="button"
                     onClick={handleAddToCartOnCheckout}
-                    className="py-3 px-4 bg-white hover:bg-rose-50 active:scale-95 border-2 border-[#E11D48] text-[#E11D48] rounded-xl text-xs sm:text-sm font-extrabold flex items-center justify-center gap-2 shadow-2xs transition-all cursor-pointer"
+                    className={`py-3 px-4 bg-white active:scale-95 border-2 rounded-xl text-xs sm:text-sm font-extrabold flex items-center justify-center gap-2 shadow-2xs transition-all cursor-pointer ${
+                      isOrganic
+                        ? 'hover:bg-[#ECFDF5] border-[#16A34A] text-[#15803D]'
+                        : 'hover:bg-rose-50 border-[#E11D48] text-[#E11D48]'
+                    }`}
                   >
                     {addedToCartToast ? (
                       <>
@@ -2012,7 +2156,11 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                       </>
                     ) : (
                       <>
-                        <ShoppingBag className="w-4 h-4 text-[#E11D48] shrink-0" />
+                        <ShoppingBag
+                          className={`w-4 h-4 shrink-0 ${
+                            isOrganic ? 'text-[#16A34A]' : 'text-[#E11D48]'
+                          }`}
+                        />
                         <span>অ্যাড টু কার্ট (কার্টে যোগ করুন)</span>
                       </>
                     )}
@@ -2031,7 +2179,11 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                 <button
                   type="button"
                   onClick={handleGoToInstantCheckout}
-                  className="w-full py-3.5 px-4 bg-gradient-to-r from-[#E11D48] via-[#F43F5E] to-[#BE123C] hover:from-[#BE123C] hover:to-[#9F1239] active:scale-[0.98] text-white rounded-xl text-sm sm:text-base font-extrabold shadow-md hover:shadow-lg ring-2 ring-rose-300/70 flex items-center justify-center gap-2 transition-all duration-200 cursor-pointer"
+                  className={`w-full py-3.5 px-4 active:scale-[0.98] text-white rounded-xl text-sm sm:text-base font-extrabold shadow-md hover:shadow-lg flex items-center justify-center gap-2 transition-all duration-200 cursor-pointer ${
+                    isOrganic
+                      ? 'bg-[#16A34A] hover:bg-[#15803D] ring-2 ring-emerald-300/70'
+                      : 'bg-gradient-to-r from-[#E11D48] via-[#F43F5E] to-[#BE123C] hover:from-[#BE123C] hover:to-[#9F1239] ring-2 ring-rose-300/70'
+                  }`}
                 >
                   <ShoppingBag className="w-5 h-5 text-white shrink-0 animate-bounce" />
                   <span>
@@ -2042,7 +2194,9 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                 {/* Delivery Fee Quick Note */}
                 <div className="flex items-center justify-between text-[10.5px] sm:text-xs text-stone-600 px-1 font-semibold">
                   <div className="flex items-center gap-1">
-                    <Truck className="w-3.5 h-3.5 text-[#E11D48]" />
+                    <Truck
+                      className={`w-3.5 h-3.5 ${isOrganic ? 'text-[#16A34A]' : 'text-[#E11D48]'}`}
+                    />
                     <span>ঢাকার ভেতরে: ৳৭০ | ঢাকার বাইরে: ৳১২০</span>
                   </div>
                   <span className="text-emerald-700 font-bold flex items-center gap-1">
@@ -2135,17 +2289,31 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
 
           return (
             <section className="pt-4 sm:pt-6 space-y-4">
-              <div className="bg-white border border-rose-200/80 rounded-2xl p-3.5 sm:p-5 flex items-center justify-between shadow-2xs flex-wrap gap-2">
+              <div
+                className={`bg-white border rounded-2xl p-3.5 sm:p-5 flex items-center justify-between shadow-2xs flex-wrap gap-2 ${
+                  isOrganic ? 'border-emerald-200' : 'border-rose-200/80'
+                }`}
+              >
                 <div className="flex items-center gap-2.5">
-                  <span className="w-8 h-8 rounded-xl bg-[#E11D48] text-white flex items-center justify-center text-sm font-bold shrink-0 shadow-2xs">
-                    ✨
+                  <span
+                    className={`w-8 h-8 rounded-xl text-white flex items-center justify-center text-sm font-bold shrink-0 shadow-2xs ${
+                      isOrganic ? 'bg-[#16A34A]' : 'bg-[#E11D48]'
+                    }`}
+                  >
+                    {isOrganic ? '🌿' : '✨'}
                   </span>
                   <div>
                     <div className="flex items-center gap-2 flex-wrap">
                       <h2 className="text-sm sm:text-lg font-extrabold text-stone-900">
                         সাজেস্টেড ও সম্পর্কিত প্রোডাক্ট ({categoryNameBn})
                       </h2>
-                      <span className="text-[10px] font-bold text-[#E11D48] bg-rose-50 px-2.5 py-0.5 rounded-full border border-rose-200">
+                      <span
+                        className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${
+                          isOrganic
+                            ? 'text-[#15803D] bg-[#ECFDF5] border-emerald-200'
+                            : 'text-[#E11D48] bg-rose-50 border-rose-200'
+                        }`}
+                      >
                         {suggestedList.length} টি বাছাইকৃত পণ্য
                       </span>
                     </div>
@@ -2158,7 +2326,11 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                 <button
                   type="button"
                   onClick={onBack}
-                  className="px-3.5 py-1.5 rounded-xl bg-[#FFF1F2] hover:bg-[#E11D48] text-[#E11D48] hover:text-white border border-rose-200 text-xs font-bold transition-all cursor-pointer shrink-0"
+                  className={`px-3.5 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer shrink-0 ${
+                    isOrganic
+                      ? 'bg-[#ECFDF5] hover:bg-[#16A34A] text-[#15803D] hover:text-white border-emerald-200'
+                      : 'bg-[#FFF1F2] hover:bg-[#E11D48] text-[#E11D48] hover:text-white border-rose-200'
+                  }`}
                 >
                   সকল প্রোডাক্ট দেখুন &rarr;
                 </button>
@@ -2169,6 +2341,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                   <ProductCard
                     key={sugProd.id}
                     product={sugProd}
+                    greenTheme={sugProd.category === 'organic_food' || isOrganic}
                     onOpenDetail={(p) => {
                       if (onSelectProduct) {
                         onSelectProduct(p);

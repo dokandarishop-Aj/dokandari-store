@@ -29,25 +29,27 @@ export const VideoGalleryPage: React.FC<VideoGalleryPageProps> = ({
 
   return (
     <div className="bg-[#FAF9F6] min-h-screen pb-16 animate-in fade-in">
-      {/* Header Banner */}
-      <div className="bg-stone-900 text-white py-12 px-4 sm:px-6 lg:px-8">
+      {/* 100% Light Rose/Cream Header Banner — Zero Dark Background */}
+      <div className="bg-gradient-to-br from-[#FFF5F7] via-[#FFF0F3] to-[#FFE4E8] text-stone-900 border-b border-rose-200 py-10 sm:py-12 px-4 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto space-y-3">
           <button
             onClick={onBackToHome}
-            className="inline-flex items-center gap-1.5 text-xs font-bold text-rose-200 hover:text-white transition-colors cursor-pointer bg-white/10 px-3 py-1.5 rounded-full backdrop-blur-xs"
+            className="inline-flex items-center gap-1.5 text-xs font-bold text-stone-800 hover:text-[#E11D48] transition-colors cursor-pointer bg-white px-3.5 py-2 rounded-xl border border-rose-200 shadow-2xs"
           >
-            <ArrowLeft className="w-3.5 h-3.5" />
+            <ArrowLeft className="w-3.5 h-3.5 text-[#E11D48]" />
             <span>&larr; শপে ফিরে যান</span>
           </button>
 
-          <div className="inline-block px-3 py-0.5 rounded-full bg-[#E11D48] text-white text-xs font-bold tracking-wider">
-            LIVE PRODUCT SHOWCASE
+          <div>
+            <div className="inline-block px-3.5 py-1 rounded-full bg-white text-[#E11D48] border border-rose-200 text-xs font-extrabold tracking-wider shadow-2xs">
+              LIVE PRODUCT SHOWCASE
+            </div>
           </div>
 
-          <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight">
+          <h1 className="text-2xl sm:text-4xl font-black text-stone-900 tracking-tight">
             অরিজিনাল ভিডিও গ্যালারি ও আনবক্সিং রিলস
           </h1>
-          <p className="text-xs sm:text-sm text-stone-300 max-w-xl">
+          <p className="text-xs sm:text-sm text-stone-700 font-medium max-w-xl">
             অর্ডার করার আগেই দেখে নিন পণ্যের আসল কোয়ালিটি, ফিনিশিং ও ব্যবহারিক ডেমো। ১০০% সততা ও ক্যাশ অন ডেলিভারি নিশ্চয়তা।
           </p>
         </div>

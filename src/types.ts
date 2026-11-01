@@ -43,12 +43,12 @@ export const OFFICIAL_CATEGORIES: MainCategory[] = [
     visible: true,
   },
   {
-    id: 'fashion_clothing',
-    nameBn: 'ফ্যাশন ও ক্লদিং',
-    nameEn: 'Fashion & Clothing',
+    id: 'organic_food',
+    nameBn: 'অর্গানিক ফুড ও ন্যাচারাল ফুড',
+    nameEn: 'Organic Food & Superfoods',
     order: 3,
     icon: '',
-    image: 'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=400&q=80',
+    image: '/uploads/product/organic-sundarban-honey.jpg',
     visible: true,
   },
   {

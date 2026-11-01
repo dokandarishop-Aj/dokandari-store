@@ -63,6 +63,7 @@ export const CategorySquircleBar: React.FC<CategorySquircleBarProps> = ({
         <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none">
           {orderedCategories.filter((c) => c.visible).map((cat, idx) => {
             const isSelected = activeCategory === cat.id;
+            const isOrganicCat = cat.id === 'organic_food';
             const count = productCounts[cat.id] || 0;
 
             return (
@@ -74,7 +75,11 @@ export const CategorySquircleBar: React.FC<CategorySquircleBarProps> = ({
                 <div
                   className={`relative w-18 h-18 sm:w-20 sm:h-20 rounded-2xl overflow-hidden border-2 transition-all p-0.5 shadow-2xs ${
                     isSelected
-                      ? 'border-[#E11D48] ring-2 ring-rose-200 bg-rose-50 shadow-xs'
+                      ? isOrganicCat
+                        ? 'border-[#16A34A] ring-2 ring-emerald-200 bg-[#F0FDF4] shadow-xs'
+                        : 'border-[#E11D48] ring-2 ring-rose-200 bg-rose-50 shadow-xs'
+                      : isOrganicCat
+                      ? 'border-emerald-300 hover:border-[#16A34A] bg-[#F0FDF4]'
                       : 'border-stone-200 hover:border-rose-300 bg-stone-50'
                   }`}
                 >
@@ -84,15 +89,25 @@ export const CategorySquircleBar: React.FC<CategorySquircleBarProps> = ({
                     className="w-full h-full object-cover rounded-xl"
                     referrerPolicy="no-referrer"
                   />
-                  {/* Subtle Scrim for Contrast */}
-                  <div className="absolute inset-x-0 bottom-0 bg-stone-950/75 text-white text-[9px] font-bold py-0.5 text-center leading-tight">
+                  {/* Subtle Badge for Count */}
+                  <div
+                    className={`absolute inset-x-0 bottom-0 text-white text-[9px] font-bold py-0.5 text-center leading-tight ${
+                      isOrganicCat ? 'bg-[#15803D]/90' : 'bg-stone-900/75'
+                    }`}
+                  >
                     {count > 0 ? `${count} টি পণ্য` : `#${idx + 1}`}
                   </div>
                 </div>
 
                 <span
                   className={`text-[11px] font-bold text-center mt-2 leading-tight transition-colors line-clamp-1 ${
-                    isSelected ? 'text-[#E11D48]' : 'text-stone-800 group-hover:text-[#E11D48]'
+                    isSelected
+                      ? isOrganicCat
+                        ? 'text-[#15803D]'
+                        : 'text-[#E11D48]'
+                      : isOrganicCat
+                      ? 'text-[#15803D] group-hover:text-[#16A34A]'
+                      : 'text-stone-800 group-hover:text-[#E11D48]'
                   }`}
                 >
                   {cat.nameBn}

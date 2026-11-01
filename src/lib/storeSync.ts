@@ -51,6 +51,10 @@ export interface StoreContent {
     warehouseAddress: string;
     corporateAddress?: string;
     googleMapUrl?: string;
+    ceoMessageText?: string;
+    businessStoryText?: string;
+    productSourcingText?: string;
+    businessPolicyText?: string;
     policyHeadline: string;
     policySubtitle: string;
     returnPolicyText: string;
@@ -92,12 +96,19 @@ export const DEFAULT_CATEGORY_HEROES: Record<string, CategoryHeroConfig> = {
     tag: 'স্মার্ট গ্যাজেটস ও টেক',
     ctaText: 'গ্যাজেটস দেখুন',
   },
+  organic_food: {
+    title: '১০০% খাঁটি অর্গানিক ফুড, ন্যাচারাল মধু ও সুপারফুড কালেকশন',
+    subtitle: 'সুন্দরবনের প্রাকৃতিক চাকের মধু, পাবনার দানাদার গাওয়া ঘি, কাঠের ঘানির সরিষার তেল, সৌদি আজওয়া খেজুর ও ল্যাব-টেস্টেড অর্গানিক সুপারফুড — সরাসরি উৎস থেকে আপনার ঘরে।',
+    image: '/uploads/product/organic-sundarban-honey.jpg',
+    tag: '🌿 ১০০% অর্গানিক ও কেমিক্যালমুক্ত ফুড',
+    ctaText: 'অর্গানিক ফুড দেখুন',
+  },
   fashion_clothing: {
-    title: 'প্রিমিয়াম ফ্যাশন, হিজাব ও মডেস্ট ক্লদিং কালেকশন',
-    subtitle: 'মালয়েশিয়ান শিফন হিজাব, প্রিমিয়াম পার্টি আবায়া ও ট্রেন্ডি ফ্যাশন ওয়্যার — আরামদায়ক ফেব্রিক ও নিখুঁত ফিনিশিং।',
-    image: 'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=1600&q=80',
-    tag: 'ফ্যাশন ও ক্লদিং',
-    ctaText: 'ফ্যাশন কালেকশন',
+    title: '১০০% খাঁটি অর্গানিক ফুড, ন্যাচারাল মধু ও সুপারফুড কালেকশন',
+    subtitle: 'সুন্দরবনের প্রাকৃতিক চাকের মধু, পাবনার দানাদার গাওয়া ঘি, কাঠের ঘানির সরিষার তেল ও ল্যাব-টেস্টেড অর্গানিক ফুড কালেকশন।',
+    image: '/uploads/product/organic-sundarban-honey.jpg',
+    tag: '🌿 অর্গানিক ফুড জোন',
+    ctaText: 'অর্গানিক ফুড দেখুন',
   },
   beauty_personal_care: {
     title: 'অথেনটিক বিউটি ও পার্সোনাল কেয়ার কালেকশন',
@@ -171,12 +182,20 @@ export const DEFAULT_STORE_CONTENT: StoreContent = {
     youtube: 'https://youtube.com/@dokandari',
   },
   pageContent: {
-    aboutHeadline: 'Dokandari — আপনার সৌন্দর্য, আমাদের ঐতিহ্য',
+    aboutHeadline: 'Dokandari — আপনার সৌন্দর্য ও সুস্থতা, আমাদের ঐতিহ্য',
     aboutSubtitle:
-      'আন্তর্জাতিক মানের প্রিমিয়াম হোম ডেকোর, ফ্যাশন ও গ্যাজেটস কালেকশন সরাসরি বিশ্বস্ত প্রস্তুতকারক থেকে আপনার দ্বারে পৌঁছে দিতে আমরা দায়বদ্ধ।',
+      'আন্তর্জাতিক মানের প্রিমিয়াম হোম ডেকোর, স্মার্ট গ্যাজেটস এবং ১০০% খাঁটি অর্গানিক ফুড সরাসরি বিশ্বস্ত উৎস থেকে আপনার দ্বারে পৌঁছে দিতে আমরা দায়বদ্ধ।',
     warehouseAddress: 'বি-৬১/১৪, জলেশ্বর, সাভার - ১৩৪০, ঢাকা (১ম তলা)',
     corporateAddress: 'সাভার বাস স্ট্যান্ড, শহীদ প্লাজা, দ্বিতীয় তলা',
     googleMapUrl: 'https://maps.google.com/?q=Jaleshwar+Savar+1340+Dhaka',
+    ceoMessageText:
+      'আমাদের প্রতিটি গ্রাহক আমাদের পরিবারের অংশ। বাংলাদেশে বসে মানুষ যেন কোনো প্রতারণা ছাড়াই ১০০% খাঁটি অর্গানিক ফুড, অরিজিনাল ইমপোর্টেড হোম ডেকোর এবং স্মার্ট গ্যাজেটস হাতে পেয়ে যাচাই করে মূল্য পরিশোধ করতে পারেন—সেই লক্ষ্যেই Dokandari-এর পথচলা।',
+    businessStoryText:
+      'Dokandari শুরু হয়েছিল একটি সহজ কিন্তু দৃঢ় লক্ষ্য নিয়ে—বাংলাদেশের ই-কমার্স গ্রাহকদের কাছে ছবির সাথে হুবহু মিল থাকা অরিজিনাল পণ্য এবং ভেজালমুক্ত অর্গানিক খাবার পৌঁছে দেওয়া। সাভারের জলেশ্বর ও শহীদ প্লাজা অফিস থেকে শুরু করে আজ আমরা সারা বাংলাদেশের ৬৪টি জেলায় হাজারো সন্তুষ্ট পরিবারের আস্থার প্রতীক।',
+    productSourcingText:
+      'আমরা আমাদের অর্গানিক ফুড ক্যাটাগরির প্রতিটি পণ্য সরাসরি প্রাকৃতিক উৎস থেকে সংগ্রহ করি—সুন্দরবনের মৌয়ালদের খাঁটি চাকের মধু, পাবনার দেশি গাওয়া ঘি, তেঁতুল কাঠের ঘানির সরিষার তেল, মদিনার আজওয়া খেজুর এবং বাছাইকৃত সুপারফুড। পাশাপাশি আমাদের হোম ডেকোর ও স্মার্ট গ্যাজেটস সরাসরি ভেরিফাইড ফ্যাক্টরি থেকে নিজস্ব কোয়ালিটি চেকিংয়ের মাধ্যমে ইমপোর্ট করা হয়।',
+    businessPolicyText:
+      '১. অগ্রিম ১ টাকাও ছাড়া সারা বাংলাদেশে শতভাগ ওপেন-পার্সেল ক্যাশ অন ডেলিভারি সুবিধা।\n২. ডেলিভারি ম্যানের সামনে প্যাকেট খুলে পণ্য ও গুণগত মান দেখে নেওয়ার পূর্ণ স্বাধীনতা।\n৩. যেকোনো ত্রুটি বা অমিলে ৭ দিনের মধ্যে সম্পূর্ণ ফ্রি রিটার্ন ও ইনস্ট্যান্ট এক্সচেঞ্জ গ্যারান্টি।',
     policyHeadline: 'গোপনীয়তা, রিটার্ন ও রিফান্ড পলিসি',
     policySubtitle:
       'Dokandari এর সাথে আপনার প্রতিটি কেনাকাটা শতভাগ নিরাপদ — ৭ দিনের ফ্রি রিটার্ন ও এক্সচেঞ্জ গ্যারান্টি (0 BDT Return Cost)। ডেলিভারি ম্যানের সামনে পার্সেল খুলে যাচাই করে নেওয়ার পূর্ণ সুবিধা।',
@@ -365,6 +384,12 @@ export async function saveStoreContentPersisted(
 ): Promise<StoreContent> {
   const current = getInitialStoreContent();
   const merged = mergeStoreContent(current, contentUpdate);
+  // Migrate any legacy 'fashion_clothing' in categoryOrder to 'organic_food' at position #3
+  if (Array.isArray(merged.categoryOrder)) {
+    merged.categoryOrder = merged.categoryOrder.map((c) =>
+      c === 'fashion_clothing' ? 'organic_food' : c
+    );
+  }
   const clean = sanitizeForFirestore(merged);
   try {
     localStorage.setItem(LS_STORE_CONTENT_KEY, JSON.stringify(clean));
@@ -377,6 +402,25 @@ export async function saveStoreContentPersisted(
   } catch (err) {
     console.warn('Firestore store_content sync warning (saved locally):', err);
   }
+
+  // Also persist Founder & Brand Identity profile to a dedicated lightweight Firestore doc
+  // so Founder photo & Brand Story edits ALWAYS sync 100% reliably to live domain
+  if (contentUpdate.founder || contentUpdate.pageContent) {
+    try {
+      await setDoc(
+        doc(db, 'settings', 'founder_profile'),
+        sanitizeForFirestore({
+          founder: clean.founder,
+          pageContent: clean.pageContent,
+          updatedAt: Date.now(),
+        }),
+        { merge: true }
+      );
+    } catch (err) {
+      console.warn('Firestore founder_profile sync note:', err);
+    }
+  }
+
   return clean;
 }
 
@@ -464,6 +508,18 @@ export const VALID_LOCAL_UPLOAD_FILES = new Set<string>([
   'Ha595a0e636bb4479885d5e8a88bd25afz.jpg',
   'Hb954a2545019473bba00901770da8608F.jpg',
   'He1e7d0e527634b5196f9d7cd961eb694M.jpg',
+  'organic-sundarban-honey.jpg',
+  'organic-pabna-ghee.jpg',
+  'organic-mustard-oil.jpg',
+  'organic-ajwa-dates.jpg',
+  'organic-chia-seeds.jpg',
+  'organic-honey-nuts.jpg',
+  'organic-kalojira-oil.jpg',
+  'organic-moringa-powder.jpg',
+  'organic-red-rice.jpg',
+  'organic-green-tea.jpg',
+  'organic-patali-gur.jpg',
+  'organic-spice-combo.jpg',
 ]);
 
 /**
@@ -724,8 +780,22 @@ export function getFallbackProductImage(
     office_essentials: [
       '/uploads/product/1776523954-20516.jpg',
     ],
+    organic_food: [
+      '/uploads/product/organic-sundarban-honey.jpg',
+      '/uploads/product/organic-pabna-ghee.jpg',
+      '/uploads/product/organic-mustard-oil.jpg',
+      '/uploads/product/organic-ajwa-dates.jpg',
+      '/uploads/product/organic-honey-nuts.jpg',
+      '/uploads/product/organic-chia-seeds.jpg',
+      '/uploads/product/organic-kalojira-oil.jpg',
+      '/uploads/product/organic-moringa-powder.jpg',
+      '/uploads/product/organic-red-rice.jpg',
+      '/uploads/product/organic-green-tea.jpg',
+      '/uploads/product/organic-patali-gur.jpg',
+      '/uploads/product/organic-spice-combo.jpg',
+    ],
     fashion_clothing: [
-      '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg',
+      '/uploads/product/organic-sundarban-honey.jpg',
     ],
   };
 

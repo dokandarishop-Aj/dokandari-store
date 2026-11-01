@@ -26,6 +26,7 @@ interface ProductCardProps {
   onInstantOrder: (product: Product) => void;
   onEditProduct?: (product: Product) => void;
   compact?: boolean;
+  greenTheme?: boolean;
 }
 
 /**
@@ -41,9 +42,12 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   onInstantOrder,
   onEditProduct,
   compact = false,
+  greenTheme = false,
 }) => {
   const { addToCart } = useCart();
   const [isAdded, setIsAdded] = useState(false);
+
+  const isOrganic = greenTheme || product.category === 'organic_food';
 
   const discountPercent = product.originalPrice
     ? Math.round(((product.originalPrice - product.price) / product.originalPrice) * 100)
@@ -77,10 +81,14 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   return (
     <article
       onClick={() => onOpenDetail(product)}
-      className="group relative flex flex-col bg-white rounded-2xl border border-rose-100/90 overflow-hidden shadow-2xs hover:shadow-md hover:border-rose-200 transition-all duration-200 cursor-pointer"
+      className={`group relative flex flex-col bg-white rounded-2xl border overflow-hidden shadow-2xs hover:shadow-md transition-all duration-200 cursor-pointer ${
+        isOrganic
+          ? 'border-emerald-200/90 hover:border-emerald-400'
+          : 'border-rose-100/90 hover:border-rose-200'
+      }`}
     >
       {/* Square Product Image Area */}
-      <div className="relative aspect-square w-full overflow-hidden bg-stone-50">
+      <div className={`relative aspect-square w-full overflow-hidden ${isOrganic ? 'bg-[#F0FDF4]' : 'bg-stone-50'}`}>
         <img
           src={primaryImageUrl}
           alt={displayTitle}
@@ -91,14 +99,20 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           referrerPolicy="no-referrer"
         />
 
-        {/* Top-Left Video Indicator (if product has video) */}
-        {product.videos && product.videos.length > 0 && (
+        {/* Top-Left Video Indicator or Organic Pure Badge */}
+        {product.videos && product.videos.length > 0 ? (
           <div className="absolute top-2 left-2">
-            <span className="bg-stone-900/85 text-white text-[9px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 backdrop-blur-xs shadow-2xs">
-              <Play className="w-2.5 h-2.5 fill-[#E11D48] text-[#E11D48]" /> ভিডিও
+            <span className="bg-white/95 text-stone-900 border border-stone-200 text-[9px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 backdrop-blur-xs shadow-2xs">
+              <Play className={`w-2.5 h-2.5 ${isOrganic ? 'fill-[#16A34A] text-[#16A34A]' : 'fill-[#E11D48] text-[#E11D48]'}`} /> ভিডিও
             </span>
           </div>
-        )}
+        ) : isOrganic ? (
+          <div className="absolute top-2 left-2">
+            <span className="bg-[#ECFDF5]/95 text-[#15803D] border border-emerald-200 text-[9px] font-extrabold px-2 py-0.5 rounded-full shadow-2xs">
+              🌿 ১০০% অর্গানিক
+            </span>
+          </div>
+        ) : null}
 
         {/* Top-Right Golden Admin Edit Badge */}
         {onEditProduct && (
@@ -131,7 +145,13 @@ export const ProductCard: React.FC<ProductCardProps> = ({
               ★ <span className="text-stone-700">{product.rating || 5}</span>
             </span>
             <span className="text-stone-300">•</span>
-            <span className="bg-rose-50 text-[#E11D48] border border-rose-200/70 px-1.5 py-0.5 rounded text-[8.5px] sm:text-[10px] font-bold truncate">
+            <span
+              className={`px-1.5 py-0.5 rounded text-[8.5px] sm:text-[10px] font-bold truncate border ${
+                isOrganic
+                  ? 'bg-[#ECFDF5] text-[#15803D] border-emerald-200/80'
+                  : 'bg-rose-50 text-[#E11D48] border-rose-200/70'
+              }`}
+            >
               {product.inStock ? '✓ স্টকে আছে' : 'স্টক আউট'}
             </span>
           </div>
@@ -142,14 +162,20 @@ export const ProductCard: React.FC<ProductCardProps> = ({
               compact
                 ? 'text-[10.5px] line-clamp-1'
                 : 'text-[11px] sm:text-[13px] line-clamp-1'
-            } font-extrabold text-stone-900 leading-snug group-hover:text-[#E11D48] transition-colors`}
+            } font-extrabold text-stone-900 leading-snug transition-colors ${
+              isOrganic ? 'group-hover:text-[#15803D]' : 'group-hover:text-[#E11D48]'
+            }`}
           >
             {displayTitle}
           </h3>
 
           {/* Secondary Subtitle Line */}
           {!compact && (
-            <p className="text-[9.5px] sm:text-[10px] text-[#E11D48] font-medium line-clamp-1">
+            <p
+              className={`text-[9.5px] sm:text-[10px] font-medium line-clamp-1 ${
+                isOrganic ? 'text-[#15803D]' : 'text-[#E11D48]'
+              }`}
+            >
               {product.titleEn ? `${product.titleEn} | Dokandari` : `${displayTitle} | Dokandari`}
             </p>
           )}
@@ -161,7 +187,9 @@ export const ProductCard: React.FC<ProductCardProps> = ({
             <span
               className={`${
                 compact ? 'text-xs sm:text-sm' : 'text-[13px] sm:text-base'
-              } font-extrabold text-[#E11D48] font-mono tabular-nums`}
+              } font-extrabold font-mono tabular-nums ${
+                isOrganic ? 'text-[#15803D]' : 'text-[#E11D48]'
+              }`}
             >
               ৳{product.price.toLocaleString()}
             </span>
@@ -171,7 +199,13 @@ export const ProductCard: React.FC<ProductCardProps> = ({
               </span>
             )}
             {discountPercent > 0 && (
-              <span className="bg-rose-50 text-[#E11D48] border border-rose-200/80 text-[8.5px] sm:text-[10px] font-extrabold px-1 sm:px-1.5 py-0.5 rounded tabular-nums">
+              <span
+                className={`text-[8.5px] sm:text-[10px] font-extrabold px-1 sm:px-1.5 py-0.5 rounded tabular-nums border ${
+                  isOrganic
+                    ? 'bg-[#ECFDF5] text-[#15803D] border-emerald-200/80'
+                    : 'bg-rose-50 text-[#E11D48] border-rose-200/80'
+                }`}
+              >
                 -{discountPercent}%
               </span>
             )}
@@ -200,7 +234,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                 <span className="tracking-tight">WhatsApp</span>
               </a>
 
-              {/* Top-Right: White/Rose Cart Button */}
+              {/* Top-Right: Cart Button */}
               <button
                 type="button"
                 onClick={handleQuickAdd}
@@ -209,7 +243,11 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                   compact
                     ? 'py-1 px-1 text-[8.5px]'
                     : 'py-1.5 px-1 sm:px-2 text-[9.5px] sm:text-[11px]'
-                } bg-white hover:bg-rose-50 active:scale-95 border border-rose-200 text-[#E11D48] rounded-lg font-extrabold flex items-center justify-center gap-1 transition-all cursor-pointer leading-none whitespace-nowrap overflow-hidden`}
+                } bg-white active:scale-95 border rounded-lg font-extrabold flex items-center justify-center gap-1 transition-all cursor-pointer leading-none whitespace-nowrap overflow-hidden ${
+                  isOrganic
+                    ? 'hover:bg-[#ECFDF5] border-emerald-200 text-[#15803D]'
+                    : 'hover:bg-rose-50 border-rose-200 text-[#E11D48]'
+                }`}
               >
                 {isAdded ? (
                   <>
@@ -218,14 +256,18 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                   </>
                 ) : (
                   <>
-                    <ShoppingBag className={compact ? 'w-2.5 h-2.5 text-[#E11D48] shrink-0' : 'w-3 h-3 sm:w-3.5 sm:h-3.5 text-[#E11D48] shrink-0'} />
+                    <ShoppingBag
+                      className={`${
+                        compact ? 'w-2.5 h-2.5 shrink-0' : 'w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0'
+                      } ${isOrganic ? 'text-[#15803D]' : 'text-[#E11D48]'}`}
+                    />
                     <span>কার্ট</span>
                   </>
                 )}
               </button>
             </div>
 
-            {/* Bottom Row: Animated Full-Width Crimson "অর্ডার করুন" Button */}
+            {/* Bottom Row: Full-Width "অর্ডার করুন" Button (Soft Organic Green for Organic Food, Crimson Rose for others) */}
             <button
               type="button"
               onClick={(e) => {
@@ -238,7 +280,11 @@ export const ProductCard: React.FC<ProductCardProps> = ({
               }}
               className={`${
                 compact ? 'py-1.5 px-2 text-[10px]' : 'py-2 px-2.5 text-[11px] sm:text-xs'
-              } w-full bg-gradient-to-r from-[#E11D48] via-[#F43F5E] to-[#BE123C] hover:from-[#BE123C] hover:to-[#9F1239] active:scale-[0.98] text-white rounded-lg font-extrabold flex items-center justify-center gap-1.5 shadow-sm hover:shadow-md ring-2 ring-rose-300/60 transition-all duration-200 cursor-pointer group/order`}
+              } w-full active:scale-[0.98] text-white rounded-lg font-extrabold flex items-center justify-center gap-1.5 shadow-sm hover:shadow-md ring-2 transition-all duration-200 cursor-pointer group/order ${
+                isOrganic
+                  ? 'bg-gradient-to-r from-[#16A34A] via-[#22C55E] to-[#15803D] hover:from-[#15803D] hover:to-[#166534] ring-emerald-200/70'
+                  : 'bg-gradient-to-r from-[#E11D48] via-[#F43F5E] to-[#BE123C] hover:from-[#BE123C] hover:to-[#9F1239] ring-rose-300/60'
+              }`}
             >
               <ShoppingBag
                 className={`${

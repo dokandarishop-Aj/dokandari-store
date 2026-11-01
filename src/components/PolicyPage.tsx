@@ -180,21 +180,21 @@ export const PolicyPage: React.FC<PolicyPageProps> = ({
           </form>
         )}
 
-        {/* Deep Emerald Header Banner */}
-        <div className="relative rounded-3xl bg-gradient-to-r from-emerald-950 via-teal-900 to-emerald-900 text-white p-6 sm:p-10 shadow-xl overflow-hidden space-y-4">
-          <div className="inline-flex items-center gap-2 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-xs font-bold px-3 py-1 rounded-md">
-            <ShieldCheck className="w-4 h-4 text-emerald-400" />
+        {/* 100% Light Rose/Cream Header Banner — Zero Dark Background */}
+        <div className="relative rounded-3xl bg-gradient-to-br from-[#FFF5F7] via-[#FFF0F3] to-[#FFE4E8] text-stone-900 border border-rose-200 p-6 sm:p-10 shadow-sm overflow-hidden space-y-4">
+          <div className="inline-flex items-center gap-2 bg-white text-[#E11D48] border border-rose-200 text-xs font-extrabold px-3.5 py-1 rounded-full shadow-2xs">
+            <ShieldCheck className="w-4 h-4 text-[#E11D48]" />
             <span>১০০% ক্যাশ অন ডেলিভারি ও যাচাই সুবিধা</span>
           </div>
 
-          <h1 className="text-2xl sm:text-4xl font-black leading-tight text-white">
+          <h1 className="text-2xl sm:text-4xl font-black leading-tight text-stone-900">
             {localPage.policyHeadline}
-            <span className="block text-emerald-300 text-lg sm:text-2xl font-bold mt-1">
-              (Return, Refund & Privacy Policy)
+            <span className="block text-[#E11D48] text-lg sm:text-2xl font-bold mt-1">
+              (Return, Refund &amp; Privacy Policy)
             </span>
           </h1>
 
-          <p className="text-xs sm:text-sm text-emerald-100/90 max-w-3xl leading-relaxed">
+          <p className="text-xs sm:text-sm text-stone-700 font-medium max-w-3xl leading-relaxed">
             {localPage.policySubtitle}
           </p>
         </div>
