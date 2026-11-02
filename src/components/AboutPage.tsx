@@ -856,10 +856,10 @@ export const AboutPage: React.FC<AboutPageProps> = ({
               <div className="space-y-1">
                 <span className="font-extrabold block text-stone-900">হটলাইন ও হোয়াটসঅ্যাপ</span>
                 <a
-                  href={`tel:${localFounder.phone || '+8809638757282'}`}
+                  href={`tel:${localFounder.phone && !localFounder.phone.includes('09638757282') ? localFounder.phone : '01348282356'}`}
                   className="font-mono font-bold text-stone-800 hover:text-[#E11D48] block"
                 >
-                  {localFounder.phone || '+8809638757282'}
+                  হটলাইন: {localFounder.phone && !localFounder.phone.includes('09638757282') ? localFounder.phone : '01348282356'}
                 </a>
                 <a
                   href="https://wa.me/8801885533437"

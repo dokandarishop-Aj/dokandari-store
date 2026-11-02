@@ -338,12 +338,15 @@ function StoreMain() {
             const rawPhoto = String(data.founder.photo || '').trim();
             const cleanPhoto = rawPhoto.includes('photo-1507003211169-0a1dd7228f2d') ? '' : rawPhoto;
             const fName = String(data.founder.name || '').trim();
+            const fPhone = String(data.founder.phone || '').trim();
             const isLegacy = !fName || fName.includes('জান্নাতুল') || fName.includes('রনি');
+            const isLegacyPhone = !fPhone || fPhone.includes('09638757282');
             const cleanedFounder = {
               ...data.founder,
               name: isLegacy ? DEFAULT_STORE_CONTENT.founder.name : data.founder.name,
               title: isLegacy || data.founder.title === 'Founder & CEO, Dokandari' ? DEFAULT_STORE_CONTENT.founder.title : data.founder.title,
               bio: isLegacy || String(data.founder.bio || '').includes('মাল্টি-ক্যাটাগরি') ? DEFAULT_STORE_CONTENT.founder.bio : data.founder.bio,
+              phone: isLegacyPhone ? DEFAULT_STORE_CONTENT.founder.phone : data.founder.phone,
               photo: cleanPhoto,
             };
             setFounderData((prev) => {

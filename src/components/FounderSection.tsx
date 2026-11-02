@@ -32,7 +32,7 @@ export const FounderSection: React.FC<FounderSectionProps> = ({
     photo: '',
     bio: 'বিশিষ্ট ব্যবসায়ী, সমাজসেবক ও জনদরদী ব্যক্তিত্ব মোহাম্মদ শহিদুল আলম দীর্ঘদিনের গবেষণা ও গভীর সামাজিক দায়বদ্ধতা থেকে Dokandari প্রতিষ্ঠা করেছেন। অনলাইন কেনাকাটায় সাধারণ মানুষের ভোগান্তি ও প্রতারণা দূর করে একটি আন্তর্জাতিক মানের নির্ভরযোগ্য কেনাকাটার প্ল্যাটফর্ম উপহার দেওয়াই উনার মূল ব্রত। যেখানে প্রতিটি ক্রেতা পাবেন নির্দ্বিধায় ১০০% অরিজিনাল পণ্য, কোনো অগ্রিম ছাড়া ক্যাশ অন ডেলিভারি এবং ডেলিভারি ম্যানের সামনে পার্সেল খুলে দেখার পূর্ণ স্বাধীনতা।',
     address: 'বি-৬১/১৪, জলেশ্বর, সাভার - ১৩৪০, ঢাকা (১ম তলা)',
-    phone: '+8809638757282',
+    phone: '01348282356',
   };
 
   const cleanPhoto =
@@ -124,10 +124,25 @@ export const FounderSection: React.FC<FounderSectionProps> = ({
                   <span>{data.address || 'বি-৬১/১৪, জলেশ্বর, সাভার - ১৩৪০, ঢাকা (১ম তলা)'}</span>
                 </div>
                 <span className="hidden sm:inline text-rose-200">|</span>
-                <div className="flex items-center gap-1.5 text-stone-700">
+                <a
+                  href={`tel:${data.phone && !data.phone.includes('09638757282') ? data.phone : '01348282356'}`}
+                  className="flex items-center gap-1.5 text-stone-700 hover:text-[#E11D48] transition-colors"
+                >
                   <Phone className="w-4 h-4 text-[#E11D48] shrink-0" />
-                  <span className="font-mono">হটলাইন: {data.phone}</span>
-                </div>
+                  <span className="font-mono font-bold">
+                    হটলাইন: {data.phone && !data.phone.includes('09638757282') ? data.phone : '01348282356'}
+                  </span>
+                </a>
+                <span className="hidden sm:inline text-rose-200">|</span>
+                <a
+                  href="https://wa.me/8801885533437"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1.5 text-emerald-700 hover:underline"
+                >
+                  <MessageCircle className="w-4 h-4 text-[#25D366] shrink-0" />
+                  <span className="font-mono font-bold">WhatsApp: 01885533437</span>
+                </a>
               </div>
             </div>
 

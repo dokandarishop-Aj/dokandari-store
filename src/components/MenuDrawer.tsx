@@ -127,11 +127,11 @@ export const MenuDrawer: React.FC<MenuDrawerProps> = ({
           {/* Hotline & WhatsApp Action Buttons */}
           <div className="grid grid-cols-2 gap-2.5">
             <a
-              href="tel:+8809638757282"
+              href="tel:01348282356"
               className="py-2.5 px-3 bg-white hover:bg-rose-50 border border-rose-300 text-[#E11D48] rounded-xl font-bold flex items-center justify-center gap-1.5 shadow-2xs transition-colors"
             >
               <Phone className="w-4 h-4" />
-              <span>📞 হটলাইন কল</span>
+              <span>📞 হটলাইন: 01348282356</span>
             </a>
 
             <a
@@ -141,7 +141,7 @@ export const MenuDrawer: React.FC<MenuDrawerProps> = ({
               className="py-2.5 px-3 bg-[#25D366] hover:bg-[#1EBE5D] text-white rounded-xl font-bold flex items-center justify-center gap-1.5 shadow-2xs transition-colors"
             >
               <MessageCircle className="w-4 h-4 fill-white" />
-              <span>💬 WhatsApp চ্যাট</span>
+              <span>💬 WhatsApp: 01885533437</span>
             </a>
           </div>
 

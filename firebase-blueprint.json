@@ -15,7 +15,7 @@
         },
         "category": {
           "type": "string",
-          "description": "Product category: hijab, abaya, festive, or skincare."
+          "description": "Product category."
         },
         "price": {
           "type": "number",
@@ -51,7 +51,7 @@
       "properties": {
         "id": {
           "type": "string",
-          "description": "Dokandari order reference code (e.g. DKD-104921)."
+          "description": "Dokandari order reference code."
         },
         "subtotal": {
           "type": "number",
@@ -71,7 +71,7 @@
         },
         "status": {
           "type": "string",
-          "description": "Order processing status: pending, confirmed, packed, in_transit, delivered, or cancelled."
+          "description": "Order processing status."
         },
         "userId": {
           "type": "string",
@@ -79,6 +79,102 @@
         }
       },
       "required": ["id", "subtotal", "shippingCost", "total", "paymentMethod", "status"]
+    },
+    "BusinessExpense": {
+      "title": "BusinessExpense",
+      "description": "Business expense entry for P&L and accounting.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique expense ID."
+        },
+        "date": {
+          "type": "string",
+          "description": "Expense date (YYYY-MM-DD)."
+        },
+        "category": {
+          "type": "string",
+          "description": "Expense category identifier."
+        },
+        "categoryLabel": {
+          "type": "string",
+          "description": "Bengali display label for the expense category."
+        },
+        "amount": {
+          "type": "number",
+          "description": "Expense amount in BDT."
+        },
+        "note": {
+          "type": "string",
+          "description": "Description or reference note."
+        },
+        "createdAt": {
+          "type": "number",
+          "description": "Creation timestamp."
+        }
+      },
+      "required": ["id", "date", "category", "amount"]
+    },
+    "CourierReturn": {
+      "title": "CourierReturn",
+      "description": "Courier return record and quality inspection state.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique return ID."
+        },
+        "orderId": {
+          "type": "string",
+          "description": "Original order ID."
+        },
+        "productName": {
+          "type": "string",
+          "description": "Returned product name."
+        },
+        "quantity": {
+          "type": "number",
+          "description": "Returned quantity."
+        },
+        "returnCharge": {
+          "type": "number",
+          "description": "Courier return fee in BDT."
+        },
+        "productCondition": {
+          "type": "string",
+          "description": "Product condition: sellable or damaged."
+        },
+        "status": {
+          "type": "string",
+          "description": "Return workflow status."
+        }
+      },
+      "required": ["id", "orderId", "productName", "quantity", "status"]
+    },
+    "InventoryMovement": {
+      "title": "InventoryMovement",
+      "description": "Audit log of automatic stock adjustments and damage write-offs.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique movement ID."
+        },
+        "productId": {
+          "type": "string",
+          "description": "Target product ID."
+        },
+        "type": {
+          "type": "string",
+          "description": "Movement type: return_restock, damage_write_off, manual_adjustment."
+        },
+        "quantity": {
+          "type": "number",
+          "description": "Quantity changed."
+        }
+      },
+      "required": ["id", "productId", "type", "quantity"]
     },
     "User": {
       "title": "User",
@@ -111,7 +207,7 @@
       "properties": {
         "id": {
           "type": "string",
-          "description": "Setting key identifier (e.g. store_content, api_credentials)."
+          "description": "Setting key identifier."
         }
       },
       "required": ["id"]
@@ -153,6 +249,18 @@
     "/orders/{orderId}": {
       "schema": "Order",
       "description": "Customer orders and fulfillment records."
+    },
+    "/business_expenses/{expenseId}": {
+      "schema": "BusinessExpense",
+      "description": "Business expense records for P&L analytics."
+    },
+    "/courier_returns/{returnId}": {
+      "schema": "CourierReturn",
+      "description": "Courier return records and quality inspection status."
+    },
+    "/inventory_movements/{movementId}": {
+      "schema": "InventoryMovement",
+      "description": "Inventory movement and auto-stock adjustment logs."
     },
     "/users/{userId}": {
       "schema": "User",

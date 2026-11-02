@@ -501,35 +501,46 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   };
 
   // Business Expense Tracking & P&L State
-  const [expenses, setExpenses] = useState<BusinessExpense[]>([
-    {
-      id: 'exp-init-1',
-      date: new Date().toISOString().slice(0, 10),
-      category: 'ad_cost',
-      categoryLabel: 'মেটা ও টিকটক অ্যাড স্পেন্ড',
-      amount: 1500,
-      note: 'হোম ডেকোর ও আনব্রেকেবল মিরর ফেসবুক ক্যাম্পেইন',
-      createdAt: Date.now() - 3600 * 12 * 1000,
-    },
-    {
-      id: 'exp-init-2',
-      date: new Date().toISOString().slice(0, 10),
-      category: 'transport_fare',
-      categoryLabel: 'রিকশা / গাড়ি / যাতায়াত ভাড়া',
-      amount: 250,
-      note: 'চকবাজার ও ইসলামপুর মার্কেট সোর্সিং রিকশা ও যাতায়াত',
-      createdAt: Date.now() - 3600 * 20 * 1000,
-    },
-    {
-      id: 'exp-init-3',
-      date: new Date().toISOString().slice(0, 10),
-      category: 'packaging',
-      categoryLabel: 'বক্স ও প্যাকেজিং খরচ',
-      amount: 600,
-      note: 'বাবল র‍্যাপ ও কুরিয়ার প্যাকিং বক্স ৫০ পিস',
-      createdAt: Date.now() - 3600 * 30 * 1000,
-    },
-  ]);
+  const [expenses, setExpenses] = useState<BusinessExpense[]>(() => {
+    try {
+      const cached = localStorage.getItem('dokandari_expenses_backup_v1');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {
+      // ignore
+    }
+    return [
+      {
+        id: 'exp-init-1',
+        date: new Date().toISOString().slice(0, 10),
+        category: 'ad_cost',
+        categoryLabel: 'মেটা ও টিকটক অ্যাড স্পেন্ড',
+        amount: 1500,
+        note: 'হোম ডেকোর ও আনব্রেকেবল মিরর ফেসবুক ক্যাম্পেইন',
+        createdAt: Date.now() - 3600 * 12 * 1000,
+      },
+      {
+        id: 'exp-init-2',
+        date: new Date().toISOString().slice(0, 10),
+        category: 'transport_fare',
+        categoryLabel: 'রিকশা / গাড়ি / যাতায়াত ভাড়া',
+        amount: 250,
+        note: 'চকবাজার ও ইসলামপুর মার্কেট সোর্সিং রিকশা ও যাতায়াত',
+        createdAt: Date.now() - 3600 * 20 * 1000,
+      },
+      {
+        id: 'exp-init-3',
+        date: new Date().toISOString().slice(0, 10),
+        category: 'packaging',
+        categoryLabel: 'বক্স ও প্যাকেজিং খরচ',
+        amount: 600,
+        note: 'বাবল র‍্যাপ ও কুরিয়ার প্যাকিং বক্স ৫০ পিস',
+        createdAt: Date.now() - 3600 * 30 * 1000,
+      },
+    ];
+  });
   const [expenseRange, setExpenseRange] = useState<'today' | 'week' | 'month' | 'all'>('month');
   const [newExpenseCategory, setNewExpenseCategory] = useState<BusinessExpense['category']>('ad_cost');
   const [newExpenseAmount, setNewExpenseAmount] = useState<number | ''>('');
@@ -550,6 +561,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             });
             loaded.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
             setExpenses(loaded);
+            try {
+              localStorage.setItem('dokandari_expenses_backup_v1', JSON.stringify(loaded));
+            } catch {
+              // ignore
+            }
           }
         },
         (err) => console.warn('Expenses listener notice:', err)
@@ -862,28 +878,46 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         note: newExpenseNote.trim() || categoryLabels[newExpenseCategory],
         createdAt: Date.now(),
       };
-      await setDoc(doc(db, 'business_expenses', newExp.id), newExp);
-      setExpenses((prev) => [newExp, ...prev.filter((x) => x.id !== newExp.id)]);
+      setExpenses((prev) => {
+        const next = [newExp, ...prev.filter((x) => x.id !== newExp.id)];
+        try {
+          localStorage.setItem('dokandari_expenses_backup_v1', JSON.stringify(next));
+        } catch {
+          // ignore
+        }
+        return next;
+      });
       setNewExpenseAmount('');
       setNewExpenseNote('');
+      try {
+        await setDoc(doc(db, 'business_expenses', newExp.id), newExp);
+      } catch (err) {
+        console.warn('Firestore expense sync note (saved locally):', err);
+      }
       setFeedback('✅ নতুন খরচ সফলভাবে সেভ হয়েছে!');
       setTimeout(() => setFeedback(''), 3000);
-    } catch (err) {
-      console.error('Failed to add expense', err);
     } finally {
       setIsSubmittingExpense(false);
     }
   };
 
   const handleDeleteExpense = async (id: string) => {
+    setExpenses((prev) => {
+      const next = prev.filter((x) => x.id !== id);
+      try {
+        localStorage.setItem('dokandari_expenses_backup_v1', JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
     try {
       await deleteDoc(doc(db, 'business_expenses', id));
-      setExpenses((prev) => prev.filter((x) => x.id !== id));
-      setFeedback('🗑️ খরচটি মুছে ফেলা হয়েছে।');
-      setTimeout(() => setFeedback(''), 3000);
     } catch (err) {
       console.warn('Delete expense note:', err);
     }
+    setFeedback('🗑️ খরচটি মুছে ফেলা হয়েছে।');
+    setTimeout(() => setFeedback(''), 3000);
   };
 
   const handleExportPnLToCSV = () => {
@@ -946,7 +980,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       `🚚 ডেলিভারি চার্জ: ৳${order.shippingCost || 0}\n` +
       `💰 *সর্বমোট প্রদেয় বিল:* ৳${order.total.toLocaleString()} (ক্যাশ অন ডেলিভারি)\n\n` +
       `✓ ডেলিভারি ম্যানের সামনে পার্সেল খুলে দেখে মূল্য পরিশোধ করবেন।\n` +
-      `📞 হটলাইন: +8809638757282\n` +
+      `📞 হটলাইন: 01348282356 | WhatsApp: 01885533437\n` +
       `🌐 ওয়েবসাইট: https://dokandari.com\n\n` +
       `ধন্যবাদ Dokandari-র সাথে কেনাকাটা করার জন্য!`;
     window.open(`https://wa.me/${waNum}?text=${encodeURIComponent(text)}`, '_blank');
@@ -4608,7 +4642,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           বি-৬১/১৪, জলেশ্বর, সাভার - ১৩৪০, ঢাকা (১ম তলা)
                         </p>
                         <p className="text-[10.5px] text-stone-600">
-                          হটলাইন: <strong>+8809638757282</strong> | WhatsApp: <strong>+8801886161426</strong>
+                          হটলাইন: <strong>01348282356</strong> | WhatsApp: <strong>01885533437</strong>
                         </p>
                       </div>
 
@@ -7626,7 +7660,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           },
                         })
                       }
-                      placeholder="https://www.facebook.com/dokandari"
+                      placeholder="https://web.facebook.com/dokandari.shop"
                       className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl font-mono"
                     />
                   </div>
@@ -7650,7 +7684,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           },
                         })
                       }
-                      placeholder="https://www.instagram.com/dokandari"
+                      placeholder="https://www.instagram.com/dokandaridotcom/"
                       className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl font-mono"
                     />
                   </div>
@@ -7674,7 +7708,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           },
                         })
                       }
-                      placeholder="https://www.youtube.com/@dokandari"
+                      placeholder="https://www.youtube.com/@Dokandarishop"
                       className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl font-mono"
                     />
                   </div>
@@ -7698,7 +7732,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           },
                         })
                       }
-                      placeholder="https://www.tiktok.com/@dokandari"
+                      placeholder="https://www.tiktok.com/@dokandari.shop?is_from_webapp=1&sender_device=pc"
                       className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl font-mono"
                     />
                   </div>

@@ -380,11 +380,11 @@ export const CustomerAuthModal: React.FC<CustomerAuthModalProps> = ({
 
           <div className="flex items-center gap-2 shrink-0">
             <a
-              href="tel:+8809638757282"
+              href="tel:01348282356"
               className="px-3 py-1.5 bg-white border border-rose-300 text-[#E11D48] hover:bg-rose-50 rounded-lg font-bold flex items-center gap-1 transition-colors"
             >
               <Phone className="w-3.5 h-3.5" />
-              <span>কল: +8809638757282</span>
+              <span>কল: 01348282356</span>
             </a>
 
             <a

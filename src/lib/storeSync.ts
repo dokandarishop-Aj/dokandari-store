@@ -17,6 +17,7 @@ import { Product, Order } from '../types';
 
 export const OFFICIAL_WHATSAPP = '01885533437';
 export const OFFICIAL_WHATSAPP_INT = '8801885533437';
+export const OFFICIAL_HOTLINE = '01348282356';
 
 const LS_STORE_CONTENT_KEY = 'dokandari_store_content_backup_v2';
 const LS_CUSTOM_PRODUCTS_KEY = 'dokandari_custom_products_v2';
@@ -170,16 +171,16 @@ export const DEFAULT_CATEGORY_HEROES: Record<string, CategoryHeroConfig> = {
 
 export const DEFAULT_STORE_CONTENT: StoreContent = {
   whatsappNumber: OFFICIAL_WHATSAPP,
-  hotlineNumber: '+8809638757282',
+  hotlineNumber: OFFICIAL_HOTLINE,
   officialEmail: 'dokandari.shop@gmail.com',
   carouselInterval: 3000,
   bestSellingInterval: 5000,
   socialLinks: {
     whatsapp: 'https://wa.me/8801885533437?text=Dokandari',
-    facebook: 'https://facebook.com/dokandari',
-    instagram: 'https://instagram.com/dokandari',
-    tiktok: 'https://tiktok.com/@dokandari',
-    youtube: 'https://youtube.com/@dokandari',
+    facebook: 'https://web.facebook.com/dokandari.shop',
+    instagram: 'https://www.instagram.com/dokandaridotcom/',
+    tiktok: 'https://www.tiktok.com/@dokandari.shop?is_from_webapp=1&sender_device=pc',
+    youtube: 'https://www.youtube.com/@Dokandarishop',
   },
   pageContent: {
     aboutHeadline: 'Dokandari — আপনার সৌন্দর্য ও সুস্থতা, আমাদের ঐতিহ্য',
@@ -212,7 +213,7 @@ export const DEFAULT_STORE_CONTENT: StoreContent = {
     photo: '',
     bio: 'বিশিষ্ট ব্যবসায়ী, সমাজসেবক ও জনদরদী ব্যক্তিত্ব মোহাম্মদ শহিদুল আলম দীর্ঘদিনের গবেষণা ও গভীর সামাজিক দায়বদ্ধতা থেকে Dokandari প্রতিষ্ঠা করেছেন। অনলাইন কেনাকাটায় সাধারণ মানুষের ভোগান্তি ও প্রতারণা দূর করে একটি আন্তর্জাতিক মানের নির্ভরযোগ্য কেনাকাটার প্ল্যাটফর্ম উপহার দেওয়াই উনার মূল ব্রত। যেখানে প্রতিটি ক্রেতা পাবেন নির্দ্বিধায় ১০০% অরিজিনাল পণ্য, কোনো অগ্রিম ছাড়া ক্যাশ অন ডেলিভারি এবং ডেলিভারি ম্যানের সামনে পার্সেল খুলে দেখার পূর্ণ স্বাধীনতা।',
     address: 'বি-৬১/১৪, জলেশ্বর, সাভার - ১৩৪০, ঢাকা (১ম তলা)',
-    phone: '+8809638757282',
+    phone: '01348282356',
   },
   heroSlides: [
     {
@@ -328,8 +329,57 @@ function normalizeOfficialAddresses(content: StoreContent): StoreContent {
     ? DEFAULT_STORE_CONTENT.pageContent!.businessStoryText
     : rawStory;
 
+  const rawHotline = content.hotlineNumber || '';
+  const effectiveHotline =
+    !rawHotline || rawHotline.includes('09638757282')
+      ? DEFAULT_STORE_CONTENT.hotlineNumber
+      : rawHotline;
+
+  const rawWhatsapp = content.whatsappNumber || '';
+  const effectiveWhatsapp =
+    !rawWhatsapp || rawWhatsapp.includes('01886161426')
+      ? DEFAULT_STORE_CONTENT.whatsappNumber
+      : rawWhatsapp;
+
+  const rawFounderPhone = content.founder?.phone || '';
+  const effectiveFounderPhone =
+    !rawFounderPhone || rawFounderPhone.includes('09638757282')
+      ? DEFAULT_STORE_CONTENT.founder.phone
+      : rawFounderPhone;
+
+  const rawSocials = content.socialLinks || DEFAULT_STORE_CONTENT.socialLinks!;
+  const isLegacyFb =
+    !rawSocials.facebook ||
+    rawSocials.facebook === 'https://facebook.com/dokandari' ||
+    rawSocials.facebook === 'https://www.facebook.com/dokandari';
+  const isLegacyIg =
+    !rawSocials.instagram ||
+    rawSocials.instagram === 'https://instagram.com/dokandari' ||
+    rawSocials.instagram === 'https://www.instagram.com/dokandari';
+  const isLegacyTk =
+    !rawSocials.tiktok ||
+    rawSocials.tiktok === 'https://tiktok.com/@dokandari' ||
+    rawSocials.tiktok === 'https://www.tiktok.com/@dokandari';
+  const isLegacyYt =
+    !rawSocials.youtube ||
+    rawSocials.youtube === 'https://youtube.com/@dokandari' ||
+    rawSocials.youtube === 'https://www.youtube.com/@dokandari';
+  const isLegacyWaLink =
+    !rawSocials.whatsapp || rawSocials.whatsapp.includes('01886161426');
+
   return {
     ...content,
+    whatsappNumber: effectiveWhatsapp,
+    hotlineNumber: effectiveHotline,
+    socialLinks: {
+      ...DEFAULT_STORE_CONTENT.socialLinks!,
+      ...rawSocials,
+      whatsapp: isLegacyWaLink ? DEFAULT_STORE_CONTENT.socialLinks!.whatsapp : rawSocials.whatsapp,
+      facebook: isLegacyFb ? DEFAULT_STORE_CONTENT.socialLinks!.facebook : rawSocials.facebook,
+      instagram: isLegacyIg ? DEFAULT_STORE_CONTENT.socialLinks!.instagram : rawSocials.instagram,
+      tiktok: isLegacyTk ? DEFAULT_STORE_CONTENT.socialLinks!.tiktok : rawSocials.tiktok,
+      youtube: isLegacyYt ? DEFAULT_STORE_CONTENT.socialLinks!.youtube : rawSocials.youtube,
+    },
     pageContent: {
       ...DEFAULT_STORE_CONTENT.pageContent!,
       ...(content.pageContent || {}),
@@ -349,6 +399,7 @@ function normalizeOfficialAddresses(content: StoreContent): StoreContent {
       title: effectiveFounderTitle,
       bio: effectiveFounderBio,
       photo: cleanedPhoto,
+      phone: effectiveFounderPhone,
       address: isLegacyEnglishFounderAddr
         ? 'বি-৬১/১৪, জলেশ্বর, সাভার - ১৩৪০, ঢাকা (১ম তলা)'
         : fAddr,
@@ -1977,12 +2028,36 @@ export async function seedProductsIfEmpty(): Promise<void> {
       }
     }
 
-    // 5. Ensure store_content exists ONLY if not yet created in Firestore (NEVER overwrite existing Admin edits!)
+    // 5. Ensure store_content exists or auto-migrates legacy social links / hotline in Firestore
     const contentRef = doc(db, 'settings', 'store_content');
     const contentSnap = await getDoc(contentRef);
     if (!contentSnap.exists()) {
       const initialContent = getInitialStoreContent();
       await setDoc(contentRef, sanitizeForFirestore(initialContent));
+    } else {
+      const existingData = contentSnap.data() as Partial<StoreContent>;
+      const normalized = mergeStoreContent(DEFAULT_STORE_CONTENT, existingData);
+      const needsMigration =
+        existingData.hotlineNumber !== normalized.hotlineNumber ||
+        existingData.whatsappNumber !== normalized.whatsappNumber ||
+        existingData.socialLinks?.facebook !== normalized.socialLinks?.facebook ||
+        existingData.socialLinks?.instagram !== normalized.socialLinks?.instagram ||
+        existingData.socialLinks?.tiktok !== normalized.socialLinks?.tiktok ||
+        existingData.socialLinks?.youtube !== normalized.socialLinks?.youtube ||
+        existingData.founder?.phone !== normalized.founder.phone;
+      if (needsMigration) {
+        await setDoc(
+          contentRef,
+          sanitizeForFirestore({
+            whatsappNumber: normalized.whatsappNumber,
+            hotlineNumber: normalized.hotlineNumber,
+            socialLinks: normalized.socialLinks,
+            founder: normalized.founder,
+            updatedAt: Date.now(),
+          }),
+          { merge: true }
+        );
+      }
     }
   } catch (err) {
     console.warn('Seeding check note', err);

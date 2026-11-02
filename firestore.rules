@@ -6,7 +6,8 @@ service cloud.firestore {
     }
 
     match /test/{docId} {
-      allow read, write: if isValidId(docId);
+      allow read: if true;
+      allow create, update, delete: if isValidId(docId);
     }
 
     match /products/{productId} {
@@ -19,16 +20,34 @@ service cloud.firestore {
       allow create, update, delete: if isValidId(orderId);
     }
 
+    match /business_expenses/{expenseId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(expenseId);
+    }
+
+    match /courier_returns/{returnId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(returnId);
+    }
+
+    match /inventory_movements/{movementId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(movementId);
+    }
+
     match /abandoned_leads/{leadId} {
-      allow read, create, update, delete: if isValidId(leadId);
+      allow read: if true;
+      allow create, update, delete: if isValidId(leadId);
     }
 
     match /campaigns/{campaignId} {
-      allow read, create, update, delete: if isValidId(campaignId);
+      allow read: if true;
+      allow create, update, delete: if isValidId(campaignId);
     }
 
     match /reviews/{reviewId} {
-      allow read, create, update, delete: if isValidId(reviewId);
+      allow read: if true;
+      allow create, update, delete: if isValidId(reviewId);
     }
 
     match /settings/{settingId} {
@@ -37,11 +56,13 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow read, create, update, delete: if isValidId(userId);
+      allow read: if true;
+      allow create, update, delete: if isValidId(userId);
     }
 
     match /admins/{adminId} {
-      allow read, create, update, delete: if isValidId(adminId);
+      allow read: if true;
+      allow create, update, delete: if isValidId(adminId);
     }
   }
 }
