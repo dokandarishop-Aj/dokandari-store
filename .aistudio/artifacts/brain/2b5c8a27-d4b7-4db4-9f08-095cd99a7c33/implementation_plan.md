@@ -1,23 +1,56 @@
-# Multi-Pixel Tracking & Abandoned Lead Recovery Plan
+# Dokandari.com – Courier Return & Auto Stock Management System
 
-## 1. Zero Duplicate Pixel Warnings & Multi-Pixel ID Support
-- [x] Injects base Meta and TikTok tracking scripts strictly ONCE globally.
-- [x] Allows admins to input multiple comma/space/newline-separated Meta Pixel IDs and TikTok Pixel IDs.
-- [x] Parses and dedupes all unique IDs in `src/lib/pixelManager.ts`, maintaining global Sets (`__dokandari_meta_initialized_ids`, `__dokandari_tiktok_initialized_ids`) so `fbq('init')` and `ttq.load()` are called exactly once per ID.
-- [x] Dispatches all standard e-commerce events (`PageView`, `ViewContent`, `AddToCart`, `InitiateCheckout`, `Purchase`) to all configured pixel IDs simultaneously.
-- [x] Background CAPI proxy route `/api/pixel/event` in `server.ts` for iOS 14+ reliability.
-- [x] Interactive Multi-Pixel tool in Admin Panel with live parsed ID chips and zero-duplicate status verification.
+## ১. Courier Return Management (কুরিয়ার রিটার্ন ম্যানেজমেন্ট)
+- [x] **নতুন অ্যাডমিন মেনু ও ড্যাশবোর্ড**: অ্যাডমিন নেভিগেশনে সিরিয়াল '০৫' হিসেবে "কুরিয়ার রিটার্ন ম্যানেজমেন্ট" যুক্ত করা হয়েছে।
+- [x] **প্রয়োজনীয় সকল তথ্য সংগ্রহ ও ট্র্যাকিং**:
+  - Order ID (বিদ্যমান অর্ডার থেকে ১-ক্লিকে অটো-পূরণ সুবিধা সহ)
+  - Customer Name & Customer Phone
+  - Product Name & SKU / Variant
+  - Returned Quantity
+  - Courier Name (Steadfast, Pathao, RedX, Paperfly, eCourier, Sundarban, ইত্যাদি)
+  - Courier Return Charge (যেমন: ৳১২০)
+  - Return Reason (ড্রপডাউন ও কাস্টম টেক্সট: 'কাস্টমার ফোন রিসিভ করেনি', 'পণ্য পছন্দ হয়নি', 'দেরিতে ডেলিভারি', ইত্যাদি)
+  - Return Date
+  - Product Condition (`sellable` / বিক্রয়যোগ্য বনাম `damaged` / ড্যামেজ)
+  - Return Status (৭টি পূর্ণাঙ্গ ওয়ার্কফ্লো স্ট্যাটাস)
+- [x] **অর্ডার টেবিল থেকে ১-ক্লিক রিটার্ন**: অ্যাডমিন প্যানেলের অর্ডার তালিকায় প্রতিটি অর্ডারের পাশে "🔄 রিটার্ন" বাটন যুক্ত করা হয়েছে যা মুহূর্তেই সংশ্লিষ্ট অর্ডারের তথ্য প্রি-লোড করে রিটার্ন উইন্ডো খোলে।
 
-## 2. Real-Time Abandoned Cart & Lead Recovery
-- [x] Instant debounced lead capture (`captureAbandonedLeadDebounced`) triggered the moment a customer enters their phone number in PDP quick order form or Cart Checkout modal.
-- [x] Automatic conversion marker (`markLeadConverted`) when customer confirms the order.
-- [x] Real-time Admin Dashboard module "ড্রপড ও লিড রিকভারি (Abandoned Leads & Cart Drop Recovery)":
-  - KPI cards: Total captured leads, Pending recovery count, Converted orders, Recoverable value in BDT.
-  - Search and filter by status ('all', 'pending', 'contacted', 'converted', 'cancelled').
-  - 1-Click WhatsApp button with prefilled personalized recovery message in Bengali.
-  - 1-Click Direct Phone call (`tel:...`) and quick phone number copy.
-  - Live status dropdown with instantaneous Firestore update and lead deletion.
+## ২. ৭টি রিটার্ন ওয়ার্কফ্লো স্ট্যাটাস (Return Statuses)
+- [x] ১. কুরিয়ারে ফেরত আসছে (`courier_in_transit`)
+- [x] ২. গুদামে পণ্য পৌঁছেছে (`warehouse_received`)
+- [x] ৩. পণ্য পরীক্ষা চলছে (`inspecting`)
+- [x] ৪. বিক্রয়যোগ্য (`sellable`)
+- [x] ৫. ড্যামেজ (`damaged`)
+- [x] ৬. স্টকে যুক্ত হয়েছে (`restocked`)
+- [x] ৭. রিটার্ন সম্পন্ন (`completed`)
 
-## 3. High-Performance Speed & Zero-Lag
-- [x] Added `loading="lazy"`, `decoding="async"`, `referrerPolicy="no-referrer"` to product images and thumbnails across ProductCard, ProductDetailPage, ProductDetailModal, and Admin Panel.
-- [x] Build and TypeScript validation passed cleanly.
+## ৩. Automatic Stock Update & Inventory Movement (স্বয়ংক্রিয় স্টক সমন্বয়)
+- [x] **বিক্রয়যোগ্য পণ্য (Sellable)**:
+  - গুদামে কোয়ালিটি পাস বা রিস্টক হলে পণ্যের স্টকে ফেরত আসা সংখ্যা স্বয়ংক্রিয়ভাবে বৃদ্ধি পায় (`stock = stock + returnedQty`)।
+  - Firestore `products` কালেকশন এবং লোকাল ক্যাটালগ রিয়েল-টাইমে আপডেট হয়।
+  - Firestore `inventory_movements` কালেকশনে অডিট লগ সংরক্ষিত হয় (পূর্বের স্টক → নতুন স্টক, রেফারেন্স অর্ডার আইডি ও তারিখ সহ)।
+- [x] **ড্যামেজ পণ্য (Damaged)**:
+  - বিক্রয়যোগ্য স্টক কোনোভাবেই বৃদ্ধি পায় না।
+  - ড্যামেজের কারণ ইনপুট নেওয়া হয় এবং পণ্যের ক্রয়মূল্য হিসাব করে `Damage Loss` হিসেবে গণ্য হয়।
+  - `inventory_movements` কালেকশনে `damage_write_off` রেকর্ড সংরক্ষণ করা হয়।
+- [x] **ডুপ্লিকেট স্টক প্রতিরোধ**: `stockAdjusted: true` ফ্ল্যাগ ব্যবহারের মাধ্যমে একই অর্ডারের জন্য বারবার স্টক বৃদ্ধির ঝুঁকি ১০০% প্রতিরোধ করা হয়েছে।
+
+## ৪. Courier Return Expense (কুরিয়ার রিটার্ন খরচ অটোমেশন)
+- [x] প্রতিটি রিটার্ন এন্ট্রি হলে কুরিয়ার রিটার্ন চার্জ (যেমন: ৳১২০) স্বয়ংক্রিয়ভাবে `business_expenses` কালেকশনে ক্যাটাগরি `courier_return_charge` ('কুরিয়ার রিটার্ন চার্জ') হিসেবে যোগ হয়।
+- [x] `expenseRecorded: true` ফ্ল্যাগ দিয়ে ডুপ্লিকেট খরচ এন্ট্রি শতভাগ প্রতিরোধ করা হয়েছে।
+
+## ৫. P&L Analytics Integration (ব্যবসায়িক লাভ-ক্ষতি হিসাব)
+- [x] অ্যানালাইটিক্স ট্যাবে ৭টি নির্দিষ্ট কুরিয়ার রিটার্ন মেট্রিক্স যুক্ত করা হয়েছে:
+  1. মোট কুরিয়ার রিটার্ন (Total Courier Returns)
+  2. মোট কুরিয়ার রিটার্ন চার্জ (Total Courier Return Charge)
+  3. মোট ফেরত পণ্য সংখ্যা (Total Returned Product Quantity)
+  4. বিক্রয়যোগ্য ফেরত পণ্য (Sellable Returned Quantity)
+  5. ড্যামেজ পণ্য সংখ্যা (Damaged Product Quantity)
+  6. পণ্যের ড্যামেজ ক্ষতি (Total Damage Loss)
+  7. রিটার্ন জনিত নিট ক্ষতি (Net Return Loss = Return Charge + Damage Loss)
+- [x] আর্থিক নীতিমালা স্পষ্টভাবে উল্লেখিত: ভালো পণ্য ফেরত এলে পণ্যের ক্রয়মূল্য ক্ষতি হিসেবে গণ্য হয় না (শুধু রিটার্ন চার্জ লস); কিন্তু পণ্য ড্যামেজ হলে চার্জের সাথে পণ্যের ক্রয়মূল্যও ব্যবসার ক্ষতি হিসেবে গণ্য হয়।
+
+## ৬. ভেরিফিকেশন ও স্ট্যাবিলিটি
+- [x] Linter (`lint_applet`): Passed cleanly (0 errors).
+- [x] Compiler (`compile_applet`): Passed cleanly.
+- [x] সমস্ত ইন্টারফেস এবং লেবেল খাঁটি ও প্রফেশনাল বাংলায় উপস্থাপিত।

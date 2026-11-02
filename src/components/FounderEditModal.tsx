@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, Save, Check, Upload, Trash2, Sparkles, Loader2 } from 'lucide-react';
 import { FounderData } from './FounderSection';
 import {
@@ -27,56 +27,155 @@ export const FounderEditModal: React.FC<FounderEditModalProps> = ({
   onSave,
 }) => {
   const initialStore = getInitialStoreContent();
-  const [name, setName] = useState(founderData.name);
-  const [title, setTitle] = useState(founderData.title);
-  const [photo, setPhoto] = useState(founderData.photo || '');
-  const [bio, setBio] = useState(founderData.bio);
+  const [name, setName] = useState(founderData.name || '');
+  const [title, setTitle] = useState(founderData.title || '');
+  const [photo, setPhoto] = useState(
+    founderData.photo && !founderData.photo.includes('photo-1507003211169-0a1dd7228f2d')
+      ? founderData.photo
+      : ''
+  );
+  const [bio, setBio] = useState(founderData.bio || '');
   const [address, setAddress] = useState(
-    founderData.address ||
-      initialStore.pageContent?.warehouseAddress ||
-      'বি-৬১/১৪, জলেশ্বর, সাভার - ১৩৪০, ঢাকা (১ম তলা)'
+    founderData.address ?? initialStore.pageContent?.warehouseAddress ?? ''
   );
   const [corporateAddress, setCorporateAddress] = useState(
-    initialStore.pageContent?.corporateAddress ||
-      'সাভার বাস স্ট্যান্ড, শহীদ প্লাজা, দ্বিতীয় তলা'
+    initialStore.pageContent?.corporateAddress ?? ''
   );
-  const [phone, setPhone] = useState(founderData.phone || '+8809638757282');
+  const [phone, setPhone] = useState(founderData.phone ?? '');
   const [aiPrompt, setAiPrompt] = useState('');
   const [aiGenerating, setAiGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [autoSaveStatus, setAutoSaveStatus] = useState<string>('');
 
+  const wasOpenRef = useRef(false);
+  const isDirtyRef = useRef(false);
+
+  // Initialize form state ONLY when modal transitions from closed -> open
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !wasOpenRef.current) {
       const store = getInitialStoreContent();
-      setName(founderData.name);
-      setTitle(founderData.title);
-      setPhoto(founderData.photo || '');
-      setBio(founderData.bio);
-      setAddress(
-        founderData.address ||
-          store.pageContent?.warehouseAddress ||
-          'বি-৬১/১৪, জলেশ্বর, সাভার - ১৩৪০, ঢাকা (১ম তলা)'
-      );
-      setCorporateAddress(
-        store.pageContent?.corporateAddress ||
-          'সাভার বাস স্ট্যান্ড, শহীদ প্লাজা, দ্বিতীয় তলা'
-      );
-      setPhone(founderData.phone || '+8809638757282');
+      setName(founderData.name ?? '');
+      setTitle(founderData.title ?? '');
+      const cleanInitialPhoto =
+        founderData.photo && !founderData.photo.includes('photo-1507003211169-0a1dd7228f2d')
+          ? founderData.photo
+          : '';
+      setPhoto(cleanInitialPhoto);
+      setBio(founderData.bio ?? '');
+      setAddress(founderData.address ?? store.pageContent?.warehouseAddress ?? '');
+      setCorporateAddress(store.pageContent?.corporateAddress ?? '');
+      setPhone(founderData.phone ?? '');
+      isDirtyRef.current = false;
+      setAutoSaveStatus('');
     }
+    wasOpenRef.current = isOpen;
   }, [isOpen, founderData]);
 
+  // Real-time debounced auto-save to Firestore whenever admin edits any field
+  useEffect(() => {
+    if (!isOpen || !isDirtyRef.current) return;
+    setAutoSaveStatus('⚡ রিয়েল-টাইম ডাটাবেজে সেভ হচ্ছে...');
+    const timer = setTimeout(async () => {
+      const updated: FounderData = {
+        name: name.trim(),
+        title: title.trim(),
+        photo: photo.trim(),
+        bio: bio.trim(),
+        address: address.trim(),
+        phone: phone.trim(),
+      };
+      try {
+        const current = getInitialStoreContent();
+        const mergedStore = await saveStoreContentPersisted({
+          founder: updated,
+          pageContent: {
+            ...current.pageContent!,
+            warehouseAddress: address.trim(),
+            corporateAddress: corporateAddress.trim(),
+          },
+        });
+        onSave(updated, mergedStore);
+        setAutoSaveStatus('✓ লাইভ ডাটাবেজে অটো-সেভ সম্পন্ন');
+      } catch (err) {
+        console.warn('Realtime founder auto-save note:', err);
+      }
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [name, title, photo, bio, address, corporateAddress, phone, isOpen]);
+
   if (!isOpen) return null;
+
+  const persistImmediately = async (overridePhoto?: string) => {
+    setSaving(true);
+    setAutoSaveStatus('⚡ রিয়েল-টাইম ডাটাবেজে সেভ হচ্ছে...');
+    const finalPhoto = overridePhoto !== undefined ? overridePhoto : photo.trim();
+    const updated: FounderData = {
+      name: name.trim(),
+      title: title.trim(),
+      photo: finalPhoto,
+      bio: bio.trim(),
+      address: address.trim(),
+      phone: phone.trim(),
+    };
+    try {
+      const current = getInitialStoreContent();
+      const mergedStore = await saveStoreContentPersisted({
+        founder: updated,
+        pageContent: {
+          ...current.pageContent!,
+          warehouseAddress: address.trim(),
+          corporateAddress: corporateAddress.trim(),
+        },
+      });
+      onSave(updated, mergedStore);
+      setAutoSaveStatus('✓ লাইভ ডাটাবেজে স্থায়ীভাবে সেভ হয়েছে');
+      return mergedStore;
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setSaving(true);
+    setAutoSaveStatus('⚡ ছবি সার্ভার ও ক্লাউডে আপলোড হচ্ছে...');
     try {
-      const compressed = await compressImageFileToDataUrl(file, 480, 0.78);
-      setPhoto(compressed);
+      const compressed = await compressImageFileToDataUrl(file, 640, 0.85);
+      
+      let finalPhotoUrl = compressed;
+      try {
+        const uploadRes = await fetch('/api/upload-founder-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageDataUrl: compressed }),
+        });
+        const uploadJson = await uploadRes.json();
+        if (uploadJson?.success && uploadJson?.url) {
+          finalPhotoUrl = uploadJson.url;
+        }
+      } catch (err) {
+        console.warn('Server upload fallback to compressed dataUrl:', err);
+      }
+
+      isDirtyRef.current = true;
+      setPhoto(finalPhotoUrl);
+      await persistImmediately(finalPhotoUrl);
+      setAutoSaveStatus('✓ ছবি স্থায়ীভাবে সংরক্ষিত হয়েছে');
     } catch (err) {
       console.warn('Founder photo upload error:', err);
+      setAutoSaveStatus('❌ ছবি আপলোডে সমস্যা হয়েছে');
+    } finally {
+      setSaving(false);
     }
+  };
+
+  const handleRemovePhotoNow = async () => {
+    isDirtyRef.current = true;
+    setPhoto('');
+    await persistImmediately('');
   };
 
   const handleAiGenerateBio = async () => {
@@ -102,6 +201,7 @@ export const FounderEditModal: React.FC<FounderEditModalProps> = ({
       });
       const json = await res.json();
       if (json?.data) {
+        isDirtyRef.current = true;
         if (json.data.name) setName(json.data.name);
         if (json.data.title) setTitle(json.data.title);
         if (json.data.bio) setBio(json.data.bio);
@@ -117,42 +217,12 @@ export const FounderEditModal: React.FC<FounderEditModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSaving(true);
-    const updated: FounderData = {
-      name: name.trim(),
-      title: title.trim(),
-      photo: photo.trim(),
-      bio: bio.trim(),
-      address: address.trim(),
-      phone: phone.trim(),
-    };
-
-    try {
-      const current = getInitialStoreContent();
-      const mergedStore = await saveStoreContentPersisted({
-        ...current,
-        founder: updated,
-        pageContent: {
-          ...current.pageContent!,
-          warehouseAddress:
-            address.trim() || 'বি-৬১/১৪, জলেশ্বর, সাভার - ১৩৪০, ঢাকা (১ম তলা)',
-          corporateAddress:
-            corporateAddress.trim() || 'সাভার বাস স্ট্যান্ড, শহীদ প্লাজা, দ্বিতীয় তলা',
-        },
-      });
-      onSave(updated, mergedStore);
-      setSaved(true);
-      setTimeout(() => {
-        setSaved(false);
-        onClose();
-      }, 700);
-    } catch (err) {
-      console.warn('Founder save fallback', err);
-      onSave(updated);
+    await persistImmediately();
+    setSaved(true);
+    setTimeout(() => {
+      setSaved(false);
       onClose();
-    } finally {
-      setSaving(false);
-    }
+    }, 500);
   };
 
   return (
@@ -160,11 +230,16 @@ export const FounderEditModal: React.FC<FounderEditModalProps> = ({
       <div className="bg-white rounded-2xl max-w-xl w-full p-5 sm:p-6 shadow-2xl border border-rose-200 text-xs space-y-4 my-auto max-h-[92vh] overflow-y-auto">
         <div className="flex items-center justify-between pb-3 border-b border-rose-100">
           <div>
-            <h3 className="text-sm font-extrabold text-stone-900">
-              প্রতিষ্ঠাতা প্রোফাইল, ব্র্যান্ড পরিচিতি ও অফিসের ঠিকানা এডিট করুন
-            </h3>
-            <p className="text-[11px] text-stone-500">
-              ছবি আপলোড/রিমুভ করুন অথবা AI দিয়ে পুরো ফাউন্ডার বায়ো ও ঠিকানা সাজিয়ে নিন
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="text-sm font-extrabold text-stone-900">
+                প্রতিষ্ঠাতা প্রোফাইল, ব্র্যান্ড পরিচিতি ও অফিসের ঠিকানা এডিট করুন
+              </h3>
+              <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold">
+                {autoSaveStatus || '⚡ রিয়েল-টাইম অটো-সেভ চালু'}
+              </span>
+            </div>
+            <p className="text-[11px] text-stone-500 mt-0.5">
+              যেখানেই লিখুন, লিংক পেস্ট করুন বা ছবি রিমুভ করুন — সাথে সাথে লাইভ ডাটাবেজে অটোমেটিক সেভ হয়ে যাবে
             </p>
           </div>
           <button
@@ -246,11 +321,11 @@ export const FounderEditModal: React.FC<FounderEditModalProps> = ({
                   {photo.trim() && (
                     <button
                       type="button"
-                      onClick={() => setPhoto('')}
+                      onClick={handleRemovePhotoNow}
                       className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-[#E11D48] border border-rose-200 font-bold rounded-lg flex items-center gap-1 cursor-pointer text-[11px]"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
-                      <span>🗑️ ছবি রিমুভ করুন</span>
+                      <span>🗑️ ছবি রিমুভ করুন (অটো-সেভ)</span>
                     </button>
                   )}
                 </div>
@@ -258,7 +333,10 @@ export const FounderEditModal: React.FC<FounderEditModalProps> = ({
                 <input
                   type="text"
                   value={photo}
-                  onChange={(e) => setPhoto(e.target.value)}
+                  onChange={(e) => {
+                    isDirtyRef.current = true;
+                    setPhoto(e.target.value);
+                  }}
                   placeholder="অথবা ছবির সরাসরি লিংক (URL) দিন (ফাঁকা রাখলে ছবি রিমুভ থাকবে)..."
                   className="w-full px-3 py-1.5 bg-white border border-stone-300 rounded-lg text-[11px]"
                 />
@@ -271,9 +349,11 @@ export const FounderEditModal: React.FC<FounderEditModalProps> = ({
               <label className="block text-stone-700 font-bold mb-1">প্রতিষ্ঠাতার নাম</label>
               <input
                 type="text"
-                required
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => {
+                  isDirtyRef.current = true;
+                  setName(e.target.value);
+                }}
                 className="w-full px-3 py-2 border border-stone-300 rounded-lg"
               />
             </div>
@@ -282,9 +362,11 @@ export const FounderEditModal: React.FC<FounderEditModalProps> = ({
               <label className="block text-stone-700 font-bold mb-1">পদবী ও ডেজিগনেশন</label>
               <input
                 type="text"
-                required
                 value={title}
-                onChange={(e) => setTitle(e.target.value)}
+                onChange={(e) => {
+                  isDirtyRef.current = true;
+                  setTitle(e.target.value);
+                }}
                 className="w-full px-3 py-2 border border-stone-300 rounded-lg"
               />
             </div>
@@ -294,9 +376,11 @@ export const FounderEditModal: React.FC<FounderEditModalProps> = ({
             <label className="block text-stone-700 font-bold mb-1">ব্র্যান্ড বায়ো / বিবরণ</label>
             <textarea
               rows={3}
-              required
               value={bio}
-              onChange={(e) => setBio(e.target.value)}
+              onChange={(e) => {
+                isDirtyRef.current = true;
+                setBio(e.target.value);
+              }}
               className="w-full px-3 py-2 border border-stone-300 rounded-lg"
             />
           </div>
@@ -308,9 +392,11 @@ export const FounderEditModal: React.FC<FounderEditModalProps> = ({
               </label>
               <input
                 type="text"
-                required
                 value={address}
-                onChange={(e) => setAddress(e.target.value)}
+                onChange={(e) => {
+                  isDirtyRef.current = true;
+                  setAddress(e.target.value);
+                }}
                 className="w-full px-3 py-2 border border-stone-300 rounded-lg"
               />
             </div>
@@ -320,9 +406,11 @@ export const FounderEditModal: React.FC<FounderEditModalProps> = ({
               </label>
               <input
                 type="text"
-                required
                 value={corporateAddress}
-                onChange={(e) => setCorporateAddress(e.target.value)}
+                onChange={(e) => {
+                  isDirtyRef.current = true;
+                  setCorporateAddress(e.target.value);
+                }}
                 className="w-full px-3 py-2 border border-stone-300 rounded-lg"
               />
             </div>
@@ -332,9 +420,11 @@ export const FounderEditModal: React.FC<FounderEditModalProps> = ({
             <label className="block text-stone-700 font-bold mb-1">হটলাইন নম্বর</label>
             <input
               type="text"
-              required
               value={phone}
-              onChange={(e) => setPhone(e.target.value)}
+              onChange={(e) => {
+                isDirtyRef.current = true;
+                setPhone(e.target.value);
+              }}
               className="w-full px-3 py-2 border border-stone-300 rounded-lg font-mono"
             />
           </div>
@@ -345,7 +435,7 @@ export const FounderEditModal: React.FC<FounderEditModalProps> = ({
               onClick={onClose}
               className="px-4 py-2 border border-stone-300 rounded-lg text-stone-700 hover:bg-stone-50 cursor-pointer"
             >
-              বাতিল
+              বন্ধ করুন
             </button>
             <button
               type="submit"
@@ -353,7 +443,7 @@ export const FounderEditModal: React.FC<FounderEditModalProps> = ({
               className="px-5 py-2 bg-[#E11D48] hover:bg-[#BE123C] text-white rounded-lg font-bold flex items-center gap-1.5 cursor-pointer"
             >
               {saved ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
-              <span>{saving ? 'সংরক্ষণ হচ্ছে...' : saved ? 'সংরক্ষিত হয়েছে' : 'সেভ করুন'}</span>
+              <span>{saving ? 'সংরক্ষণ হচ্ছে...' : saved ? 'সংরক্ষিত হয়েছে' : 'সেভ ও বন্ধ করুন'}</span>
             </button>
           </div>
         </form>
@@ -361,4 +451,5 @@ export const FounderEditModal: React.FC<FounderEditModalProps> = ({
     </div>
   );
 };
+
 

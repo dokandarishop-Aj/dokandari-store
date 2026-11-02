@@ -235,133 +235,112 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({
             )}
           </div>
 
-          {/* 2-Column Light Hero Layout (Left: Brand Copy & CTAs, Right: Bright Hero Visual Card) */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
-            <div className="lg:col-span-7 space-y-3.5">
-              <div
-                className={`inline-flex items-center gap-2 px-3.5 py-1 rounded-full text-white text-xs font-extrabold tracking-wide shadow-2xs ${
-                  isOrganic ? 'bg-[#16A34A]' : 'bg-[#E11D48]'
-                }`}
-              >
-                <img
-                  src={foundCategory?.image || activeHero.image}
-                  alt={foundCategory?.nameBn || ''}
-                  className="w-4 h-4 rounded-full object-cover border border-white/60"
-                  referrerPolicy="no-referrer"
-                />
-                <span>{activeHero.tag || foundCategory?.nameBn}</span>
-              </div>
-
-              <h1 className="text-xl sm:text-4xl font-extrabold tracking-tight text-stone-900 leading-tight">
-                {activeHero.title}
-              </h1>
-
-              <p className="text-xs sm:text-base text-stone-700 leading-relaxed font-medium max-w-2xl">
-                {activeHero.subtitle}
-              </p>
-
-              <div className="pt-1 flex flex-wrap items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const gridEl = document.getElementById('category-products-grid');
-                    if (gridEl) gridEl.scrollIntoView({ behavior: 'smooth' });
-                  }}
-                  className={`px-5 py-2.5 text-white rounded-xl text-xs sm:text-sm font-extrabold shadow-sm cursor-pointer transition-all ${
-                    isOrganic
-                      ? 'bg-gradient-to-r from-[#16A34A] to-[#15803D] hover:from-[#15803D] hover:to-[#166534]'
-                      : 'bg-gradient-to-r from-[#E11D48] to-[#BE123C] hover:from-[#BE123C] hover:to-[#9F1239]'
-                  }`}
-                >
-                  {activeHero.ctaText || (isOrganic ? 'অর্গানিক ফুড দেখুন' : 'কালেকশন দেখুন')} &rarr;
-                </button>
-
-                <span
-                  className={`px-3.5 py-2 rounded-xl bg-white border text-xs font-extrabold shadow-2xs ${
-                    isOrganic
-                      ? 'border-emerald-200 text-[#15803D]'
-                      : 'border-rose-200 text-[#E11D48]'
-                  }`}
-                >
-                  মোট {categoryProducts.length}টি বাছাইকৃত প্রোডাক্ট রেডি স্টক
-                </span>
-              </div>
-
-              {/* Value Badges in Light Mode */}
-              <div className="pt-2 flex flex-wrap items-center gap-2 text-[11px] font-bold text-stone-800">
-                <span
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border shadow-2xs ${
-                    isOrganic ? 'border-emerald-200' : 'border-rose-200'
-                  }`}
-                >
-                  <ShieldCheck className="w-4 h-4 text-[#16A34A]" />
-                  <span>{isOrganic ? '১০০% কেমিক্যালমুক্ত ও খাঁটি অর্গানিক' : '১০০% অরিজিনাল গ্যারান্টি'}</span>
-                </span>
-                <span
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border shadow-2xs ${
-                    isOrganic ? 'border-emerald-200' : 'border-rose-200'
-                  }`}
-                >
-                  <Truck className={`w-4 h-4 ${isOrganic ? 'text-[#16A34A]' : 'text-[#E11D48]'}`} />
-                  <span>ক্যাশ অন ডেলিভারি (খুলে দেখে পেমেন্ট)</span>
-                </span>
-                <span
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border shadow-2xs ${
-                    isOrganic ? 'border-emerald-200' : 'border-rose-200'
-                  }`}
-                >
-                  <RotateCcw className="w-4 h-4 text-amber-600" />
-                  <span>৭ দিনের সহজ রিটার্ন ও এক্সচেঞ্জ</span>
-                </span>
-              </div>
-            </div>
-
-            {/* Right Column: Bright Hero Showcase Image Card */}
-            <div className="lg:col-span-5">
-              <div
-                className={`relative rounded-3xl overflow-hidden bg-white border-2 p-2 shadow-md ${
-                  isOrganic ? 'border-emerald-200' : 'border-rose-200'
-                }`}
-              >
-                <div className="relative aspect-16/10 w-full rounded-2xl overflow-hidden bg-stone-50">
+          {/* Organic Food gets the Rich Hero Section; All other categories get a sleek thin display banner without promo text */}
+          {isOrganic ? (
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
+              <div className="lg:col-span-7 space-y-3.5">
+                <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full text-white text-xs font-extrabold tracking-wide shadow-2xs bg-[#16A34A]">
                   <img
-                    src={resolveSafeProductImageUrl(activeHero.image, categoryProducts[0], 0)}
-                    alt={activeHero.title}
-                    onError={(e) => handleProductImageError(e, categoryProducts[0], 0)}
-                    loading="eager"
-                    decoding="async"
-                    className="w-full h-full object-cover object-center"
+                    src={foundCategory?.image || activeHero.image}
+                    alt={foundCategory?.nameBn || ''}
+                    className="w-4 h-4 rounded-full object-cover border border-white/60"
                     referrerPolicy="no-referrer"
                   />
-                  <div
-                    className={`absolute bottom-2.5 left-2.5 right-2.5 px-3.5 py-2 rounded-xl bg-white/95 backdrop-blur-xs border flex items-center justify-between shadow-sm ${
-                      isOrganic ? 'border-emerald-200' : 'border-rose-200'
-                    }`}
+                  <span>{activeHero.tag || foundCategory?.nameBn}</span>
+                </div>
+
+                <h1 className="text-xl sm:text-4xl font-extrabold tracking-tight text-stone-900 leading-tight">
+                  {activeHero.title}
+                </h1>
+
+                <p className="text-xs sm:text-base text-stone-700 leading-relaxed font-medium max-w-2xl">
+                  {activeHero.subtitle}
+                </p>
+
+                <div className="pt-1 flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const gridEl = document.getElementById('category-products-grid');
+                      if (gridEl) gridEl.scrollIntoView({ behavior: 'smooth' });
+                    }}
+                    className="px-5 py-2.5 text-white rounded-xl text-xs sm:text-sm font-extrabold shadow-sm cursor-pointer transition-all bg-gradient-to-r from-[#16A34A] to-[#15803D] hover:from-[#15803D] hover:to-[#166534]"
                   >
-                    <div>
-                      <span
-                        className={`text-[10px] font-extrabold uppercase tracking-wider block ${
-                          isOrganic ? 'text-[#15803D]' : 'text-[#E11D48]'
-                        }`}
-                      >
-                        {isOrganic ? '🌿 Dokandari Organic Store' : '✨ Dokandari Official'}
-                      </span>
-                      <span className="text-xs font-extrabold text-stone-900 line-clamp-1">
-                        {foundCategory?.nameBn} — সরাসরি হোম ডেলিভারি
+                    {activeHero.ctaText || 'অর্গানিক ফুড দেখুন'} &rarr;
+                  </button>
+
+                  <span className="px-3.5 py-2 rounded-xl bg-white border text-xs font-extrabold shadow-2xs border-emerald-200 text-[#15803D]">
+                    মোট {categoryProducts.length}টি বাছাইকৃত অর্গানিক ফুড স্টক
+                  </span>
+                </div>
+
+                {/* Value Badges in Organic Light Mode */}
+                <div className="pt-2 flex flex-wrap items-center gap-2 text-[11px] font-bold text-stone-800">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border shadow-2xs border-emerald-200">
+                    <ShieldCheck className="w-4 h-4 text-[#16A34A]" />
+                    <span>১০০% কেমিক্যালমুক্ত ও খাঁটি অর্গানিক</span>
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border shadow-2xs border-emerald-200">
+                    <Truck className="w-4 h-4 text-[#16A34A]" />
+                    <span>ক্যাশ অন ডেলিভারি (খুলে দেখে পেমেন্ট)</span>
+                  </span>
+                </div>
+              </div>
+
+              {/* Right Column: Organic Showcase Image */}
+              <div className="lg:col-span-5">
+                <div className="relative rounded-3xl overflow-hidden bg-white border-2 p-2 shadow-md border-emerald-200">
+                  <div className="relative aspect-16/10 w-full rounded-2xl overflow-hidden bg-stone-50">
+                    <img
+                      src={resolveSafeProductImageUrl(activeHero.image, categoryProducts[0], 0)}
+                      alt={activeHero.title}
+                      onError={(e) => handleProductImageError(e, categoryProducts[0], 0)}
+                      loading="eager"
+                      decoding="async"
+                      className="w-full h-full object-cover object-center"
+                      referrerPolicy="no-referrer"
+                    />
+                    <div className="absolute bottom-2.5 left-2.5 right-2.5 px-3.5 py-2 rounded-xl bg-white/95 backdrop-blur-xs border border-emerald-200 flex items-center justify-between shadow-sm">
+                      <div>
+                        <span className="text-[10px] font-extrabold uppercase tracking-wider block text-[#15803D]">
+                          🌿 Dokandari Organic Store
+                        </span>
+                        <span className="text-xs font-extrabold text-stone-900 line-clamp-1">
+                          {foundCategory?.nameBn} — সরাসরি ফার্ম থেকে সংগৃহীত
+                        </span>
+                      </div>
+                      <span className="px-2.5 py-1 rounded-lg text-[10px] font-extrabold text-white shrink-0 bg-[#16A34A]">
+                        ১০০% খাঁটি
                       </span>
                     </div>
-                    <span
-                      className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold text-white shrink-0 ${
-                        isOrganic ? 'bg-[#16A34A]' : 'bg-[#E11D48]'
-                      }`}
-                    >
-                      ১০০% খাঁটি
-                    </span>
                   </div>
                 </div>
               </div>
             </div>
-          </div>
+          ) : (
+            /* Non-Organic Categories: Sleek, Thin Full-Width Display Banner — Zero Promotional Clutter */
+            <div className="relative w-full h-24 sm:h-32 rounded-2xl overflow-hidden border border-rose-200 shadow-xs bg-stone-100">
+              <img
+                src={resolveSafeProductImageUrl(activeHero.image, categoryProducts[0], 0)}
+                alt={foundCategory?.nameBn || activeHero.title}
+                onError={(e) => handleProductImageError(e, categoryProducts[0], 0)}
+                loading="eager"
+                decoding="async"
+                className="w-full h-full object-cover object-center"
+                referrerPolicy="no-referrer"
+              />
+              <div className="absolute inset-0 bg-gradient-to-r from-stone-950/75 via-stone-950/40 to-transparent flex items-center px-4 sm:px-6">
+                <div className="text-white space-y-1">
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#E11D48] text-white uppercase tracking-wider inline-block">
+                    {foundCategory?.nameBn}
+                  </span>
+                  <h1 className="text-sm sm:text-xl font-black text-white drop-shadow-sm">
+                    {foundCategory?.nameBn} — অফিশিয়াল কালেকশন
+                  </h1>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

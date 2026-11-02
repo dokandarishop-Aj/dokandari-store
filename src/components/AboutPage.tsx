@@ -3,7 +3,7 @@
  * @SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   ArrowLeft,
   ShieldCheck,
@@ -64,25 +64,74 @@ export const AboutPage: React.FC<AboutPageProps> = ({
   const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
+  const isDirtyRef = useRef(false);
 
-  const [localFounder, setLocalFounder] = useState<FounderData>(founderData);
+  const [localFounder, setLocalFounder] = useState<FounderData>(() => ({
+    ...founderData,
+    photo:
+      founderData.photo && !founderData.photo.includes('photo-1507003211169-0a1dd7228f2d')
+        ? founderData.photo
+        : '',
+  }));
   const [localPage, setLocalPage] = useState(
     pageContent || DEFAULT_STORE_CONTENT.pageContent!
   );
 
   useEffect(() => {
-    setLocalFounder(founderData);
-  }, [founderData]);
+    if (!isEditingPage && !isDirtyRef.current) {
+      setLocalFounder({
+        ...founderData,
+        photo:
+          founderData.photo && !founderData.photo.includes('photo-1507003211169-0a1dd7228f2d')
+            ? founderData.photo
+            : '',
+      });
+    }
+  }, [founderData, isEditingPage]);
 
   useEffect(() => {
-    if (pageContent) {
+    if (pageContent && !isEditingPage && !isDirtyRef.current) {
       setLocalPage((prev) => ({
         ...DEFAULT_STORE_CONTENT.pageContent!,
         ...prev,
         ...pageContent,
       }));
     }
-  }, [pageContent]);
+  }, [pageContent, isEditingPage]);
+
+  // Real-time debounced auto-save to Firestore whenever admin edits any field on AboutPage
+  useEffect(() => {
+    if (!isEditingPage || !isDirtyRef.current) return;
+    const timer = setTimeout(async () => {
+      try {
+        const updatedFounder: FounderData = {
+          ...localFounder,
+          name: (localFounder.name ?? '').trim(),
+          title: (localFounder.title ?? '').trim(),
+          photo: (localFounder.photo ?? '').trim(),
+          bio: (localFounder.bio ?? '').trim(),
+          address: (localPage.warehouseAddress ?? localFounder.address ?? '').trim(),
+          phone: (localFounder.phone ?? '').trim(),
+        };
+        const updatedPageContent = {
+          ...DEFAULT_STORE_CONTENT.pageContent!,
+          ...localPage,
+          warehouseAddress: updatedFounder.address,
+          corporateAddress: (localPage.corporateAddress ?? '').trim(),
+        };
+        const merged = await saveStoreContentPersisted({
+          founder: updatedFounder,
+          pageContent: updatedPageContent,
+        });
+        if (onFounderDirectSaved) {
+          onFounderDirectSaved(updatedFounder, merged);
+        }
+      } catch (err) {
+        console.warn('Realtime about page auto-save note:', err);
+      }
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [localFounder, localPage, isEditingPage]);
 
   const showSavedToast = (msg: string) => {
     setSaveSuccessMsg(msg);
@@ -94,15 +143,31 @@ export const AboutPage: React.FC<AboutPageProps> = ({
     if (!file) return;
     setSaving(true);
     try {
-      const compressed = await compressImageFileToDataUrl(file, 480, 0.78);
+      const compressed = await compressImageFileToDataUrl(file, 640, 0.85);
+      
+      let finalPhotoUrl = compressed;
+      try {
+        const uploadRes = await fetch('/api/upload-founder-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageDataUrl: compressed }),
+        });
+        const uploadJson = await uploadRes.json();
+        if (uploadJson?.success && uploadJson?.url) {
+          finalPhotoUrl = uploadJson.url;
+        }
+      } catch (err) {
+        console.warn('Server upload fallback:', err);
+      }
+
       const updatedFounder: FounderData = {
         ...localFounder,
-        photo: compressed,
+        photo: finalPhotoUrl,
       };
+      isDirtyRef.current = true;
       setLocalFounder(updatedFounder);
       const current = getInitialStoreContent();
       const merged = await saveStoreContentPersisted({
-        ...current,
         founder: updatedFounder,
         pageContent: {
           ...DEFAULT_STORE_CONTENT.pageContent!,
@@ -113,7 +178,7 @@ export const AboutPage: React.FC<AboutPageProps> = ({
       if (onFounderDirectSaved) {
         onFounderDirectSaved(updatedFounder, merged);
       }
-      showSavedToast('✓ ফাউন্ডারের ছবি লাইভ ডাটাবেজে ও ডোমেইনে সফলভাবে সংরক্ষিত হয়েছে!');
+      showSavedToast('✓ ফাউন্ডারের ছবি লাইভ ডাটাবেজ ও ডোমেইনে স্থায়ীভাবে সংরক্ষিত হয়েছে!');
     } catch (err) {
       console.warn('Direct founder photo upload error:', err);
     } finally {
@@ -128,10 +193,10 @@ export const AboutPage: React.FC<AboutPageProps> = ({
         ...localFounder,
         photo: '',
       };
+      isDirtyRef.current = true;
       setLocalFounder(updatedFounder);
       const current = getInitialStoreContent();
       const merged = await saveStoreContentPersisted({
-        ...current,
         founder: updatedFounder,
         pageContent: {
           ...DEFAULT_STORE_CONTENT.pageContent!,
@@ -145,7 +210,7 @@ export const AboutPage: React.FC<AboutPageProps> = ({
       if (onRemoveFounderPhoto) {
         onRemoveFounderPhoto();
       }
-      showSavedToast('✓ ফাউন্ডারের ছবি লাইভ ডাটাবেজ থেকে রিমুভ করা হয়েছে!');
+      showSavedToast('✓ ফাউন্ডারের ছবি লাইভ ডাটাবেজ থেকে স্থায়ীভাবে রিমুভ করা হয়েছে!');
     } catch (err) {
       console.warn('Direct founder photo remove error:', err);
     } finally {
@@ -170,10 +235,8 @@ export const AboutPage: React.FC<AboutPageProps> = ({
             bio: localFounder.bio,
             aboutHeadline: localPage.aboutHeadline,
             aboutSubtitle: localPage.aboutSubtitle,
-            warehouseAddress:
-              localPage.warehouseAddress || 'বি-৬১/১৪, জলেশ্বর, সাভার - ১৩৪০, ঢাকা (১ম তলা)',
-            corporateAddress:
-              localPage.corporateAddress || 'সাভার বাস স্ট্যান্ড, শহীদ প্লাজা, দ্বিতীয় তলা',
+            warehouseAddress: localPage.warehouseAddress,
+            corporateAddress: localPage.corporateAddress,
             ceoMessageText: localPage.ceoMessageText,
             businessStoryText: localPage.businessStoryText,
             productSourcingText: localPage.productSourcingText,
@@ -183,6 +246,7 @@ export const AboutPage: React.FC<AboutPageProps> = ({
       });
       const json = await res.json();
       if (json?.data) {
+        isDirtyRef.current = true;
         if (json.data.name || json.data.title || json.data.bio) {
           setLocalFounder((prev) => ({
             ...prev,
@@ -195,14 +259,8 @@ export const AboutPage: React.FC<AboutPageProps> = ({
           ...prev,
           aboutHeadline: json.data.aboutHeadline || prev.aboutHeadline,
           aboutSubtitle: json.data.aboutSubtitle || prev.aboutSubtitle,
-          warehouseAddress:
-            json.data.warehouseAddress ||
-            prev.warehouseAddress ||
-            'বি-৬১/১৪, জলেশ্বর, সাভার - ১৩৪০, ঢাকা (১ম তলা)',
-          corporateAddress:
-            json.data.corporateAddress ||
-            prev.corporateAddress ||
-            'সাভার বাস স্ট্যান্ড, শহীদ প্লাজা, দ্বিতীয় তলা',
+          warehouseAddress: json.data.warehouseAddress || prev.warehouseAddress,
+          corporateAddress: json.data.corporateAddress || prev.corporateAddress,
           ceoMessageText: json.data.ceoMessageText || prev.ceoMessageText,
           businessStoryText: json.data.businessStoryText || prev.businessStoryText,
           productSourcingText: json.data.productSourcingText || prev.productSourcingText,
@@ -222,27 +280,21 @@ export const AboutPage: React.FC<AboutPageProps> = ({
     try {
       const updatedFounder: FounderData = {
         ...localFounder,
-        name: localFounder.name.trim(),
-        title: localFounder.title.trim(),
-        bio: localFounder.bio.trim(),
-        address:
-          localPage.warehouseAddress?.trim() ||
-          localFounder.address?.trim() ||
-          'বি-৬১/১৪, জলেশ্বর, সাভার - ১৩৪০, ঢাকা (১ম তলা)',
-        phone: localFounder.phone.trim() || '+8809638757282',
+        name: (localFounder.name ?? '').trim(),
+        title: (localFounder.title ?? '').trim(),
+        photo: (localFounder.photo ?? '').trim(),
+        bio: (localFounder.bio ?? '').trim(),
+        address: (localPage.warehouseAddress ?? localFounder.address ?? '').trim(),
+        phone: (localFounder.phone ?? '').trim(),
       };
       const updatedPageContent = {
         ...DEFAULT_STORE_CONTENT.pageContent!,
         ...localPage,
         warehouseAddress: updatedFounder.address,
-        corporateAddress:
-          localPage.corporateAddress?.trim() ||
-          'সাভার বাস স্ট্যান্ড, শহীদ প্লাজা, দ্বিতীয় তলা',
+        corporateAddress: (localPage.corporateAddress ?? '').trim(),
       };
 
-      const current = getInitialStoreContent();
       const merged = await saveStoreContentPersisted({
-        ...current,
         founder: updatedFounder,
         pageContent: updatedPageContent,
       });
@@ -250,9 +302,10 @@ export const AboutPage: React.FC<AboutPageProps> = ({
       if (onFounderDirectSaved) {
         onFounderDirectSaved(updatedFounder, merged);
       }
+      isDirtyRef.current = false;
       setIsEditingPage(false);
       setEditingFounderInline(false);
-      showSavedToast('✓ ব্র্যান্ড পরিচিতি ও ফাউন্ডার প্রোফাইল লাইভ ডাটাবেজে ও ডোমেইনে সেভ হয়েছে!');
+      showSavedToast('✓ ব্র্যান্ড পরিচিতি ও ফাউন্ডার প্রোফাইল লাইভ ডাটাবেজে ও ডোমেইনে স্থায়ীভাবে সেভ হয়েছে!');
     } catch (err) {
       console.warn('Save about page error:', err);
     } finally {
@@ -260,7 +313,12 @@ export const AboutPage: React.FC<AboutPageProps> = ({
     }
   };
 
-  const hasPhoto = Boolean(localFounder.photo && localFounder.photo.trim());
+  const cleanPhoto =
+    localFounder.photo && !localFounder.photo.includes('photo-1507003211169-0a1dd7228f2d')
+      ? localFounder.photo.trim()
+      : '';
+  const hasPhoto = Boolean(cleanPhoto);
+
 
   return (
     <div className="bg-[#FAF9F6] min-h-screen pb-16 animate-in fade-in">
@@ -406,7 +464,10 @@ export const AboutPage: React.FC<AboutPageProps> = ({
                   <input
                     type="text"
                     value={localFounder.name}
-                    onChange={(e) => setLocalFounder({ ...localFounder, name: e.target.value })}
+                    onChange={(e) => {
+                      isDirtyRef.current = true;
+                      setLocalFounder({ ...localFounder, name: e.target.value });
+                    }}
                     className="w-full px-3.5 py-2 bg-stone-50 border border-stone-300 rounded-xl font-bold"
                   />
                 </div>
@@ -415,7 +476,10 @@ export const AboutPage: React.FC<AboutPageProps> = ({
                   <input
                     type="text"
                     value={localFounder.title}
-                    onChange={(e) => setLocalFounder({ ...localFounder, title: e.target.value })}
+                    onChange={(e) => {
+                      isDirtyRef.current = true;
+                      setLocalFounder({ ...localFounder, title: e.target.value });
+                    }}
                     className="w-full px-3.5 py-2 bg-stone-50 border border-stone-300 rounded-xl font-bold"
                   />
                 </div>
@@ -426,7 +490,10 @@ export const AboutPage: React.FC<AboutPageProps> = ({
                 <textarea
                   rows={2}
                   value={localFounder.bio}
-                  onChange={(e) => setLocalFounder({ ...localFounder, bio: e.target.value })}
+                  onChange={(e) => {
+                    isDirtyRef.current = true;
+                    setLocalFounder({ ...localFounder, bio: e.target.value });
+                  }}
                   className="w-full px-3.5 py-2 bg-stone-50 border border-stone-300 rounded-xl"
                 />
               </div>
@@ -435,8 +502,11 @@ export const AboutPage: React.FC<AboutPageProps> = ({
                 <label className="block font-bold text-stone-700 mb-1">সিইও-এর বিশেষ বার্তা (CEO Message)</label>
                 <textarea
                   rows={2}
-                  value={localPage.ceoMessageText || ''}
-                  onChange={(e) => setLocalPage({ ...localPage, ceoMessageText: e.target.value })}
+                  value={localPage.ceoMessageText ?? ''}
+                  onChange={(e) => {
+                    isDirtyRef.current = true;
+                    setLocalPage({ ...localPage, ceoMessageText: e.target.value });
+                  }}
                   className="w-full px-3.5 py-2 bg-stone-50 border border-stone-300 rounded-xl"
                 />
               </div>
@@ -448,8 +518,12 @@ export const AboutPage: React.FC<AboutPageProps> = ({
                   </label>
                   <input
                     type="text"
-                    value={localPage.warehouseAddress}
-                    onChange={(e) => setLocalPage({ ...localPage, warehouseAddress: e.target.value })}
+                    value={localPage.warehouseAddress ?? ''}
+                    onChange={(e) => {
+                      isDirtyRef.current = true;
+                      setLocalPage({ ...localPage, warehouseAddress: e.target.value });
+                      setLocalFounder((prev) => ({ ...prev, address: e.target.value }));
+                    }}
                     className="w-full px-3.5 py-2 bg-stone-50 border border-stone-300 rounded-xl"
                   />
                 </div>
@@ -459,11 +533,11 @@ export const AboutPage: React.FC<AboutPageProps> = ({
                   </label>
                   <input
                     type="text"
-                    value={
-                      localPage.corporateAddress ||
-                      'সাভার বাস স্ট্যান্ড, শহীদ প্লাজা, দ্বিতীয় তলা'
-                    }
-                    onChange={(e) => setLocalPage({ ...localPage, corporateAddress: e.target.value })}
+                    value={localPage.corporateAddress ?? ''}
+                    onChange={(e) => {
+                      isDirtyRef.current = true;
+                      setLocalPage({ ...localPage, corporateAddress: e.target.value });
+                    }}
                     className="w-full px-3.5 py-2 bg-stone-50 border border-stone-300 rounded-xl"
                   />
                 </div>
@@ -471,8 +545,11 @@ export const AboutPage: React.FC<AboutPageProps> = ({
                   <label className="block font-bold text-stone-700 mb-1">হটলাইন নম্বর</label>
                   <input
                     type="text"
-                    value={localFounder.phone}
-                    onChange={(e) => setLocalFounder({ ...localFounder, phone: e.target.value })}
+                    value={localFounder.phone ?? ''}
+                    onChange={(e) => {
+                      isDirtyRef.current = true;
+                      setLocalFounder({ ...localFounder, phone: e.target.value });
+                    }}
                     className="w-full px-3.5 py-2 bg-stone-50 border border-stone-300 rounded-xl font-mono"
                   />
                 </div>
@@ -483,8 +560,11 @@ export const AboutPage: React.FC<AboutPageProps> = ({
                   <label className="block font-bold text-stone-700 mb-1">পেইজ শিরোনাম (Headline)</label>
                   <input
                     type="text"
-                    value={localPage.aboutHeadline}
-                    onChange={(e) => setLocalPage({ ...localPage, aboutHeadline: e.target.value })}
+                    value={localPage.aboutHeadline ?? ''}
+                    onChange={(e) => {
+                      isDirtyRef.current = true;
+                      setLocalPage({ ...localPage, aboutHeadline: e.target.value });
+                    }}
                     className="w-full px-3.5 py-2 bg-stone-50 border border-stone-300 rounded-xl font-bold"
                   />
                 </div>
@@ -492,8 +572,11 @@ export const AboutPage: React.FC<AboutPageProps> = ({
                   <label className="block font-bold text-stone-700 mb-1">সাবটাইটেল / বিবরণ (Subtitle)</label>
                   <input
                     type="text"
-                    value={localPage.aboutSubtitle}
-                    onChange={(e) => setLocalPage({ ...localPage, aboutSubtitle: e.target.value })}
+                    value={localPage.aboutSubtitle ?? ''}
+                    onChange={(e) => {
+                      isDirtyRef.current = true;
+                      setLocalPage({ ...localPage, aboutSubtitle: e.target.value });
+                    }}
                     className="w-full px-3.5 py-2 bg-stone-50 border border-stone-300 rounded-xl"
                   />
                 </div>
@@ -503,8 +586,11 @@ export const AboutPage: React.FC<AboutPageProps> = ({
                 <label className="block font-bold text-stone-700 mb-1">আমাদের বিজনেস স্টোরি ও যাত্রা (Business Story)</label>
                 <textarea
                   rows={3}
-                  value={localPage.businessStoryText || ''}
-                  onChange={(e) => setLocalPage({ ...localPage, businessStoryText: e.target.value })}
+                  value={localPage.businessStoryText ?? ''}
+                  onChange={(e) => {
+                    isDirtyRef.current = true;
+                    setLocalPage({ ...localPage, businessStoryText: e.target.value });
+                  }}
                   className="w-full px-3.5 py-2 bg-stone-50 border border-stone-300 rounded-xl"
                 />
               </div>
@@ -513,8 +599,11 @@ export const AboutPage: React.FC<AboutPageProps> = ({
                 <label className="block font-bold text-stone-700 mb-1">প্রোডাক্ট সোর্সিং ও ১০০% অর্গানিক ফুড কালেকশন (Product Sourcing)</label>
                 <textarea
                   rows={3}
-                  value={localPage.productSourcingText || ''}
-                  onChange={(e) => setLocalPage({ ...localPage, productSourcingText: e.target.value })}
+                  value={localPage.productSourcingText ?? ''}
+                  onChange={(e) => {
+                    isDirtyRef.current = true;
+                    setLocalPage({ ...localPage, productSourcingText: e.target.value });
+                  }}
                   className="w-full px-3.5 py-2 bg-stone-50 border border-stone-300 rounded-xl"
                 />
               </div>
@@ -523,8 +612,11 @@ export const AboutPage: React.FC<AboutPageProps> = ({
                 <label className="block font-bold text-stone-700 mb-1">আমাদের বিজনেস পলিসি ও কাস্টমার গ্যারান্টি (Business Policy)</label>
                 <textarea
                   rows={3}
-                  value={localPage.businessPolicyText || ''}
-                  onChange={(e) => setLocalPage({ ...localPage, businessPolicyText: e.target.value })}
+                  value={localPage.businessPolicyText ?? ''}
+                  onChange={(e) => {
+                    isDirtyRef.current = true;
+                    setLocalPage({ ...localPage, businessPolicyText: e.target.value });
+                  }}
                   className="w-full px-3.5 py-2 bg-stone-50 border border-stone-300 rounded-xl"
                 />
               </div>
@@ -610,7 +702,7 @@ export const AboutPage: React.FC<AboutPageProps> = ({
               <div className="relative w-44 h-44 sm:w-52 sm:h-52 rounded-3xl overflow-hidden border-4 border-rose-100 shadow-md bg-gradient-to-br from-[#FFF1F2] via-rose-100 to-rose-200 flex items-center justify-center">
                 {hasPhoto ? (
                   <img
-                    src={localFounder.photo}
+                    src={cleanPhoto}
                     alt={localFounder.name}
                     loading="eager"
                     decoding="async"

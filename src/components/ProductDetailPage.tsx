@@ -261,7 +261,6 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
             name: product.name,
             price: product.price,
             quantity,
-            category: product.category,
           },
         ],
         product.price * quantity
@@ -309,9 +308,20 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     ? Math.round(((product.originalPrice - product.price) / product.originalPrice) * 100)
     : 20;
 
-  const shippingCost = deliveryArea === 'dhaka' ? 70 : 120;
-  const subtotalPrice = product.price * quantity;
-  const finalShipping = shippingCost;
+  // 3 High-Converting Combo Pack Deals (Pack 1: Regular, Pack 2: Save 150৳, Pack 3: Free Delivery + Save 350৳)
+  const [selectedCombo, setSelectedCombo] = useState<1 | 2 | 3>(1);
+
+  const handleSelectCombo = (pack: 1 | 2 | 3) => {
+    setSelectedCombo(pack);
+    setQuantity(pack);
+  };
+
+  const comboDiscount = selectedCombo === 3 ? 350 : selectedCombo === 2 ? 150 : 0;
+  const isFreeDeliveryCombo = selectedCombo === 3;
+  const baseShippingCost = deliveryArea === 'dhaka' ? 70 : 120;
+  const finalShipping = isFreeDeliveryCombo ? 0 : baseShippingCost;
+  const rawSubtotal = product.price * quantity;
+  const subtotalPrice = Math.max(0, rawSubtotal - comboDiscount);
   const totalPrice = subtotalPrice + finalShipping;
 
   // Real-time Lead Recovery mechanism: automatically captures customer phone & details on Instant Checkout page
@@ -458,7 +468,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
         ],
         subtotal: subtotalPrice,
         shippingCost: finalShipping,
-        discount: 0,
+        discount: comboDiscount,
         total: totalPrice,
         paymentMethod: 'cod',
         status: 'pending',
@@ -1418,331 +1428,19 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               )}
             </button>
 
-            {/* Admin-Only Refresh, AI Auto-Edit, Hero Edit & Full Edit Controls — Strictly hidden from customers unless Admin is logged in */}
-            {isAdmin && (
-              <>
-                <button
-                  onClick={() => setIsEditingHero(!isEditingHero)}
-                  className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-bold bg-amber-400 hover:bg-amber-300 text-stone-950 px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-xl shadow-2xs transition-colors cursor-pointer"
-                  title="প্রোডাক্ট হিরো ব্যানার এডিট করুন"
-                >
-                  <Edit3 className="w-3.5 h-3.5" />
-                  <span>হিরো ব্যানার এডিট</span>
-                </button>
-
-                <button
-                  onClick={() => {
-                    setShowAiEditBar(!showAiEditBar);
-                    setShowRefreshBar(false);
-                  }}
-                  className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-bold bg-[#FFF1F2] hover:bg-rose-100 text-[#E11D48] border border-rose-300 px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-xl shadow-2xs transition-colors cursor-pointer"
-                  title="ছবি বা নির্দেশনা দিয়ে AI অটো-ফিল ও এডিট করুন"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-[#E11D48]" />
-                  <span>✨ AI ও ৫+ ছবি আপলোড</span>
-                </button>
-
-                <button
-                  onClick={() => {
-                    setShowRefreshBar(!showRefreshBar);
-                    setShowAiEditBar(false);
-                  }}
-                  className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-bold bg-white hover:bg-rose-50 text-[#E11D48] border border-rose-200 px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-xl shadow-2xs transition-colors cursor-pointer"
-                  title="১-ক্লিকে নতুন লিংক দিয়ে প্রোডাক্টের তথ্য রিফ্রেশ করুন"
-                >
-                  <RefreshCw
-                    className={`w-3.5 h-3.5 text-[#E11D48] ${isRefreshing ? 'animate-spin' : ''}`}
-                  />
-                  <span>লিংক রিফ্রেশ</span>
-                </button>
-
-                <button
-                  onClick={() => onOpenEdit(product)}
-                  className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-bold bg-[#E11D48] hover:bg-[#BE123C] text-white px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-xl shadow-xs transition-colors cursor-pointer"
-                  title="Edit this product"
-                >
-                  <Edit3 className="w-3.5 h-3.5 text-white" />
-                  <span>ফুল এডিট</span>
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* 100% Light Theme Product Detail Hero Banner — Zero Dark Overlay */}
-        <div
-          className={`relative rounded-2xl overflow-hidden border shadow-2xs p-4 sm:p-6 flex items-center justify-between gap-4 ${
-            isOrganic
-              ? 'bg-gradient-to-r from-[#F0FDF4] via-[#ECFDF5] to-[#DCFCE7] border-emerald-200'
-              : 'bg-gradient-to-r from-[#FFF5F7] via-[#FFF0F3] to-[#FFE4E8] border-rose-200'
-          }`}
-        >
-          <div className="space-y-1.5 max-w-2xl flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span
-                className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-white text-[10px] font-bold uppercase tracking-wider ${
-                  isOrganic ? 'bg-[#16A34A]' : 'bg-[#E11D48]'
-                }`}
-              >
-                {activeHeroConfig.tag || categoryNameBn}
-              </span>
-              <span
-                className={`text-[11px] font-extrabold ${
-                  isOrganic ? 'text-[#15803D]' : 'text-[#BE123C]'
-                }`}
-              >
-                ✓ ১০০% অরিজিনাল কোয়ালিটি • সারা দেশে ক্যাশ অন ডেলিভারি
-              </span>
-            </div>
-            <h2 className="text-sm sm:text-xl font-black text-stone-900 line-clamp-1">
-              {activeHeroConfig.title || `${categoryNameBn} — অফিশিয়াল কালেকশন`}
-            </h2>
-            <p className="text-[11px] sm:text-xs text-stone-700 font-medium line-clamp-1">
-              {activeHeroConfig.subtitle}
-            </p>
-          </div>
-
-          <div className="flex items-center gap-3 shrink-0">
-            <img
-              src={resolveSafeProductImageUrl(
-                activeHeroConfig.image || product.images[0],
-                product,
-                0
-              )}
-              alt={activeHeroConfig.title}
-              onError={(e) => handleProductImageError(e, product, 0)}
-              className={`w-16 h-16 sm:w-20 sm:h-20 rounded-2xl object-cover border-2 bg-white shadow-2xs hidden xs:block ${
-                isOrganic ? 'border-emerald-300' : 'border-rose-300'
-              }`}
-              referrerPolicy="no-referrer"
-            />
+            {/* Admin-Only Discrete Quick Edit Button — Hidden from regular customers */}
             {isAdmin && (
               <button
-                type="button"
-                onClick={() => setIsEditingHero(!isEditingHero)}
-                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-stone-50 text-stone-900 border border-stone-300 text-xs font-extrabold shadow-2xs cursor-pointer shrink-0"
+                onClick={() => onOpenEdit(product)}
+                className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-bold bg-[#E11D48] hover:bg-[#BE123C] text-white px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl shadow-xs transition-colors cursor-pointer"
+                title="প্রোডাক্ট তথ্য ও ছবি এডিট করুন"
               >
-                <Edit3 className="w-3.5 h-3.5 text-[#E11D48]" />
-                <span>হিরো ব্যানার এডিট</span>
+                <Edit3 className="w-3.5 h-3.5 text-white" />
+                <span>এডিট করুন</span>
               </button>
             )}
           </div>
         </div>
-
-        {/* Admin-Only Product Detail Hero Editor Box */}
-        {isAdmin && isEditingHero && (
-          <form
-            onSubmit={handleSavePdpHeroBanner}
-            className="bg-white border-2 border-amber-400 rounded-2xl p-4 shadow-md space-y-3 text-xs animate-in fade-in"
-          >
-            <div className="flex items-center justify-between pb-2 border-b border-stone-200">
-              <h3 className="font-extrabold text-stone-900 flex items-center gap-1.5">
-                <Edit3 className="w-4 h-4 text-[#E11D48]" />
-                <span>প্রোডাক্ট ও ক্যাটাগরি হিরো ব্যানার এডিট (ফায়ারস্টোরে লাইভ সেভ হবে)</span>
-              </h3>
-              <button
-                type="button"
-                onClick={() => setIsEditingHero(false)}
-                className="text-stone-500 hover:text-stone-800 font-bold cursor-pointer"
-              >
-                ✕ বন্ধ করুন
-              </button>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-              <div>
-                <label className="block font-bold text-stone-700 mb-1">ব্যানার শিরোনাম</label>
-                <input
-                  type="text"
-                  value={heroTitleInput}
-                  onChange={(e) => setHeroTitleInput(e.target.value)}
-                  className="w-full px-3 py-2 border border-stone-300 rounded-xl"
-                />
-              </div>
-              <div>
-                <label className="block font-bold text-stone-700 mb-1">ট্যাগ ব্যাজ</label>
-                <input
-                  type="text"
-                  value={heroTagInput}
-                  onChange={(e) => setHeroTagInput(e.target.value)}
-                  className="w-full px-3 py-2 border border-stone-300 rounded-xl"
-                />
-              </div>
-              <div>
-                <label className="block font-bold text-stone-700 mb-1">ব্যানার ছবির লিংক বা আপলোড</label>
-                <div className="flex gap-1.5">
-                  <input
-                    type="text"
-                    value={heroImageInput}
-                    onChange={(e) => setHeroImageInput(e.target.value)}
-                    className="flex-1 px-3 py-2 border border-stone-300 rounded-xl"
-                  />
-                  <label className="px-2.5 py-2 bg-rose-50 text-[#E11D48] border border-rose-200 rounded-xl font-bold cursor-pointer shrink-0 flex items-center">
-                    <Upload className="w-3.5 h-3.5" />
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={async (ev) => {
-                        const file = ev.target.files?.[0];
-                        if (!file) return;
-                        const dUrl = await compressImageFileToDataUrl(file, 900, 0.72);
-                        if (dUrl) setHeroImageInput(dUrl);
-                      }}
-                      className="hidden"
-                    />
-                  </label>
-                </div>
-              </div>
-            </div>
-            <div className="flex flex-col sm:flex-row gap-2.5 items-end">
-              <div className="flex-1 w-full">
-                <label className="block font-bold text-stone-700 mb-1">সাবটাইটেল</label>
-                <input
-                  type="text"
-                  value={heroSubtitleInput}
-                  onChange={(e) => setHeroSubtitleInput(e.target.value)}
-                  className="w-full px-3 py-2 border border-stone-300 rounded-xl"
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={savingHero}
-                className="px-5 py-2 bg-[#E11D48] hover:bg-[#BE123C] text-white font-bold rounded-xl cursor-pointer shrink-0"
-              >
-                {savingHero ? 'সেভ হচ্ছে...' : 'ব্যানার লাইভ সেভ করুন'}
-              </button>
-            </div>
-          </form>
-        )}
-
-        {/* Admin-Only AI Photo & Multi-Image (5+ Photos) Auto-Fill Bar on PDP */}
-        {isAdmin && showAiEditBar && (
-          <section className="bg-[#FFF5F7] border-2 border-[#E11D48] rounded-2xl p-4 sm:p-5 shadow-md space-y-3 animate-in fade-in">
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <div className="flex items-center gap-2">
-                <span className="p-1.5 rounded-lg bg-[#E11D48] text-white">
-                  <Sparkles className="w-4 h-4" />
-                </span>
-                <div>
-                  <h3 className="text-xs sm:text-sm font-extrabold text-stone-900">
-                    ✨ একসাথে ৫+ ছবি আপলোড এবং AI দিয়ে এই প্রোডাক্টের সকল তথ্য অটো-ফিল ও এডিট করুন
-                  </h3>
-                  <p className="text-[11px] text-stone-600">
-                    একসাথে ৫টি বা তার বেশি ছবি সিলেক্ট করে আপলোড করুন অথবা সংক্ষেপে নির্দেশনা লিখুন — সকল ছবি ও তথ্য সরাসরি ফায়ারবেস ডাটাবেজে রিয়েল-টাইম সেভ হবে।
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <form onSubmit={handleAiAutoFillProduct} className="space-y-3">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-                <label className="px-3.5 py-2 bg-white hover:bg-rose-50 text-[#E11D48] border border-rose-300 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shrink-0 shadow-2xs">
-                  <Upload className="w-3.5 h-3.5" />
-                  <span>📸 একসাথে একাধিক (৫+টি) ছবি আপলোড করুন</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    onChange={handleAiPhotoUpload}
-                    className="hidden"
-                  />
-                </label>
-
-                {aiUploadedImages.length > 0 && (
-                  <div className="flex items-center gap-2 bg-white px-2.5 py-1.5 rounded-xl border border-rose-200 flex-wrap">
-                    <div className="flex -space-x-1.5">
-                      {aiUploadedImages.slice(0, 6).map((imgSrc, i) => (
-                        <img
-                          key={i}
-                          src={imgSrc}
-                          alt="Uploaded preview"
-                          className="w-8 h-8 rounded-lg object-cover border border-white shadow-2xs"
-                        />
-                      ))}
-                    </div>
-                    <span className="text-[11px] font-bold text-emerald-700">
-                      {aiUploadedImages.length}টি নতুন ছবি যুক্ত হয়েছে
-                    </span>
-                    <button
-                      type="button"
-                      onClick={handleSaveUploadedPhotosOnly}
-                      disabled={isAiEditing}
-                      className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold cursor-pointer"
-                    >
-                      শুধু ছবিগুলো সেভ করুন
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setAiUploadedImages([])}
-                      className="text-[11px] text-rose-600 font-bold hover:underline cursor-pointer"
-                    >
-                      বাতিল
-                    </button>
-                  </div>
-                )}
-
-                <input
-                  type="text"
-                  value={aiPromptInput}
-                  onChange={(e) => setAiPromptInput(e.target.value)}
-                  placeholder="নির্দেশনা লিখুন (যেমন: দাম ১২৫০ টাকা করো এবং প্রিমিয়াম বাংলা বিবরণ ও ফিচার দাও)..."
-                  className="flex-1 w-full px-3.5 py-2 bg-white border border-rose-200 rounded-xl text-xs outline-none focus:border-[#E11D48]"
-                />
-
-                <button
-                  type="submit"
-                  disabled={isAiEditing}
-                  className="px-5 py-2.5 bg-[#E11D48] hover:bg-[#BE123C] text-white text-xs font-bold rounded-xl shadow-xs flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
-                >
-                  {isAiEditing ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Sparkles className="w-4 h-4 text-amber-200" />
-                  )}
-                  <span>{isAiEditing ? 'AI সাজাচ্ছে...' : '✨ AI অটো-ফিল ও সেভ'}</span>
-                </button>
-              </div>
-            </form>
-          </section>
-        )}
-
-        {/* 1-Click Fast URL Refresh Bar on PDP (Admin Only) */}
-        {isAdmin && showRefreshBar && (
-          <section className="bg-white border-2 border-rose-200 rounded-2xl p-4 sm:p-5 shadow-xs space-y-3 animate-in fade-in">
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <div className="flex items-center gap-2">
-                <span className="p-1.5 rounded-lg bg-[#E11D48] text-white">
-                  <Globe className="w-4 h-4" />
-                </span>
-                <div>
-                  <h3 className="text-xs sm:text-sm font-bold text-stone-900">
-                    ১-ক্লিকে যেকোনো লিংক দিয়ে এই প্রোডাক্টটি রিফ্রেশ করুন (In-Place URL Refresh)
-                  </h3>
-                  <p className="text-[11px] text-stone-500">
-                    Alibaba, AliExpress, CJ, Amazon বা Daraz লিংক দিন — স্বয়ংক্রিয়ভাবে আসল ছবি, ১০০% বাংলা টাইটেল ও সঠিক বিডিটি প্রাইস রিফ্রেশ হয়ে লাইভ ডাটাবেজে সেভ হবে।
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <form onSubmit={handleFastUrlRefresh} className="flex flex-col sm:flex-row gap-2">
-              <input
-                type="text"
-                value={refreshUrl}
-                onChange={(e) => setRefreshUrl(e.target.value)}
-                placeholder="নতুন প্রোডাক্টের লিংক পেস্ট করুন..."
-                className="flex-1 px-4 py-2.5 bg-stone-50 border border-stone-300 focus:border-[#E11D48] focus:bg-white rounded-xl text-xs outline-none"
-              />
-              <button
-                type="submit"
-                disabled={isRefreshing || !refreshUrl.trim()}
-                className="px-5 py-2.5 bg-[#E11D48] hover:bg-[#BE123C] disabled:bg-stone-300 text-white text-xs font-bold rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer shrink-0"
-              >
-                <Sparkles className="w-4 h-4 text-amber-300" />
-                <span>{isRefreshing ? 'রিফ্রেশ হচ্ছে...' : 'প্রোডাক্ট সম্পূর্ণ রিফ্রেশ করুন'}</span>
-              </button>
-            </form>
-          </section>
-        )}
 
         {/* Main Product Details Split Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-8 items-start">
@@ -2045,12 +1743,12 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                 </div>
               )}
 
-              {/* Variants & Quantity Selector */}
-              <div className="space-y-3">
+              {/* Compact Variants & 3 High-Conversion Combo Pack Offers */}
+              <div className="space-y-3.5">
                 {product.variants.colors && product.variants.colors.length > 0 && (
                   <div>
-                    <span className="block text-[11px] sm:text-xs font-bold text-stone-900 mb-1">
-                      {isOrganic ? 'ধরন / প্যাক নির্বাচন করুন:' : 'কালার নির্বাচন করুন:'}
+                    <span className="block text-[11px] sm:text-xs font-bold text-stone-900 mb-1.5">
+                      {isOrganic ? 'ধরন / প্যাক নির্বাচন:' : 'কালার নির্বাচন:'}
                     </span>
                     <div className="flex flex-wrap gap-1.5">
                       {product.variants.colors.map((c) => (
@@ -2058,12 +1756,12 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                           key={c}
                           type="button"
                           onClick={() => setSelectedColor(c)}
-                          className={`px-2.5 py-1 text-[11px] sm:text-xs font-bold rounded-lg border transition-all cursor-pointer ${
+                          className={`px-3 py-1.5 text-[11px] sm:text-xs font-bold rounded-xl border transition-all cursor-pointer ${
                             selectedColor === c
                               ? isOrganic
-                                ? 'bg-[#16A34A] text-white border-[#16A34A] shadow-2xs'
-                                : 'bg-[#E11D48] text-white border-[#E11D48] shadow-2xs'
-                              : 'bg-white text-stone-700 border-stone-200 hover:border-stone-400'
+                                ? 'bg-[#16A34A] text-white border-[#16A34A] shadow-xs'
+                                : 'bg-[#E11D48] text-white border-[#E11D48] shadow-xs'
+                              : 'bg-stone-50 text-stone-700 border-stone-200 hover:border-stone-400'
                           }`}
                         >
                           {c}
@@ -2075,8 +1773,8 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
 
                 {product.variants.sizes && product.variants.sizes.length > 0 && (
                   <div>
-                    <span className="block text-[11px] sm:text-xs font-bold text-stone-900 mb-1">
-                      {isOrganic ? 'ওজন / পরিমাণ নির্বাচন করুন:' : 'সাইজ নির্বাচন করুন:'}
+                    <span className="block text-[11px] sm:text-xs font-bold text-stone-900 mb-1.5">
+                      {isOrganic ? 'ওজন / পরিমাণ নির্বাচন:' : 'সাইজ নির্বাচন:'}
                     </span>
                     <div className="flex flex-wrap gap-1.5">
                       {product.variants.sizes.map((s) => (
@@ -2084,12 +1782,12 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                           key={s}
                           type="button"
                           onClick={() => setSelectedSize(s)}
-                          className={`px-3 py-1 text-[11px] sm:text-xs font-bold rounded-lg border transition-all cursor-pointer ${
+                          className={`px-3 py-1.5 text-[11px] sm:text-xs font-bold rounded-xl border transition-all cursor-pointer ${
                             selectedSize === s
                               ? isOrganic
-                                ? 'bg-[#16A34A] text-white border-[#16A34A] shadow-2xs'
-                                : 'bg-[#E11D48] text-white border-[#E11D48] shadow-2xs'
-                              : 'bg-white text-stone-700 border-stone-200 hover:border-stone-400'
+                                ? 'bg-[#16A34A] text-white border-[#16A34A] shadow-xs'
+                                : 'bg-[#E11D48] text-white border-[#E11D48] shadow-xs'
+                              : 'bg-stone-50 text-stone-700 border-stone-200 hover:border-stone-400'
                           }`}
                         >
                           {s}
@@ -2099,6 +1797,136 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                   </div>
                 )}
 
+                {/* 3 HIGH-CONVERSION COMBO PACK CARDS (AOV Booster & Return Reducer) */}
+                <div className="space-y-2 pt-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black text-stone-900 flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-[#E11D48] animate-ping" />
+                      <span>অফার ও কম্বো প্যাকেজ নির্বাচন করুন:</span>
+                    </span>
+                    <span className="text-[10px] font-bold text-[#E11D48] bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full">
+                      🔥 ৩৫০৳ পর্যন্ত সাশ্রয়!
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    {/* Pack 1: 1 Pc */}
+                    <button
+                      type="button"
+                      onClick={() => handleSelectCombo(1)}
+                      className={`p-2.5 rounded-xl border-2 text-left transition-all cursor-pointer relative flex flex-col justify-between ${
+                        selectedCombo === 1
+                          ? isOrganic
+                            ? 'border-[#16A34A] bg-[#F0FDF4] shadow-xs ring-1 ring-emerald-300'
+                            : 'border-[#E11D48] bg-rose-50/60 shadow-xs ring-1 ring-rose-300'
+                          : 'border-stone-200 bg-white hover:border-stone-300'
+                      }`}
+                    >
+                      <div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-extrabold text-stone-900">১ টি (স্ট্যান্ডার্ড)</span>
+                          <span
+                            className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                              selectedCombo === 1
+                                ? isOrganic
+                                  ? 'border-[#16A34A] bg-[#16A34A]'
+                                  : 'border-[#E11D48] bg-[#E11D48]'
+                                : 'border-stone-300 bg-white'
+                            }`}
+                          >
+                            {selectedCombo === 1 && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-stone-500 font-medium mt-0.5">সাধারণ মূল্য</p>
+                      </div>
+                      <div className="mt-2 pt-1 border-t border-stone-100 flex items-baseline justify-between">
+                        <span className="text-xs font-mono font-black text-stone-900">৳{product.price.toLocaleString()}</span>
+                        <span className="text-[10px] text-stone-400">১ পিস</span>
+                      </div>
+                    </button>
+
+                    {/* Pack 2: 2 Pcs - Popular Combo */}
+                    <button
+                      type="button"
+                      onClick={() => handleSelectCombo(2)}
+                      className={`p-2.5 rounded-xl border-2 text-left transition-all cursor-pointer relative flex flex-col justify-between ${
+                        selectedCombo === 2
+                          ? isOrganic
+                            ? 'border-[#16A34A] bg-[#F0FDF4] shadow-xs ring-2 ring-emerald-400'
+                            : 'border-[#E11D48] bg-rose-50/70 shadow-xs ring-2 ring-rose-400'
+                          : 'border-stone-200 bg-white hover:border-stone-300'
+                      }`}
+                    >
+                      <span className="absolute -top-2 right-2 px-1.5 py-0.2 rounded-md bg-amber-500 text-stone-950 text-[9px] font-black uppercase tracking-wide shadow-2xs">
+                        🔥 সবচেয়ে জনপ্রিয়
+                      </span>
+                      <div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-extrabold text-stone-900">২ টি (কম্বো প্যাক)</span>
+                          <span
+                            className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                              selectedCombo === 2
+                                ? isOrganic
+                                  ? 'border-[#16A34A] bg-[#16A34A]'
+                                  : 'border-[#E11D48] bg-[#E11D48]'
+                                : 'border-stone-300 bg-white'
+                            }`}
+                          >
+                            {selectedCombo === 2 && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-emerald-700 font-bold mt-0.5">১৫০৳ নগদ সাশ্রয়!</p>
+                      </div>
+                      <div className="mt-2 pt-1 border-t border-stone-100 flex items-baseline justify-between">
+                        <span className="text-xs font-mono font-black text-[#E11D48]">
+                          ৳{(product.price * 2 - 150).toLocaleString()}
+                        </span>
+                        <span className="text-[10px] text-stone-400 line-through">৳{(product.price * 2).toLocaleString()}</span>
+                      </div>
+                    </button>
+
+                    {/* Pack 3: 3 Pcs - Mega Saver + Free Delivery */}
+                    <button
+                      type="button"
+                      onClick={() => handleSelectCombo(3)}
+                      className={`p-2.5 rounded-xl border-2 text-left transition-all cursor-pointer relative flex flex-col justify-between ${
+                        selectedCombo === 3
+                          ? isOrganic
+                            ? 'border-[#16A34A] bg-[#F0FDF4] shadow-xs ring-2 ring-emerald-500'
+                            : 'border-[#E11D48] bg-rose-50/80 shadow-xs ring-2 ring-rose-500'
+                          : 'border-stone-200 bg-white hover:border-stone-300'
+                      }`}
+                    >
+                      <span className="absolute -top-2 right-2 px-1.5 py-0.2 rounded-md bg-emerald-600 text-white text-[9px] font-black uppercase tracking-wide shadow-2xs animate-pulse">
+                        🚚 ফ্রি ডেলিভারি!
+                      </span>
+                      <div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-extrabold text-stone-900">৩ টি (মেগা সেভার)</span>
+                          <span
+                            className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                              selectedCombo === 3
+                                ? isOrganic
+                                  ? 'border-[#16A34A] bg-[#16A34A]'
+                                  : 'border-[#E11D48] bg-[#E11D48]'
+                                : 'border-stone-300 bg-white'
+                            }`}
+                          >
+                            {selectedCombo === 3 && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-emerald-700 font-bold mt-0.5">৩৫০৳ ছাড় + ০৳ ডেলিভারি</p>
+                      </div>
+                      <div className="mt-2 pt-1 border-t border-stone-100 flex items-baseline justify-between">
+                        <span className="text-xs font-mono font-black text-[#E11D48]">
+                          ৳{(product.price * 3 - 350).toLocaleString()}
+                        </span>
+                        <span className="text-[10px] text-stone-400 line-through">৳{(product.price * 3).toLocaleString()}</span>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+
                 {/* Quantity & Subtotal */}
                 <div className="flex items-center justify-between gap-3 pt-1">
                   <div className="flex items-center gap-2.5">
@@ -2106,7 +1934,13 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                     <div className="flex items-center border border-stone-300 rounded-lg overflow-hidden bg-white">
                       <button
                         type="button"
-                        onClick={() => setQuantity(Math.max(1, quantity - 1))}
+                        onClick={() => {
+                          const n = Math.max(1, quantity - 1);
+                          setQuantity(n);
+                          if (n === 1) setSelectedCombo(1);
+                          else if (n === 2) setSelectedCombo(2);
+                          else if (n >= 3) setSelectedCombo(3);
+                        }}
                         className="px-2.5 py-1 text-stone-700 font-bold hover:bg-stone-100 cursor-pointer"
                       >
                         -
@@ -2116,7 +1950,12 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                       </span>
                       <button
                         type="button"
-                        onClick={() => setQuantity(quantity + 1)}
+                        onClick={() => {
+                          const n = quantity + 1;
+                          setQuantity(n);
+                          if (n === 2) setSelectedCombo(2);
+                          else if (n >= 3) setSelectedCombo(3);
+                        }}
                         className="px-2.5 py-1 text-stone-700 font-bold hover:bg-stone-100 cursor-pointer"
                       >
                         +
@@ -2133,6 +1972,11 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                     >
                       ৳{subtotalPrice.toLocaleString()}
                     </span>
+                    {comboDiscount > 0 && (
+                      <span className="text-[10px] font-bold text-emerald-700 ml-1">
+                        (৳{comboDiscount} ছাড়)
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>

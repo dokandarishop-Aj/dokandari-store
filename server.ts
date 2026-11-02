@@ -4,6 +4,7 @@
  */
 
 import express from 'express';
+import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
@@ -698,7 +699,7 @@ async function scrapeWebpageMetadata(targetUrl: string): Promise<{
                 .filter((u: string) => isValidScrapedProductImage(u))
             : [];
           if (imgs.length > 0) {
-            result.images = Array.from(new Set(imgs)).slice(0, 8);
+            result.images = imgs.filter((v: string, i: number, a: string[]) => a.indexOf(v) === i).slice(0, 8);
           }
           const firstVar = Array.isArray(p.variants) && p.variants[0] ? p.variants[0] : null;
           if (firstVar?.price) {
@@ -1556,6 +1557,46 @@ async function startServer() {
   // Serve authentic local product uploads at both /uploads and /public/uploads
   app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
   app.use('/public/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
+
+  // 0. Founder Photo Upload Endpoint (/api/upload-founder-image)
+  // Permanently writes uploaded founder photos to public/uploads/founder/ and returns permanent static URL
+  app.post('/api/upload-founder-image', (req, res) => {
+    try {
+      const { imageDataUrl, remoteUrl } = req.body as { imageDataUrl?: string; remoteUrl?: string };
+
+      const uploadDir = path.join(__dirname, 'public', 'uploads', 'founder');
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
+
+      if (imageDataUrl && imageDataUrl.includes('base64,')) {
+        const matches = imageDataUrl.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+        if (!matches || matches.length !== 3) {
+          res.status(400).json({ success: false, error: 'Malformed image data' });
+          return;
+        }
+        const mimeType = matches[1];
+        const base64Data = matches[2];
+        const ext = mimeType.includes('png') ? 'png' : mimeType.includes('webp') ? 'webp' : 'jpg';
+        const filename = `founder_photo_${Date.now()}_${Math.floor(Math.random() * 1000)}.${ext}`;
+        const filePath = path.join(uploadDir, filename);
+        fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
+        const publicUrl = `/uploads/founder/${filename}`;
+        res.json({ success: true, url: publicUrl });
+        return;
+      }
+
+      if (remoteUrl && (remoteUrl.startsWith('http://') || remoteUrl.startsWith('https://'))) {
+        res.json({ success: true, url: remoteUrl });
+        return;
+      }
+
+      res.status(400).json({ success: false, error: 'No valid image data or URL provided' });
+    } catch (err: any) {
+      console.error('Founder photo save error:', err);
+      res.status(500).json({ success: false, error: err?.message || 'Failed to save founder photo' });
+    }
+  });
 
   // 0. Unique Domain-Relative Image Endpoint (/images/:productId/:index?src=...)
   // Ensures every product image has its own unique URL after the main domain (dokandari.com/images/<product-id>/<index>)
@@ -2677,8 +2718,9 @@ Return strict JSON.
         const parsed: Record<string, string> = {
           facebookPixelId: f.facebookPixelId?.stringValue || '1994859257776698',
           facebookCapiToken: f.facebookCapiToken?.stringValue || '',
-          tiktokPixelId: f.tiktokPixelId?.stringValue || '',
-          tiktokAccessToken: f.tiktokAccessToken?.stringValue || '',
+          tiktokPixelId: f.tiktokPixelId?.stringValue || 'DBJGOSRC77U3VQV6KLB0',
+          tiktokAccessToken:
+            f.tiktokAccessToken?.stringValue || '94ff51f47eb09ce7d34aefffeffd3400af49a742',
           youtubeTagId: f.youtubeTagId?.stringValue || '',
           metaTestEventCode: f.metaTestEventCode?.stringValue || '',
           tiktokTestEventCode: f.tiktokTestEventCode?.stringValue || '',
@@ -2690,7 +2732,13 @@ Return strict JSON.
     } catch {
       // ignore network error
     }
-    return cachedFirestoreCreds || { facebookPixelId: '1994859257776698' };
+    return (
+      cachedFirestoreCreds || {
+        facebookPixelId: '1994859257776698',
+        tiktokPixelId: 'DBJGOSRC77U3VQV6KLB0',
+        tiktokAccessToken: '94ff51f47eb09ce7d34aefffeffd3400af49a742',
+      }
+    );
   };
 
   const parseServerPixelIdList = (raw?: string): string[] => {
@@ -2933,7 +2981,7 @@ Return strict JSON.
               const cleanPhone = String(customer.phone).replace(/\D/g, '');
               if (cleanPhone.length >= 10) {
                 const bdPhone = cleanPhone.startsWith('88') ? `+${cleanPhone}` : `+88${cleanPhone}`;
-                ttUser.phone_number = sha256Hash(bdPhone);
+                ttUser.phone = sha256Hash(bdPhone);
                 ttUser.external_id = sha256Hash(bdPhone);
               }
             }
@@ -2941,65 +2989,81 @@ Return strict JSON.
               ttUser.email = sha256Hash(String(customer.email));
             }
 
-            const ttEventName =
+            const ttEventsToFire =
               eventName === 'Purchase'
-                ? 'CompletePayment'
-                : eventName === 'Contact'
-                ? 'Contact'
-                : eventName || 'PageView';
+                ? [
+                    { name: 'Purchase', id: deduplicationEventId },
+                    { name: 'CompletePayment', id: `${deduplicationEventId}_payment` },
+                    { name: 'PlaceAnOrder', id: `${deduplicationEventId}_order` },
+                  ]
+                : [
+                    {
+                      name: eventName === 'Contact' ? 'Contact' : eventName || 'PageView',
+                      id: deduplicationEventId,
+                    },
+                  ];
 
-            const ttPayload: Record<string, any> = {
-              pixel_code: ttPixelId,
-              event: ttEventName,
-              event_id: deduplicationEventId,
-              timestamp: new Date(eventTime * 1000).toISOString(),
-              context: {
-                page: {
-                  url:
-                    url ||
-                    (orderId
-                      ? `https://dokandari.com/thank-you/${encodeURIComponent(orderId)}?brand=dokandari`
-                      : 'https://dokandari.com'),
+            for (const ttEv of ttEventsToFire) {
+              const pageUrl =
+                url ||
+                (orderId
+                  ? `https://dokandari.com/thank-you/${encodeURIComponent(orderId)}?brand=dokandari`
+                  : 'https://dokandari.com');
+
+              const ttPayload: Record<string, any> = {
+                event_source: 'web',
+                event_source_id: ttPixelId,
+                data: [
+                  {
+                    event: ttEv.name,
+                    event_time: eventTime,
+                    event_id: ttEv.id,
+                    user: ttUser,
+                    page: {
+                      url: pageUrl,
+                    },
+                    properties: {
+                      currency: 'BDT',
+                      value: numericValue,
+                      content_type: 'product',
+                      content_id: contentIds[0] || 'dkd-1',
+                      content_name: contentName,
+                      contents: normalizedContents.map((c: any) => ({
+                        content_id: c.id,
+                        content_type: 'product',
+                        content_name: contentName,
+                        quantity: c.quantity,
+                        price: c.item_price,
+                      })),
+                    },
+                  },
+                ],
+              };
+              if (activeTiktokTestCode) {
+                ttPayload.test_event_code = activeTiktokTestCode;
+              }
+
+              const ttRes = await fetch('https://business-api.tiktok.com/open_api/v1.3/event/track/', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Access-Token': ttToken,
                 },
-                user: ttUser,
-              },
-              properties: {
-                currency: 'BDT',
-                value: numericValue,
-                content_type: 'product',
-                content_id: contentIds[0] || 'dkd-1',
-                content_name: contentName,
-                contents: normalizedContents.map((c: any) => ({
-                  content_id: c.id,
-                  content_type: 'product',
-                  content_name: contentName,
-                  quantity: c.quantity,
-                  price: c.item_price,
-                })),
-              },
-            };
-            if (activeTiktokTestCode) {
-              ttPayload.test_event_code = activeTiktokTestCode;
+                body: JSON.stringify(ttPayload),
+              });
+              const ttJson: any = await ttRes.json().catch(() => ({}));
+              if (ttEv.name === (eventName || 'PageView') || ttEv.name === 'Purchase') {
+                capiResults.push({
+                  platform: 'tiktok_events_api',
+                  pixelId: ttPixelId,
+                  eventId: ttEv.id,
+                  status:
+                    ttRes.ok && ttJson?.code === 0
+                      ? `sent_to_tiktok_events_api (${ttEv.name}: OK)`
+                      : `http_${ttRes.status}: ${ttJson?.message || 'tiktok_api_response'}`,
+                });
+              }
             }
-
-            const ttRes = await fetch('https://business-api.tiktok.com/open_api/v1.3/event/track/', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Access-Token': ttToken,
-              },
-              body: JSON.stringify(ttPayload),
-            });
-            const ttJson: any = await ttRes.json().catch(() => ({}));
-            capiResults.push({
-              platform: 'tiktok_events_api',
-              pixelId: ttPixelId,
-              eventId: deduplicationEventId,
-              status:
-                ttRes.ok && (ttJson?.code === 0 || !ttJson?.code)
-                  ? 'sent_to_tiktok_events_api'
-                  : `http_${ttRes.status}: ${ttJson?.message || 'tiktok_api_response'}`,
-            });
           } catch (e: any) {
             capiResults.push({
               platform: 'tiktok_events_api',

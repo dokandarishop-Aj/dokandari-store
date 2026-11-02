@@ -145,6 +145,7 @@ export interface Product {
   videos?: string[];
   variants: ProductVariant;
   inStock: boolean;
+  stock?: number;
   rating: number;
   reviewCount: number;
   tag?: string;
@@ -310,4 +311,55 @@ export interface AbandonedLead {
   convertedOrderId?: string;
   createdAt: number;
   updatedAt: number;
+}
+
+export type ReturnStatus =
+  | 'courier_in_transit'   // ১. কুরিয়ারে ফেরত আসছে
+  | 'warehouse_received'   // ২. গুদামে পণ্য পৌঁছেছে
+  | 'inspecting'           // ৩. পণ্য পরীক্ষা চলছে
+  | 'sellable'             // ৪. বিক্রয়যোগ্য
+  | 'damaged'              // ৫. ড্যামেজ
+  | 'restocked'            // ৬. স্টকে যুক্ত হয়েছে
+  | 'completed';           // ৭. রিটার্ন সম্পন্ন
+
+export type ProductCondition = 'sellable' | 'damaged';
+
+export interface CourierReturn {
+  id: string;
+  orderId: string;
+  customerName: string;
+  customerPhone?: string;
+  productId: string;
+  productName: string;
+  sku: string;
+  variant?: string;
+  quantity: number;
+  courierName: string;
+  courierTracking?: string;
+  returnCharge: number;
+  returnReason: string;
+  productCondition: ProductCondition;
+  damageReason?: string;
+  damageLoss: number;
+  status: ReturnStatus;
+  stockAdjusted: boolean;
+  expenseRecorded: boolean;
+  returnDate: string; // YYYY-MM-DD
+  notes?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface InventoryMovement {
+  id: string;
+  productId: string;
+  productName: string;
+  sku: string;
+  type: 'return_restock' | 'damage_write_off' | 'manual_adjust' | 'sale';
+  quantity: number;
+  previousStock: number;
+  newStock: number;
+  referenceId: string;
+  notes: string;
+  createdAt: number;
 }

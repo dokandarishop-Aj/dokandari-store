@@ -189,9 +189,9 @@ export const DEFAULT_STORE_CONTENT: StoreContent = {
     corporateAddress: 'সাভার বাস স্ট্যান্ড, শহীদ প্লাজা, দ্বিতীয় তলা',
     googleMapUrl: 'https://maps.google.com/?q=Jaleshwar+Savar+1340+Dhaka',
     ceoMessageText:
-      'আমাদের প্রতিটি গ্রাহক আমাদের পরিবারের অংশ। বাংলাদেশে বসে মানুষ যেন কোনো প্রতারণা ছাড়াই ১০০% খাঁটি অর্গানিক ফুড, অরিজিনাল ইমপোর্টেড হোম ডেকোর এবং স্মার্ট গ্যাজেটস হাতে পেয়ে যাচাই করে মূল্য পরিশোধ করতে পারেন—সেই লক্ষ্যেই Dokandari-এর পথচলা।',
+      'অনলাইনে কেনাকাটা করতে গিয়ে মানুষ যাতে এক মুহূর্তের জন্যও প্রতারণা কিংবা আর্থিক ক্ষতির শিকার না হন, সেই গভীর মানবিক দায়বদ্ধতা থেকেই Dokandari-এর যাত্রা। দীর্ঘ গবেষণা ও আন্তর্জাতিক ই-কমার্স মানদণ্ড পর্যবেক্ষণ করে আমরা এমন একটি বিশ্বস্ত ব্যবস্থা গড়ে তুলেছি যেখানে কোনো অগ্রিম পেমেন্ট ছাড়াই সারা বাংলাদেশে ক্যাশ অন ডেলিভারি পাওয়া যায় এবং ডেলিভারি ম্যানের সামনে পণ্য খুলে যাচাই করে মূল্য পরিশোধের শতভাগ নিশ্চয়তা থাকে। Dokandari নিছক কোনো ব্যবসা নয়, এটি মানুষের আস্থা, সম্মান ও অধিকার রক্ষার এক বিশ্বস্ত আশ্রয়। — মোহাম্মদ শহিদুল আলম',
     businessStoryText:
-      'Dokandari শুরু হয়েছিল একটি সহজ কিন্তু দৃঢ় লক্ষ্য নিয়ে—বাংলাদেশের ই-কমার্স গ্রাহকদের কাছে ছবির সাথে হুবহু মিল থাকা অরিজিনাল পণ্য এবং ভেজালমুক্ত অর্গানিক খাবার পৌঁছে দেওয়া। সাভারের জলেশ্বর ও শহীদ প্লাজা অফিস থেকে শুরু করে আজ আমরা সারা বাংলাদেশের ৬৪টি জেলায় হাজারো সন্তুষ্ট পরিবারের আস্থার প্রতীক।',
+      'Dokandari-এর স্বপ্নদ্রষ্টা বিশিষ্ট ব্যবসায়ী, সমাজসেবক ও জনদরদী উদ্যোক্তা মোহাম্মদ শহিদুল আলম। বাংলাদেশে ই-কমার্সের প্রসারের সাথে সাথে সাধারণ ক্রেতাদের অনাস্থা, ছবির সাথে পণ্যের গরমিল ও প্রতারণার কষ্ট তাকে গভীরভাবে নাড়া দেয়। তিনি বাইরের উন্নত দেশের কনজিউমার রাইটস ও ই-কমার্স মডেল নিয়ে দীর্ঘ গবেষণা করে দেশে একটি আন্তর্জাতিক মানের প্ল্যাটফর্ম গড়ে তোলার অঙ্গীকার করেন। সাভার থেকে শুরু হয়ে আজ Dokandari সারা বাংলাদেশের ৬৪টি জেলায় শতভাগ অরিজিনাল পণ্য, জিরো-অ্যাডভান্স ক্যাশ অন ডেলিভারি এবং ওপেন-পার্সেল চেকিং সুবিধার মাধ্যমে হাজারো পরিবারের পরম নির্ভরতার ঠিকানা।',
     productSourcingText:
       'আমরা আমাদের অর্গানিক ফুড ক্যাটাগরির প্রতিটি পণ্য সরাসরি প্রাকৃতিক উৎস থেকে সংগ্রহ করি—সুন্দরবনের মৌয়ালদের খাঁটি চাকের মধু, পাবনার দেশি গাওয়া ঘি, তেঁতুল কাঠের ঘানির সরিষার তেল, মদিনার আজওয়া খেজুর এবং বাছাইকৃত সুপারফুড। পাশাপাশি আমাদের হোম ডেকোর ও স্মার্ট গ্যাজেটস সরাসরি ভেরিফাইড ফ্যাক্টরি থেকে নিজস্ব কোয়ালিটি চেকিংয়ের মাধ্যমে ইমপোর্ট করা হয়।',
     businessPolicyText:
@@ -207,10 +207,10 @@ export const DEFAULT_STORE_CONTENT: StoreContent = {
       'Dokandari গ্রাহকের কোনো ব্যক্তিগত তথ্য (নাম, মোবাইল নম্বর, ঠিকানা) তৃতীয় কোনো পক্ষের কাছে বিক্রি বা শেয়ার করে না। আপনার দেওয়া প্রতিটি তথ্য শুধুমাত্র পার্সেল ডেলিভারি ও অর্ডার স্ট্যাটাস জানানোর কাজে ব্যবহৃত হয়।',
   },
   founder: {
-    name: 'মোঃ জান্নাতুল ইসলাম (জে. আই. রনি)',
-    title: 'Founder & CEO, Dokandari',
-    photo: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=400&q=80',
-    bio: 'Dokandari বাংলাদেশের অন্যতম শীর্ষস্থানীয় আন্তর্জাতিক মানের মাল্টি-ক্যাটাগরি ই-কমার্স প্ল্যাটফর্ম। হোম ডেকোর, স্মার্ট গ্যাজেটস, লাইফস্টাইল ও দৈনন্দিন পণ্যে ১০০% অরিজিনাল কোয়ালিটি নিশ্চয়তা।',
+    name: 'মোহাম্মদ শহিদুল আলম',
+    title: 'প্রতিষ্ঠাতা ও চেয়ারম্যান, Dokandari (বিশিষ্ট ব্যবসায়ী ও সমাজসেবক)',
+    photo: '',
+    bio: 'বিশিষ্ট ব্যবসায়ী, সমাজসেবক ও জনদরদী ব্যক্তিত্ব মোহাম্মদ শহিদুল আলম দীর্ঘদিনের গবেষণা ও গভীর সামাজিক দায়বদ্ধতা থেকে Dokandari প্রতিষ্ঠা করেছেন। অনলাইন কেনাকাটায় সাধারণ মানুষের ভোগান্তি ও প্রতারণা দূর করে একটি আন্তর্জাতিক মানের নির্ভরযোগ্য কেনাকাটার প্ল্যাটফর্ম উপহার দেওয়াই উনার মূল ব্রত। যেখানে প্রতিটি ক্রেতা পাবেন নির্দ্বিধায় ১০০% অরিজিনাল পণ্য, কোনো অগ্রিম ছাড়া ক্যাশ অন ডেলিভারি এবং ডেলিভারি ম্যানের সামনে পার্সেল খুলে দেখার পূর্ণ স্বাধীনতা।',
     address: 'বি-৬১/১৪, জলেশ্বর, সাভার - ১৩৪০, ঢাকা (১ম তলা)',
     phone: '+8809638757282',
   },
@@ -247,50 +247,109 @@ export const DEFAULT_STORE_CONTENT: StoreContent = {
 };
 
 /**
- * Normalizes legacy English/Uttara addresses to the official Bengali Savar addresses
- * unless the admin has entered a custom new address.
+ * Preserves any custom or intentionally cleared addresses set by Admin.
+ * Only converts old English "jaleshwar" / "উত্তরা মডেল টাউন" placeholders if present.
  */
 function normalizeOfficialAddresses(content: StoreContent): StoreContent {
-  const wh = (content.pageContent?.warehouseAddress || '').trim();
-  const corp = (content.pageContent?.corporateAddress || '').trim();
-  const fAddr = (content.founder?.address || '').trim();
+  const whRaw = content.pageContent?.warehouseAddress;
+  const corpRaw = content.pageContent?.corporateAddress;
+  const fAddrRaw = content.founder?.address;
 
-  const isLegacyWarehouse =
-    !wh ||
+  const wh = typeof whRaw === 'string' ? whRaw : DEFAULT_STORE_CONTENT.pageContent!.warehouseAddress;
+  const corp =
+    typeof corpRaw === 'string' ? corpRaw : DEFAULT_STORE_CONTENT.pageContent!.corporateAddress!;
+  const fAddr = typeof fAddrRaw === 'string' ? fAddrRaw : DEFAULT_STORE_CONTENT.founder.address;
+
+  const isLegacyEnglishWarehouse =
     wh.toLowerCase().includes('b-61/14') ||
     wh.toLowerCase().includes('jaleshwar') ||
     wh.includes('প্রবাসীর পল্লী') ||
     wh.includes('ডিইপিজেড');
 
-  const isLegacyCorporate =
-    !corp ||
+  const isLegacyUttaraCorporate =
     corp.includes('উত্তরা মডেল টাউন') ||
     corp.includes('বাড়ি ৫/এ') ||
     corp.includes('সেক্টর ১০');
 
-  const isLegacyFounderAddr =
-    !fAddr ||
+  const isLegacyEnglishFounderAddr =
     fAddr.toLowerCase().includes('b-61/14') ||
     fAddr.toLowerCase().includes('jaleshwar') ||
     fAddr.includes('প্রবাসীর পল্লী') ||
     fAddr.includes('ডিইপিজেড');
+
+  const rawPhoto = content.founder?.photo || '';
+  const cleanedPhoto = rawPhoto.includes('photo-1507003211169-0a1dd7228f2d') ? '' : rawPhoto;
+
+  const rawFounderName = content.founder?.name || '';
+  const isLegacyFounderName =
+    !rawFounderName ||
+    rawFounderName.includes('জান্নাতুল') ||
+    rawFounderName.includes('রনি');
+
+  const effectiveFounderName = isLegacyFounderName
+    ? DEFAULT_STORE_CONTENT.founder.name
+    : rawFounderName;
+
+  const rawFounderTitle = content.founder?.title || '';
+  const isLegacyFounderTitle =
+    !rawFounderTitle ||
+    rawFounderTitle === 'Founder & CEO, Dokandari';
+
+  const effectiveFounderTitle = isLegacyFounderTitle
+    ? DEFAULT_STORE_CONTENT.founder.title
+    : rawFounderTitle;
+
+  const rawFounderBio = content.founder?.bio || '';
+  const isLegacyFounderBio =
+    !rawFounderBio ||
+    rawFounderBio.includes('মাল্টি-ক্যাটাগরি ই-কমার্স প্ল্যাটফর্ম') ||
+    rawFounderBio.includes('আমাদের প্রতিটি প্রোডাক্ট সরাসরি নিজস্ব তত্ত্বাবধানে বাছাইকৃত');
+
+  const effectiveFounderBio = isLegacyFounderBio
+    ? DEFAULT_STORE_CONTENT.founder.bio
+    : rawFounderBio;
+
+  const rawCeoMsg = content.pageContent?.ceoMessageText || '';
+  const isLegacyCeoMsg =
+    !rawCeoMsg ||
+    rawCeoMsg.includes('আমাদের প্রতিটি গ্রাহক আমাদের পরিবারের অংশ') ||
+    rawCeoMsg.includes('জে. আই. রনি');
+
+  const effectiveCeoMsg = isLegacyCeoMsg
+    ? DEFAULT_STORE_CONTENT.pageContent!.ceoMessageText
+    : rawCeoMsg;
+
+  const rawStory = content.pageContent?.businessStoryText || '';
+  const isLegacyStory =
+    !rawStory ||
+    rawStory.includes('Dokandari শুরু হয়েছিল একটি সহজ কিন্তু দৃঢ় লক্ষ্য নিয়ে');
+
+  const effectiveStory = isLegacyStory
+    ? DEFAULT_STORE_CONTENT.pageContent!.businessStoryText
+    : rawStory;
 
   return {
     ...content,
     pageContent: {
       ...DEFAULT_STORE_CONTENT.pageContent!,
       ...(content.pageContent || {}),
-      warehouseAddress: isLegacyWarehouse
+      warehouseAddress: isLegacyEnglishWarehouse
         ? 'বি-৬১/১৪, জলেশ্বর, সাভার - ১৩৪০, ঢাকা (১ম তলা)'
         : wh,
-      corporateAddress: isLegacyCorporate
+      corporateAddress: isLegacyUttaraCorporate
         ? 'সাভার বাস স্ট্যান্ড, শহীদ প্লাজা, দ্বিতীয় তলা'
         : corp,
+      ceoMessageText: effectiveCeoMsg,
+      businessStoryText: effectiveStory,
     },
     founder: {
       ...DEFAULT_STORE_CONTENT.founder,
       ...(content.founder || {}),
-      address: isLegacyFounderAddr
+      name: effectiveFounderName,
+      title: effectiveFounderTitle,
+      bio: effectiveFounderBio,
+      photo: cleanedPhoto,
+      address: isLegacyEnglishFounderAddr
         ? 'বি-৬১/১৪, জলেশ্বর, সাভার - ১৩৪০, ঢাকা (১ম তলা)'
         : fAddr,
     },
@@ -337,6 +396,18 @@ export function mergeStoreContent(
 ): StoreContent {
   const base: StoreContent = incomingArg ? (baseOrIncoming as StoreContent) : DEFAULT_STORE_CONTENT;
   const incoming: Partial<StoreContent> = incomingArg ? incomingArg : baseOrIncoming;
+
+  const rawIncomingPhoto =
+    incoming.founder && typeof incoming.founder.photo === 'string'
+      ? incoming.founder.photo
+      : base.founder && typeof base.founder.photo === 'string'
+      ? base.founder.photo
+      : DEFAULT_STORE_CONTENT.founder.photo;
+
+  const safePhoto = rawIncomingPhoto.includes('photo-1507003211169-0a1dd7228f2d')
+    ? ''
+    : rawIncomingPhoto;
+
   const merged: StoreContent = {
     ...DEFAULT_STORE_CONTENT,
     ...base,
@@ -355,13 +426,7 @@ export function mergeStoreContent(
       ...DEFAULT_STORE_CONTENT.founder,
       ...(base.founder || {}),
       ...(incoming.founder || {}),
-      // Preserve explicit empty string if admin removed founder photo
-      photo:
-        incoming.founder && typeof incoming.founder.photo === 'string'
-          ? incoming.founder.photo
-          : base.founder && typeof base.founder.photo === 'string'
-          ? base.founder.photo
-          : DEFAULT_STORE_CONTENT.founder.photo,
+      photo: safePhoto,
     },
     heroSlides:
       incoming.heroSlides && incoming.heroSlides.length > 0
@@ -377,14 +442,29 @@ export function mergeStoreContent(
 }
 
 /**
- * Saves StoreContent (full or partial update) to both localStorage (instant 0ms persistence) and Firestore
+ * Syncs live StoreContent from Firestore snapshot into localStorage backup
+ * so getInitialStoreContent() never falls back to stale defaults.
+ */
+export function syncStoreContentToLocalCache(partialOrFull: Partial<StoreContent>): void {
+  try {
+    const current = getInitialStoreContent();
+    const merged = mergeStoreContent(current, partialOrFull);
+    localStorage.setItem(LS_STORE_CONTENT_KEY, JSON.stringify(sanitizeForFirestore(merged)));
+  } catch {
+    // ignore storage warning
+  }
+}
+
+/**
+ * Saves StoreContent (full or partial update) to both localStorage (instant 0ms persistence) and Firestore.
+ * IMPORTANT: Only writes the fields provided in `contentUpdate` to Firestore `settings/store_content`
+ * so unrelated updates (like categoryOrder or carouselInterval) NEVER overwrite `founder` or `pageContent`!
  */
 export async function saveStoreContentPersisted(
   contentUpdate: Partial<StoreContent>
 ): Promise<StoreContent> {
   const current = getInitialStoreContent();
   const merged = mergeStoreContent(current, contentUpdate);
-  // Migrate any legacy 'fashion_clothing' in categoryOrder to 'organic_food' at position #3
   if (Array.isArray(merged.categoryOrder)) {
     merged.categoryOrder = merged.categoryOrder.map((c) =>
       c === 'fashion_clothing' ? 'organic_food' : c
@@ -397,28 +477,49 @@ export async function saveStoreContentPersisted(
     console.warn('localStorage storeContent backup note:', e);
   }
 
-  try {
-    await setDoc(doc(db, 'settings', 'store_content'), clean, { merge: true });
-  } catch (err) {
-    console.warn('Firestore store_content sync warning (saved locally):', err);
-  }
+  // Build targeted Firestore patch containing ONLY the updated keys in contentUpdate
+  const firestorePatch: Record<string, unknown> = {
+    updatedAt: Date.now(),
+  };
+  if (contentUpdate.whatsappNumber !== undefined) firestorePatch.whatsappNumber = clean.whatsappNumber;
+  if (contentUpdate.hotlineNumber !== undefined) firestorePatch.hotlineNumber = clean.hotlineNumber;
+  if (contentUpdate.officialEmail !== undefined) firestorePatch.officialEmail = clean.officialEmail;
+  if (contentUpdate.carouselInterval !== undefined) firestorePatch.carouselInterval = clean.carouselInterval;
+  if (contentUpdate.bestSellingInterval !== undefined)
+    firestorePatch.bestSellingInterval = clean.bestSellingInterval;
+  if (contentUpdate.categoryOrder !== undefined) firestorePatch.categoryOrder = clean.categoryOrder;
+  if (contentUpdate.socialLinks !== undefined) firestorePatch.socialLinks = clean.socialLinks;
+  if (contentUpdate.heroSlides !== undefined) firestorePatch.heroSlides = clean.heroSlides;
+  if (contentUpdate.categoryHeroes !== undefined) firestorePatch.categoryHeroes = clean.categoryHeroes;
+  if (contentUpdate.founder !== undefined) firestorePatch.founder = clean.founder;
+  if (contentUpdate.pageContent !== undefined) firestorePatch.pageContent = clean.pageContent;
 
-  // Also persist Founder & Brand Identity profile to a dedicated lightweight Firestore doc
-  // so Founder photo & Brand Story edits ALWAYS sync 100% reliably to live domain
-  if (contentUpdate.founder || contentUpdate.pageContent) {
+  // Persist Founder & Brand Identity profile to the dedicated authoritative Firestore doc FIRST
+  if (contentUpdate.founder !== undefined || contentUpdate.pageContent !== undefined) {
     try {
+      const founderPayload: Record<string, unknown> = {
+        updatedAt: Date.now(),
+      };
+      if (contentUpdate.founder !== undefined) founderPayload.founder = clean.founder;
+      if (contentUpdate.pageContent !== undefined) founderPayload.pageContent = clean.pageContent;
       await setDoc(
         doc(db, 'settings', 'founder_profile'),
-        sanitizeForFirestore({
-          founder: clean.founder,
-          pageContent: clean.pageContent,
-          updatedAt: Date.now(),
-        }),
+        sanitizeForFirestore(founderPayload),
         { merge: true }
       );
     } catch (err) {
       console.warn('Firestore founder_profile sync note:', err);
     }
+  }
+
+  try {
+    await setDoc(
+      doc(db, 'settings', 'store_content'),
+      sanitizeForFirestore(firestorePatch),
+      { merge: true }
+    );
+  } catch (err) {
+    console.warn('Firestore store_content sync warning (saved locally):', err);
   }
 
   return clean;
@@ -1876,21 +1977,12 @@ export async function seedProductsIfEmpty(): Promise<void> {
       }
     }
 
-    // 5. Ensure store_content exists and legacy addresses are normalized to official Bengali Savar addresses
+    // 5. Ensure store_content exists ONLY if not yet created in Firestore (NEVER overwrite existing Admin edits!)
     const contentRef = doc(db, 'settings', 'store_content');
     const contentSnap = await getDoc(contentRef);
     if (!contentSnap.exists()) {
       const initialContent = getInitialStoreContent();
       await setDoc(contentRef, sanitizeForFirestore(initialContent));
-    } else {
-      const existingData = contentSnap.data() as Partial<StoreContent>;
-      const normalizedContent = mergeStoreContent(DEFAULT_STORE_CONTENT, existingData);
-      if (
-        existingData.pageContent?.warehouseAddress !== normalizedContent.pageContent?.warehouseAddress ||
-        existingData.pageContent?.corporateAddress !== normalizedContent.pageContent?.corporateAddress
-      ) {
-        await setDoc(contentRef, sanitizeForFirestore(normalizedContent), { merge: true });
-      }
     }
   } catch (err) {
     console.warn('Seeding check note', err);

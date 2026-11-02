@@ -27,15 +27,20 @@ export const FounderSection: React.FC<FounderSectionProps> = ({
   onRemovePhoto,
 }) => {
   const data = founderData || {
-    name: 'মোঃ জান্নাতুল ইসলাম (জে. আই. রনি)',
-    title: 'Founder & CEO, Dokandari',
-    photo: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=400&q=80',
-    bio: 'Dokandari বাংলাদেশের অন্যতম বিশ্বস্ত ই-কমার্স ও প্রিমিয়াম লাইফস্টাইল ব্র্যান্ড। আমাদের প্রতিটি প্রোডাক্ট সরাসরি নিজস্ব তত্ত্বাবধানে বাছাইকৃত এবং ১০০% কোয়ালিটি গ্যারান্টিযুক্ত।',
+    name: 'মোহাম্মদ শহিদুল আলম',
+    title: 'প্রতিষ্ঠাতা ও চেয়ারম্যান, Dokandari (বিশিষ্ট ব্যবসায়ী ও সমাজসেবক)',
+    photo: '',
+    bio: 'বিশিষ্ট ব্যবসায়ী, সমাজসেবক ও জনদরদী ব্যক্তিত্ব মোহাম্মদ শহিদুল আলম দীর্ঘদিনের গবেষণা ও গভীর সামাজিক দায়বদ্ধতা থেকে Dokandari প্রতিষ্ঠা করেছেন। অনলাইন কেনাকাটায় সাধারণ মানুষের ভোগান্তি ও প্রতারণা দূর করে একটি আন্তর্জাতিক মানের নির্ভরযোগ্য কেনাকাটার প্ল্যাটফর্ম উপহার দেওয়াই উনার মূল ব্রত। যেখানে প্রতিটি ক্রেতা পাবেন নির্দ্বিধায় ১০০% অরিজিনাল পণ্য, কোনো অগ্রিম ছাড়া ক্যাশ অন ডেলিভারি এবং ডেলিভারি ম্যানের সামনে পার্সেল খুলে দেখার পূর্ণ স্বাধীনতা।',
     address: 'বি-৬১/১৪, জলেশ্বর, সাভার - ১৩৪০, ঢাকা (১ম তলা)',
     phone: '+8809638757282',
   };
 
-  const hasPhoto = Boolean(data.photo && data.photo.trim());
+  const cleanPhoto =
+    data.photo && !data.photo.includes('photo-1507003211169-0a1dd7228f2d')
+      ? data.photo.trim()
+      : '';
+  const hasPhoto = Boolean(cleanPhoto);
+
 
   return (
     <section className="bg-[#FFF8F9] border-t border-rose-100 py-12">
@@ -76,7 +81,7 @@ export const FounderSection: React.FC<FounderSectionProps> = ({
               <div className="relative w-28 h-28 sm:w-32 sm:h-32 rounded-2xl overflow-hidden border-2 border-rose-200 shadow-sm bg-gradient-to-br from-[#FFF1F2] via-rose-100 to-rose-200 flex items-center justify-center">
                 {hasPhoto ? (
                   <img
-                    src={data.photo}
+                    src={cleanPhoto}
                     alt={`${data.name} - Dokandari Founder & CEO`}
                     className="w-full h-full object-cover object-top"
                     referrerPolicy="no-referrer"

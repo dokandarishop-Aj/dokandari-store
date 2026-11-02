@@ -4,6 +4,7 @@
  */
 
 export const DEFAULT_DOKANDARI_META_PIXEL_ID = '1994859257776698';
+export const DEFAULT_DOKANDARI_TIKTOK_PIXEL_ID = 'DBJGOSRC77U3VQV6KLB0';
 
 export interface PixelEventTelemetryLog {
   id: string;
@@ -164,7 +165,7 @@ export async function reconcileOrdersWithCapi(orders: any[]): Promise<{
       body: JSON.stringify({
         orders,
         metaPixelIds: parsePixelIds(storedCreds.facebookPixelId || DEFAULT_DOKANDARI_META_PIXEL_ID),
-        tiktokPixelIds: parsePixelIds(storedCreds.tiktokPixelId),
+        tiktokPixelIds: parsePixelIds(storedCreds.tiktokPixelId || DEFAULT_DOKANDARI_TIKTOK_PIXEL_ID),
         facebookCapiToken: storedCreds.facebookCapiToken || '',
         tiktokAccessToken: storedCreds.tiktokAccessToken || '',
         metaTestEventCode: storedCreds.metaTestEventCode || '',
@@ -375,20 +376,21 @@ function ensurePixelsInitializedFromStorage(): void {
   if (typeof window === 'undefined') return;
   const hasMeta = (window.__dokandari_meta_initialized_ids?.size || 0) > 0;
   const hasTiktok = (window.__dokandari_tiktok_initialized_ids?.size || 0) > 0;
-  if (hasMeta || hasTiktok) return;
+  if (hasMeta && hasTiktok) return;
 
   try {
     const raw = localStorage.getItem('dokandari_api_credentials');
     if (raw) {
       const creds = JSON.parse(raw);
       const metaId = creds?.facebookPixelId || DEFAULT_DOKANDARI_META_PIXEL_ID;
-      initializeMultiPixels(metaId, creds?.tiktokPixelId, creds?.youtubeTagId);
+      const tiktokId = creds?.tiktokPixelId || DEFAULT_DOKANDARI_TIKTOK_PIXEL_ID;
+      initializeMultiPixels(metaId, tiktokId, creds?.youtubeTagId);
       return;
     }
   } catch {
     // ignore
   }
-  initializeMultiPixels(DEFAULT_DOKANDARI_META_PIXEL_ID);
+  initializeMultiPixels(DEFAULT_DOKANDARI_META_PIXEL_ID, DEFAULT_DOKANDARI_TIKTOK_PIXEL_ID);
 }
 
 /**
@@ -564,7 +566,7 @@ export async function dispatchServerCapi(
     const tiktokPixelIds = Array.from(
       window.__dokandari_tiktok_initialized_ids?.size
         ? window.__dokandari_tiktok_initialized_ids
-        : parsePixelIds(storedCreds.tiktokPixelId)
+        : parsePixelIds(storedCreds.tiktokPixelId || DEFAULT_DOKANDARI_TIKTOK_PIXEL_ID)
     );
     const youtubeTagIds = Array.from(
       window.__dokandari_youtube_initialized_ids?.size
@@ -1096,7 +1098,8 @@ export function trackPixelPurchase(
           currency: 'BDT',
           order_id: order.id,
         };
-        window.ttq.track('CompletePayment', tiktokPayload, { event_id: eventId });
+        window.ttq.track('Purchase', tiktokPayload, { event_id: eventId });
+        window.ttq.track('CompletePayment', tiktokPayload, { event_id: `${eventId}_payment` });
         window.ttq.track('PlaceAnOrder', tiktokPayload, { event_id: `${eventId}_order` });
       }
 

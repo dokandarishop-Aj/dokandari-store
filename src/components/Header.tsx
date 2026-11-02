@@ -49,7 +49,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <header
-      className={`sticky top-0 z-40 bg-white border-b shadow-xs ${
+      className={`relative z-30 bg-white border-b shadow-xs ${
         isOrganicGreen ? 'border-emerald-200' : 'border-rose-100'
       }`}
     >
@@ -236,91 +236,10 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
         </div>
-
-      </div>
-
-      {/* Web App Quick Navigation Bar (Visible on Mobile, Tablet & Desktop) */}
-      <div
-        className={`border-t px-2.5 sm:px-6 lg:px-8 py-1.5 overflow-x-auto no-scrollbar ${
-          isOrganicGreen
-            ? 'bg-[#F0FDF4] border-emerald-200/80'
-            : 'bg-[#FFF5F7] border-rose-100/80'
-        }`}
-      >
-        <div className="flex items-center gap-1.5 sm:gap-2 min-w-max text-[11px] sm:text-xs font-bold">
-          <button
-            type="button"
-            onClick={onGoHome}
-            className={`px-2.5 py-1 rounded-lg bg-white text-stone-800 hover:text-white border transition-colors cursor-pointer flex items-center gap-1 shadow-2xs ${
-              isOrganicGreen
-                ? 'hover:bg-[#16A34A] border-emerald-200/80'
-                : 'hover:bg-[#E11D48] border-rose-200/80'
-            }`}
-          >
-            <span>🏠 হোমপেজ</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              onGoHome();
-              setTimeout(() => {
-                const el = document.getElementById('products-section');
-                if (el) el.scrollIntoView({ behavior: 'smooth' });
-              }, 80);
-            }}
-            className="px-2.5 py-1 rounded-lg bg-white hover:bg-[#E11D48] text-stone-800 hover:text-white border border-rose-200/80 transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
-          >
-            <span>🛍️ সকল প্রোডাক্ট</span>
-          </button>
-          <button
-            type="button"
-            onClick={onOpenMenu}
-            className="px-2.5 py-1 rounded-lg bg-white hover:bg-[#E11D48] text-stone-800 hover:text-white border border-rose-200/80 transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
-          >
-            <span>📂 ১১টি ক্যাটাগরি</span>
-          </button>
-          <button
-            type="button"
-            onClick={onOpenAbout}
-            className="px-2.5 py-1 rounded-lg bg-white hover:bg-[#E11D48] text-stone-800 hover:text-white border border-rose-200/80 transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
-          >
-            <span>🏢 ব্র্যান্ড পরিচিতি</span>
-          </button>
-          <button
-            type="button"
-            onClick={onOpenTracking}
-            className="px-2.5 py-1 rounded-lg bg-white hover:bg-[#E11D48] text-stone-800 hover:text-white border border-rose-200/80 transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
-          >
-            <span>🚚 অর্ডার ট্র্যাকিং</span>
-          </button>
-          {onOpenVideoGallery && (
-            <button
-              type="button"
-              onClick={onOpenVideoGallery}
-              className="px-2.5 py-1 rounded-lg bg-white hover:bg-[#E11D48] text-stone-800 hover:text-white border border-rose-200/80 transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
-            >
-              <span>🎬 ভিডিও গ্যালারি</span>
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={onOpenPrivacy}
-            className="px-2.5 py-1 rounded-lg bg-white hover:bg-[#E11D48] text-stone-800 hover:text-white border border-rose-200/80 transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
-          >
-            <span>📜 প্রাইভেসি পলিসি</span>
-          </button>
-          {isAdmin && (
-            <button
-              type="button"
-              onClick={onOpenAdmin}
-              className="px-2.5 py-1 rounded-lg bg-amber-400 hover:bg-amber-300 text-stone-950 border border-amber-500 transition-colors cursor-pointer flex items-center gap-1 shadow-2xs font-extrabold"
-            >
-              <span>⚡ এডমিন প্যানেল</span>
-            </button>
-          )}
-        </div>
       </div>
     </header>
   );
 };
+
+
 

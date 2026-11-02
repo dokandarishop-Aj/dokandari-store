@@ -49,6 +49,7 @@ import {
   syncAllLocalProductsToFirestore,
   compressImageFileToDataUrl,
   getPersistedOrders,
+  syncStoreContentToLocalCache,
 } from './lib/storeSync';
 import {
   initializeMultiPixels,
@@ -191,6 +192,8 @@ function StoreMain() {
     return () => clearInterval(timer);
   }, [heroSlides.length, carouselInterval]);
 
+  const hasFounderProfileDocRef = useRef(false);
+
   // Seed initial catalog, recover any broken WordPress/Unsplash images from buy.dokandari.com, & attach real-time Firestore listeners
   useEffect(() => {
     seedProductsIfEmpty();
@@ -246,8 +249,14 @@ function StoreMain() {
         if (snap.exists()) {
           const data = snap.data();
           const mergedContent = mergeStoreContent(data);
-          setFounderData(mergedContent.founder);
-          setPageContent(mergedContent.pageContent!);
+          if (!hasFounderProfileDocRef.current) {
+            setFounderData(mergedContent.founder);
+            setPageContent(mergedContent.pageContent!);
+            syncStoreContentToLocalCache({
+              founder: mergedContent.founder,
+              pageContent: mergedContent.pageContent,
+            });
+          }
           setSocialLinks(mergedContent.socialLinks!);
           setWhatsappNumber(mergedContent.whatsappNumber);
           setHotlineNumber(mergedContent.hotlineNumber);
@@ -324,11 +333,31 @@ function StoreMain() {
       (snap) => {
         if (snap.exists()) {
           const data = snap.data();
+          hasFounderProfileDocRef.current = true;
           if (data?.founder) {
-            setFounderData((prev) => ({ ...prev, ...data.founder }));
+            const rawPhoto = String(data.founder.photo || '').trim();
+            const cleanPhoto = rawPhoto.includes('photo-1507003211169-0a1dd7228f2d') ? '' : rawPhoto;
+            const fName = String(data.founder.name || '').trim();
+            const isLegacy = !fName || fName.includes('জান্নাতুল') || fName.includes('রনি');
+            const cleanedFounder = {
+              ...data.founder,
+              name: isLegacy ? DEFAULT_STORE_CONTENT.founder.name : data.founder.name,
+              title: isLegacy || data.founder.title === 'Founder & CEO, Dokandari' ? DEFAULT_STORE_CONTENT.founder.title : data.founder.title,
+              bio: isLegacy || String(data.founder.bio || '').includes('মাল্টি-ক্যাটাগরি') ? DEFAULT_STORE_CONTENT.founder.bio : data.founder.bio,
+              photo: cleanPhoto,
+            };
+            setFounderData((prev) => {
+              const next = { ...prev, ...cleanedFounder };
+              syncStoreContentToLocalCache({ founder: next });
+              return next;
+            });
           }
           if (data?.pageContent) {
-            setPageContent((prev) => ({ ...prev, ...data.pageContent }));
+            setPageContent((prev) => {
+              const next = { ...prev, ...data.pageContent };
+              syncStoreContentToLocalCache({ pageContent: next });
+              return next;
+            });
           }
         }
       },
@@ -517,13 +546,21 @@ function StoreMain() {
     return products.filter((p) => p.status !== 'draft');
   }, [products]);
 
+  // Homepage Best-Selling Carousel & Homepage general products strictly exclude organic_food
+  // (Organic Food products appear ONLY inside the dedicated Organic Food category section and /catalog/organic_food page)
+  const homepageNonOrganicProducts = useMemo(() => {
+    return publishedProducts.filter(
+      (p) => p.category !== 'organic_food' && normalizeCategoryId(p.category, p.name) !== 'organic_food'
+    );
+  }, [publishedProducts]);
+
   // Step-by-step Right-to-Left auto-sliding for Best-Selling Compact Square Carousel (3s, 5s, 8s, 10s)
   useEffect(() => {
-    if (publishedProducts.length <= 1) return;
+    if (homepageNonOrganicProducts.length <= 1) return;
     const ms = Math.max(2000, bestSellingInterval || 5000);
     const timer = setInterval(() => {
       setBestSellingIndex((prev) => {
-        const nextIdx = (prev + 1) % publishedProducts.length;
+        const nextIdx = (prev + 1) % homepageNonOrganicProducts.length;
         const container = bestSellingTrackRef.current;
         if (container) {
           const firstChild = container.firstElementChild as HTMLElement | null;
@@ -539,7 +576,7 @@ function StoreMain() {
       });
     }, ms);
     return () => clearInterval(timer);
-  }, [publishedProducts.length, bestSellingInterval]);
+  }, [homepageNonOrganicProducts.length, bestSellingInterval]);
 
   // Calculate dynamic product counts per category
   const productCounts = useMemo(() => {
@@ -556,11 +593,14 @@ function StoreMain() {
 
   // Filter products by category & search
   const filteredProducts = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
     return publishedProducts.filter((p) => {
       const normCat = normalizeCategoryId(p.category, p.name);
+      if (activeCategory === 'all' && !q && (p.category === 'organic_food' || normCat === 'organic_food')) {
+        return false;
+      }
       const matchCat =
         activeCategory === 'all' || p.category === activeCategory || normCat === activeCategory;
-      const q = searchQuery.toLowerCase().trim();
       const matchQuery =
         !q ||
         p.name.toLowerCase().includes(q) ||
@@ -977,9 +1017,9 @@ function StoreMain() {
             }}
             onInstantOrder={handleInstantOrder}
             onEditProduct={isAdminAuthenticated ? (p) => setEditingProduct(p) : undefined}
-            onAddNewProduct={
+            onAddNewCategoryProduct={
               isAdminAuthenticated
-                ? (catId) => {
+                ? (catId: string) => {
                     const blankProd: Product = {
                       id: `dkd-${catId}-${Date.now()}`,
                       sku: `DKD-ORG-${Math.floor(1000 + Math.random() * 9000)}`,
@@ -1002,7 +1042,7 @@ function StoreMain() {
                         colors: ['100% Pure Organic'],
                       },
                       rating: 5.0,
-                      reviewsCount: 15,
+                      reviewCount: 15,
                       inStock: true,
                       status: 'published',
                       createdAt: Date.now(),
@@ -1015,9 +1055,9 @@ function StoreMain() {
           />
         ) : (
           <>
-            {/* 100% Light Rose/Cream Hero Banner Carousel — Zero Dark Background */}
+            {/* Full-Width Hero Banner Carousel with Overlay Text (Original Design) */}
             <section
-              className="relative w-full bg-gradient-to-br from-[#FFF5F7] via-[#FFF0F3] to-[#FFE4E8] border-b border-rose-200 overflow-hidden py-5 sm:py-8 px-4 sm:px-8 lg:px-14 select-none"
+              className="relative w-full bg-stone-900 overflow-hidden aspect-16/9 sm:aspect-24/9 max-h-[380px] select-none"
               onTouchStart={(e) => {
                 touchStartX.current = e.touches[0].clientX;
               }}
@@ -1034,90 +1074,68 @@ function StoreMain() {
                 touchStartX.current = null;
               }}
             >
-              <div className="max-w-7xl mx-auto relative min-h-[210px] sm:min-h-[260px] flex items-center">
-                {heroSlides.map((slide, idx) => (
-                  <div
-                    key={slide.id || idx}
-                    className={`w-full transition-opacity duration-500 ${
-                      currentSlide === idx
-                        ? 'opacity-100 relative z-10'
-                        : 'opacity-0 absolute inset-0 z-0 pointer-events-none'
-                    }`}
-                  >
-                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-8 items-center">
-                      <div className="lg:col-span-7 space-y-2.5 sm:space-y-3.5 text-left">
-                        <span className="inline-block w-fit text-[10px] sm:text-xs font-extrabold bg-white text-[#E11D48] border border-rose-200 px-3 py-1 rounded-full uppercase tracking-wider shadow-2xs">
-                          {slide.tag}
-                        </span>
-                        <h2 className="text-xl sm:text-3xl lg:text-4xl font-black leading-tight text-stone-900 line-clamp-2">
-                          {slide.title}
-                        </h2>
-                        <p className="text-xs sm:text-base text-stone-700 font-medium line-clamp-2 max-w-2xl">
-                          {slide.subtitle}
-                        </p>
-                        <div className="pt-1 flex flex-wrap items-center gap-2.5">
-                          <button
-                            onClick={() => {
-                              const elem = document.getElementById('products-section');
-                              if (elem) elem.scrollIntoView({ behavior: 'smooth' });
-                            }}
-                            className="px-5 py-2.5 bg-[#E11D48] hover:bg-[#BE123C] text-white text-xs sm:text-sm font-extrabold rounded-xl shadow-sm transition-all cursor-pointer"
-                          >
-                            {slide.ctaText || 'কালেকশন দেখুন'} &rarr;
-                          </button>
-                          <button
-                            onClick={() => {
-                              setActiveCategory('organic_food');
-                              setActiveCategoryPage('organic_food');
-                              window.history.pushState(null, '', '/catalog/organic_food');
-                              window.scrollTo({ top: 0, behavior: 'smooth' });
-                            }}
-                            className="px-4 py-2.5 bg-[#ECFDF5] hover:bg-[#16A34A] text-[#15803D] hover:text-white border border-emerald-300 text-xs sm:text-sm font-extrabold rounded-xl shadow-2xs transition-all cursor-pointer"
-                          >
-                            🌿 অর্গানিক ফুড দেখুন &rarr;
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="lg:col-span-5">
-                        <div className="relative rounded-2xl overflow-hidden border-2 border-white shadow-md bg-white aspect-16/9 sm:aspect-16/8 max-h-[220px] w-full">
-                          <img
-                            src={slide.image}
-                            alt={slide.title}
-                            className="w-full h-full object-cover object-center"
-                            referrerPolicy="no-referrer"
-                          />
-                        </div>
-                      </div>
+              {heroSlides.map((slide, idx) => (
+                <div
+                  key={slide.id || idx}
+                  className={`absolute inset-0 transition-opacity duration-500 ${
+                    currentSlide === idx ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'
+                  }`}
+                >
+                  <img
+                    src={slide.image}
+                    alt={slide.title}
+                    className="w-full h-full object-cover object-center opacity-75"
+                    referrerPolicy="no-referrer"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-r from-stone-950/80 via-stone-950/45 to-transparent flex flex-col justify-center px-6 sm:px-14 max-w-2xl text-white space-y-2 sm:space-y-3">
+                    <span className="inline-block w-fit text-[10px] sm:text-xs font-extrabold bg-[#E11D48] text-white px-2.5 py-1 rounded-full uppercase tracking-wider shadow-xs">
+                      {slide.tag}
+                    </span>
+                    <h2 className="text-lg sm:text-3xl font-black leading-tight line-clamp-2 drop-shadow-xs">
+                      {slide.title}
+                    </h2>
+                    <p className="text-xs sm:text-sm text-stone-200 line-clamp-2 max-w-lg">
+                      {slide.subtitle}
+                    </p>
+                    <div className="pt-1">
+                      <button
+                        onClick={() => {
+                          const elem = document.getElementById('products-section');
+                          if (elem) elem.scrollIntoView({ behavior: 'smooth' });
+                        }}
+                        className="px-4 py-2 bg-[#E11D48] hover:bg-[#BE123C] text-white text-xs sm:text-sm font-bold rounded-xl shadow-md transition-all cursor-pointer"
+                      >
+                        {slide.ctaText || 'কালেকশন দেখুন'} &rarr;
+                      </button>
                     </div>
                   </div>
-                ))}
-              </div>
+                </div>
+              ))}
 
               {/* Manual Previous / Next Controls */}
               <button
                 onClick={() => setCurrentSlide((prev) => (prev - 1 + heroSlides.length) % heroSlides.length)}
                 aria-label="Previous slide"
-                className="absolute left-1.5 sm:left-3 top-1/2 -translate-y-1/2 z-20 w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-white hover:bg-rose-50 text-[#E11D48] border border-rose-200 flex items-center justify-center shadow-sm transition-all cursor-pointer"
+                className="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 z-20 w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-stone-950/50 hover:bg-[#E11D48] text-white flex items-center justify-center backdrop-blur-xs transition-all cursor-pointer"
               >
                 <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
               <button
                 onClick={() => setCurrentSlide((prev) => (prev + 1) % heroSlides.length)}
                 aria-label="Next slide"
-                className="absolute right-1.5 sm:right-3 top-1/2 -translate-y-1/2 z-20 w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-white hover:bg-rose-50 text-[#E11D48] border border-rose-200 flex items-center justify-center shadow-sm transition-all cursor-pointer"
+                className="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 z-20 w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-stone-950/50 hover:bg-[#E11D48] text-white flex items-center justify-center backdrop-blur-xs transition-all cursor-pointer"
               >
                 <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
 
               {/* Slider Dots */}
-              <div className="flex justify-center gap-2 pt-3">
+              <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex gap-2">
                 {heroSlides.map((_, idx) => (
                   <button
                     key={idx}
                     onClick={() => setCurrentSlide(idx)}
-                    className={`h-2 rounded-full transition-all cursor-pointer ${
-                      currentSlide === idx ? 'w-6 bg-[#E11D48]' : 'w-2 bg-rose-300'
+                    className={`h-1.5 rounded-full transition-all cursor-pointer ${
+                      currentSlide === idx ? 'w-6 bg-[#E11D48]' : 'w-2 bg-white/60'
                     }`}
                   />
                 ))}
@@ -1128,9 +1146,9 @@ function StoreMain() {
                 <button
                   type="button"
                   onClick={() => setIsHeroAiModalOpen(true)}
-                  className="absolute top-3 right-3 z-20 px-3 py-1.5 rounded-xl bg-white hover:bg-[#E11D48] text-[#E11D48] hover:text-white text-[11px] font-bold border border-rose-300 flex items-center gap-1.5 shadow-xs cursor-pointer transition-all"
+                  className="absolute top-3 right-3 z-20 px-3 py-1.5 rounded-xl bg-stone-950/75 hover:bg-[#E11D48] text-white text-[11px] font-bold border border-white/20 flex items-center gap-1.5 backdrop-blur-xs cursor-pointer transition-all"
                 >
-                  <Sparkles className="w-3.5 h-3.5" />
+                  <Sparkles className="w-3.5 h-3.5 text-amber-300" />
                   <span>✨ AI ব্যানার এডিট</span>
                 </button>
               )}
@@ -1240,8 +1258,8 @@ function StoreMain() {
 
             {/* Full-Display Main Products & Ordered Category Catalog Sections */}
             <section id="products-section" className="w-full px-2.5 sm:px-5 lg:px-8 py-4 sm:py-8 space-y-8">
-              {/* Compact Square Best-Selling Product Carousel (Slides 1-by-1 Right-to-Left every 3s/5s/8s/10s) */}
-              {publishedProducts.length > 0 && !searchQuery.trim() && (
+              {/* Compact Square Best-Selling Product Carousel (Excludes Organic Food; Organic Food has its own section & page) */}
+              {homepageNonOrganicProducts.length > 0 && !searchQuery.trim() && (
                 <div className="bg-white border border-rose-200/80 rounded-2xl p-3 sm:p-4 shadow-2xs space-y-3">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <div className="flex items-center gap-2">
@@ -1321,7 +1339,7 @@ function StoreMain() {
                     data-active-index={bestSellingIndex}
                     className="flex items-stretch gap-2.5 sm:gap-3 overflow-x-auto scroll-smooth pb-1 scrollbar-none"
                   >
-                    {publishedProducts.slice(0, 14).map((product) => (
+                    {homepageNonOrganicProducts.slice(0, 14).map((product) => (
                       <div
                         key={`bs-${product.id}`}
                         className="w-[136px] sm:w-[164px] md:w-[180px] shrink-0"
