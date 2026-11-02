@@ -56,6 +56,10 @@ import {
   PackageCheck,
   AlertTriangle,
   ArrowRightLeft,
+  ChevronUp,
+  ChevronDown,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 import {
   collection,
@@ -410,6 +414,31 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [selectedOrderForView, setSelectedOrderForView] = useState<Order | null>(null);
   const [selectedOrderForInvoice, setSelectedOrderForInvoice] = useState<Order | null>(null);
 
+  // Real-time Order Edit Modal State
+  const [editingOrder, setEditingOrder] = useState<Order | null>(null);
+  const [isEditOrderModalOpen, setIsEditOrderModalOpen] = useState(false);
+  const [editOrderName, setEditOrderName] = useState('');
+  const [editOrderPhone, setEditOrderPhone] = useState('');
+  const [editOrderAddress, setEditOrderAddress] = useState('');
+  const [editOrderDistrict, setEditOrderDistrict] = useState('');
+  const [editOrderArea, setEditOrderArea] = useState<'inside_dhaka' | 'outside_dhaka'>('inside_dhaka');
+  const [editOrderItems, setEditOrderItems] = useState<Order['items']>([]);
+  const [editOrderShipping, setEditOrderShipping] = useState<number>(70);
+  const [editOrderDiscount, setEditOrderDiscount] = useState<number>(0);
+  const [editOrderStatus, setEditOrderStatus] = useState<OrderStatus>('confirmed');
+  const [editOrderNotes, setEditOrderNotes] = useState('');
+  const [editOrderSaving, setEditOrderSaving] = useState(false);
+  const [editOrderAddProdId, setEditOrderAddProdId] = useState('');
+
+  // Business Expense Edit State
+  const [editingExpense, setEditingExpense] = useState<BusinessExpense | null>(null);
+  const [isEditExpenseModalOpen, setIsEditExpenseModalOpen] = useState(false);
+  const [editExpenseDate, setEditExpenseDate] = useState('');
+  const [editExpenseCategory, setEditExpenseCategory] = useState<BusinessExpense['category']>('ad_cost');
+  const [editExpenseAmount, setEditExpenseAmount] = useState<number | ''>('');
+  const [editExpenseNote, setEditExpenseNote] = useState('');
+  const [editExpenseSaving, setEditExpenseSaving] = useState(false);
+
   // =========================================================================
   // COURIER RETURN MANAGEMENT & AUTOMATIC STOCK ADJUSTMENT STATE
   // =========================================================================
@@ -554,11 +583,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       const unsub = onSnapshot(
         collection(db, 'business_expenses'),
         (snap) => {
-          if (!snap.empty) {
-            const loaded: BusinessExpense[] = [];
-            snap.forEach((d) => {
-              loaded.push({ id: d.id, ...(d.data() as any) });
-            });
+          const loaded: BusinessExpense[] = [];
+          snap.forEach((d) => {
+            loaded.push({ id: d.id, ...(d.data() as any) });
+          });
+          if (loaded.length > 0) {
             loaded.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
             setExpenses(loaded);
             try {
@@ -566,6 +595,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             } catch {
               // ignore
             }
+          } else if (snap.empty) {
+            // keep existing or cached if any, but don't crash
           }
         },
         (err) => console.warn('Expenses listener notice:', err)
@@ -920,6 +951,60 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setTimeout(() => setFeedback(''), 3000);
   };
 
+  const handleOpenEditExpense = (exp: BusinessExpense) => {
+    setEditingExpense(exp);
+    setEditExpenseDate(exp.date);
+    setEditExpenseCategory(exp.category);
+    setEditExpenseAmount(exp.amount);
+    setEditExpenseNote(exp.note);
+    setIsEditExpenseModalOpen(true);
+  };
+
+  const handleUpdateExpense = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingExpense || !editExpenseAmount || Number(editExpenseAmount) <= 0) return;
+    setEditExpenseSaving(true);
+    try {
+      const categoryLabels: Record<string, string> = {
+        product_buying: 'পণ্য ক্রয় / সোর্シング',
+        ad_cost: 'মেটা ও টিকটক অ্যাড স্পেন্ড',
+        transport_fare: 'রিকশা / গাড়ি / যাতায়াত ভাড়া',
+        courier_charge: 'কুরিয়ার ও ডেলিভারি খরচ',
+        courier_return_charge: 'কুরিয়ার রিটার্ন চার্জ',
+        packaging: 'বক্স ও প্যাকেজিং খরচ',
+        office_utility: 'অফিস / নাস্তা / ইউটিলিটি',
+        other: 'অন্যান্য বিবিধ খরচ',
+      };
+      const updated: BusinessExpense = {
+        ...editingExpense,
+        date: editExpenseDate,
+        category: editExpenseCategory,
+        categoryLabel: categoryLabels[editExpenseCategory] || 'বিবিধ খরচ',
+        amount: Number(editExpenseAmount),
+        note: editExpenseNote.trim() || categoryLabels[editExpenseCategory],
+        createdAt: editingExpense.createdAt || Date.now(),
+      };
+      setExpenses((prev) => {
+        const next = prev.map((x) => (x.id === updated.id ? updated : x));
+        try {
+          localStorage.setItem('dokandari_expenses_backup_v1', JSON.stringify(next));
+        } catch {
+          // ignore
+        }
+        return next;
+      });
+      await setDoc(doc(db, 'business_expenses', updated.id), updated, { merge: true });
+      setIsEditExpenseModalOpen(false);
+      setEditingExpense(null);
+      setFeedback('✅ খরচটির বিবরণ সফলভাবে আপডেট ও ডাটাবেজে সেভ হয়েছে!');
+      setTimeout(() => setFeedback(''), 3000);
+    } catch (err) {
+      console.warn('Update expense error:', err);
+    } finally {
+      setEditExpenseSaving(false);
+    }
+  };
+
   const handleExportPnLToCSV = () => {
     const todayStr = new Date().toISOString().slice(0, 10);
     let csv = '\uFEFF';
@@ -1100,9 +1185,49 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       }
     );
 
+    // Realtime live listener for store settings & hero banners
+    const unsubStoreContent = onSnapshot(
+      doc(db, 'settings', 'store_content'),
+      (snap) => {
+        if (snap.exists()) {
+          const cData = snap.data();
+          setSiteContent((prev) => ({
+            ...prev,
+            ...cData,
+            socialLinks: {
+              ...(prev.socialLinks || DEFAULT_STORE_CONTENT.socialLinks!),
+              ...(cData?.socialLinks || {}),
+            },
+            pageContent: {
+              ...(prev.pageContent || DEFAULT_STORE_CONTENT.pageContent!),
+              ...(cData?.pageContent || {}),
+            },
+            heroSlides:
+              Array.isArray(cData?.heroSlides) && cData.heroSlides.length > 0
+                ? cData.heroSlides
+                : prev.heroSlides,
+            categoryHeroes: cData?.categoryHeroes || prev.categoryHeroes,
+          }));
+          if (typeof cData?.carouselInterval === 'number') {
+            setCarouselInterval(cData.carouselInterval);
+          }
+          if (typeof cData?.bestSellingInterval === 'number') {
+            setBestSellingInterval(cData.bestSellingInterval);
+          }
+          if (cData?.deliverySettings) {
+            setDeliverySettings((prev) => ({ ...prev, ...cData.deliverySettings }));
+          }
+        }
+      },
+      (err) => {
+        console.warn('Realtime store_content listener note', err);
+      }
+    );
+
     return () => {
       unsubOrders();
       unsubLeads();
+      unsubStoreContent();
     };
   }, []);
 
@@ -1137,6 +1262,145 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setOrders((prev) => prev.map((o) => (o.id === order.id ? cleanedOrder : o)));
     setFeedback(`🔄 অর্ডার ${order.id}-এর কুরিয়ার স্ট্যাটাস রিসেট হয়েছে। এখন Steadfast বা Pathao-তে বুকিং দিন।`);
     setTimeout(() => setFeedback(''), 3500);
+  };
+
+  // Open Order Edit Modal with populated data
+  const handleOpenEditOrder = (order: Order) => {
+    setEditingOrder(order);
+    setEditOrderName(order.customer.name || '');
+    setEditOrderPhone(order.customer.phone || '');
+    setEditOrderAddress(order.customer.address || '');
+    setEditOrderDistrict(order.customer.district || 'ঢাকা (Inside Dhaka)');
+    const isOut =
+      (order.customer.district && order.customer.district.includes('ঢাকার বাইরে')) ||
+      (order.customer.city && order.customer.city.includes('Outside'));
+    setEditOrderArea(isOut ? 'outside_dhaka' : 'inside_dhaka');
+    setEditOrderItems(order.items ? JSON.parse(JSON.stringify(order.items)) : []);
+    setEditOrderShipping(typeof order.shippingCost === 'number' ? order.shippingCost : 70);
+    setEditOrderDiscount(typeof order.discount === 'number' ? order.discount : 0);
+    setEditOrderStatus(order.status || 'confirmed');
+    setEditOrderNotes('');
+    setEditOrderAddProdId('');
+    setIsEditOrderModalOpen(true);
+  };
+
+  const handleEditOrderItemQuantity = (index: number, newQty: number) => {
+    if (newQty < 1) return;
+    setEditOrderItems((prev) =>
+      prev.map((item, idx) => (idx === index ? { ...item, quantity: newQty } : item))
+    );
+  };
+
+  const handleEditOrderItemPrice = (index: number, newPrice: number) => {
+    if (newPrice < 0) return;
+    setEditOrderItems((prev) =>
+      prev.map((item, idx) => (idx === index ? { ...item, price: newPrice } : item))
+    );
+  };
+
+  const handleRemoveOrderItem = (index: number) => {
+    if (editOrderItems.length <= 1) {
+      alert('অর্ডারে কমপক্ষে একটি পণ্য থাকা আবশ্যক।');
+      return;
+    }
+    setEditOrderItems((prev) => prev.filter((_, idx) => idx !== index));
+  };
+
+  const handleAddProductToEditOrder = (prodId: string) => {
+    if (!prodId) return;
+    const target = products.find((p) => p.id === prodId);
+    if (!target) return;
+    const newItem = {
+      id: `${target.id}-${Date.now().toString().slice(-4)}`,
+      productId: target.id,
+      name: target.name,
+      category: target.category,
+      price: target.price,
+      quantity: 1,
+      selectedColor: target.variants?.colors?.[0] || 'Standard',
+      selectedSize: target.variants?.sizes?.[0] || 'Standard',
+      image: target.images?.[0] || '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg',
+    };
+    setEditOrderItems((prev) => [...prev, newItem]);
+    setEditOrderAddProdId('');
+  };
+
+  const handleSaveEditedOrder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingOrder) return;
+    const cleanPhone = editOrderPhone.replace(/[^\d]/g, '').replace(/^88/, '');
+    if (!editOrderName.trim() || cleanPhone.length !== 11 || !editOrderAddress.trim()) {
+      setFeedback('⚠️ কাস্টমারের নাম, ১১ ডিজিটের মোবাইল নম্বর এবং সম্পূর্ণ ঠিকানা সঠিকভাবে দিন।');
+      setTimeout(() => setFeedback(''), 4000);
+      return;
+    }
+    if (editOrderItems.length === 0) {
+      setFeedback('⚠️ অর্ডারে কমপক্ষে একটি পণ্য থাকতে হবে।');
+      setTimeout(() => setFeedback(''), 4000);
+      return;
+    }
+
+    setEditOrderSaving(true);
+    try {
+      const calcSubtotal = editOrderItems.reduce((acc, it) => acc + (it.price * it.quantity), 0);
+      const fee = Number(editOrderShipping) || 0;
+      const disc = Number(editOrderDiscount) || 0;
+      const calcTotal = Math.max(0, calcSubtotal + fee - disc);
+
+      const finalDistrict =
+        editOrderArea === 'inside_dhaka'
+          ? (editOrderDistrict.includes('ঢাকার বাইরে') ? 'ঢাকা (Inside Dhaka)' : editOrderDistrict || 'ঢাকা (Inside Dhaka)')
+          : (editOrderDistrict.includes('ঢাকা (Inside') ? 'ঢাকার বাইরে (Outside Dhaka)' : editOrderDistrict || 'ঢাকার বাইরে (Outside Dhaka)');
+
+      const updatedOrder: Order = {
+        ...editingOrder,
+        customer: {
+          ...editingOrder.customer,
+          name: editOrderName.trim(),
+          phone: cleanPhone,
+          address: editOrderAddress.trim(),
+          district: finalDistrict,
+          city: editOrderArea === 'inside_dhaka' ? 'Dhaka' : 'Outside Dhaka',
+        },
+        items: editOrderItems,
+        subtotal: calcSubtotal,
+        shippingCost: fee,
+        discount: disc,
+        total: calcTotal,
+        status: editOrderStatus,
+        updatedAt: Date.now(),
+      };
+
+      await saveOrderPersisted(updatedOrder);
+      try {
+        await setDoc(
+          doc(db, 'orders', updatedOrder.id),
+          JSON.parse(JSON.stringify(updatedOrder)),
+          { merge: true }
+        );
+      } catch (err) {
+        console.warn('Firestore order edit sync note:', err);
+      }
+
+      setOrders((prev) => prev.map((o) => (o.id === updatedOrder.id ? updatedOrder : o)));
+      if (selectedOrderForView?.id === updatedOrder.id) {
+        setSelectedOrderForView(updatedOrder);
+      }
+      if (selectedOrderForInvoice?.id === updatedOrder.id) {
+        setSelectedOrderForInvoice(updatedOrder);
+      }
+
+      setIsEditOrderModalOpen(false);
+      setEditingOrder(null);
+      setFeedback(`✅ অর্ডার #${updatedOrder.id} সফলভাবে এডিট ও সেভ করা হয়েছে!`);
+      setTimeout(() => setFeedback(''), 4500);
+    } catch (err: any) {
+      console.warn('Order edit error:', err);
+      setFeedback(`❌ অর্ডার এডিট ত্রুটি: ${err?.message || 'অনুগ্রহ করে পুনরায় চেষ্টা করুন'}`);
+      setTimeout(() => setFeedback(''), 4000);
+    } finally {
+      setEditOrderSaving(false);
+    }
   };
 
   // Upload WhatsApp Order Screenshot image for AI auto-extraction
@@ -2053,15 +2317,121 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setTimeout(() => setFeedback(''), 3500);
   };
 
-  const handleSaveHeroSlides = async () => {
-    const updated = await saveStoreContentPersisted({
-      heroSlides: siteContent.heroSlides,
-      carouselInterval,
-      bestSellingInterval,
-    });
-    if (onStoreContentUpdated) onStoreContentUpdated(updated);
-    setFeedback('✅ হোমপেজ হিরো ব্যানার স্লাইডসমূহ সফলভাবে লাইভ স্টোরে সেভ হয়েছে!');
+  const handleAddHeroSlide = () => {
+    const newSlide = {
+      id: `slide_${Date.now()}`,
+      title: 'নতুন আকর্ষণীয় অফার বা প্রিমিয়াম পণ্য',
+      subtitle: 'ডেলিভারি ম্যানের সামনে পার্সেল চেক করে ক্যাশ অন ডেলিভারিতে নেওয়ার নিশ্চয়তা।',
+      tag: '🔥 স্পেশাল অফার',
+      image: 'https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?auto=format&fit=crop&w=1600&q=80',
+      ctaText: 'এখনই অর্ডার করুন',
+      ctaLink: '#products-catalog',
+    };
+    setSiteContent((prev) => ({
+      ...prev,
+      heroSlides: [...(prev.heroSlides || []), newSlide],
+    }));
+    setFeedback('✨ নতুন স্লাইড যোগ হয়েছে! আপনার ছবি বা টেক্সট এডিট করে নিচে সেভ করুন।');
     setTimeout(() => setFeedback(''), 3500);
+  };
+
+  const handleUpdateHeroSlide = (index: number, field: string, value: string) => {
+    setSiteContent((prev) => {
+      const slides = [...(prev.heroSlides || [])];
+      slides[index] = { ...slides[index], [field]: value };
+      return { ...prev, heroSlides: slides };
+    });
+  };
+
+  const handleMoveHeroSlide = (index: number, direction: -1 | 1) => {
+    setSiteContent((prev) => {
+      const slides = [...(prev.heroSlides || [])];
+      const target = index + direction;
+      if (target < 0 || target >= slides.length) return prev;
+      const [moved] = slides.splice(index, 1);
+      slides.splice(target, 0, moved);
+      return { ...prev, heroSlides: slides };
+    });
+  };
+
+  const handleDeleteHeroSlide = (index: number) => {
+    setSiteContent((prev) => {
+      const slides = [...(prev.heroSlides || [])];
+      if (slides.length <= 1) {
+        setFeedback('⚠️ হোমপেজে কমপক্ষে ১টি ব্যানার স্লাইড থাকতে হবে!');
+        setTimeout(() => setFeedback(''), 3500);
+        return prev;
+      }
+      slides.splice(index, 1);
+      return { ...prev, heroSlides: slides };
+    });
+  };
+
+  const handleHeroSlideImageUpload = async (index: number, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const dataUrl = await compressImageFileToDataUrl(file, 1400, 0.85);
+      handleUpdateHeroSlide(index, 'image', dataUrl);
+      setFeedback('📸 স্লাইডার ছবি লোড হয়েছে! নিচে "লাইভ স্টোরে ব্যানার সেভ করুন" বাটনে ক্লিক করুন।');
+      setTimeout(() => setFeedback(''), 4000);
+    } catch (err) {
+      console.warn('Slide image upload error:', err);
+    } finally {
+      e.target.value = '';
+    }
+  };
+
+  const handleUpdateCategoryHero = (catId: string, field: string, value: string) => {
+    setSiteContent((prev) => ({
+      ...prev,
+      categoryHeroes: {
+        ...(prev.categoryHeroes || DEFAULT_CATEGORY_HEROES),
+        [catId]: {
+          ...(prev.categoryHeroes?.[catId] || DEFAULT_CATEGORY_HEROES[catId] || {
+            title: '',
+            subtitle: '',
+            image: '',
+            tag: '',
+            ctaText: 'কালেকশন দেখুন',
+          }),
+          [field]: value,
+        },
+      },
+    }));
+  };
+
+  const handleCategoryHeroImageUpload = async (catId: string, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const dataUrl = await compressImageFileToDataUrl(file, 1200, 0.85);
+      handleUpdateCategoryHero(catId, 'image', dataUrl);
+      setFeedback(`📸 "${catId}" ক্যাটাগরি ব্যানার ছবি লোড হয়েছে! "লাইভ স্টোরে ব্যানার সেভ করুন" বাটনে ক্লিক করুন।`);
+      setTimeout(() => setFeedback(''), 4000);
+    } catch (err) {
+      console.warn('Category hero upload error:', err);
+    } finally {
+      e.target.value = '';
+    }
+  };
+
+  const handleSaveHeroSlides = async () => {
+    try {
+      const updated = await saveStoreContentPersisted({
+        heroSlides: siteContent.heroSlides,
+        categoryHeroes: siteContent.categoryHeroes || DEFAULT_CATEGORY_HEROES,
+        carouselInterval,
+        bestSellingInterval,
+      });
+      if (onStoreContentUpdated) onStoreContentUpdated(updated);
+      setFeedback('🎉 হোমপেজ হিরো ব্যানার স্লাইড ও ক্যাটাগরি ব্যানার ডাটাবেজে সেভ হয়েছে এবং লাইভ ওয়েবসাইটে সাথে সাথে কার্যকর হয়েছে!');
+      setTimeout(() => setFeedback(''), 5000);
+    } catch (err: any) {
+      console.warn('Hero slides save error:', err);
+      setFeedback(`❌ সেভ করতে ত্রুটি: ${err?.message || 'অনুগ্রহ করে পুনরায় চেষ্টা করুন'}`);
+      setTimeout(() => setFeedback(''), 4000);
+    }
   };
 
   const handleSaveSiteSettings = async (e: React.FormEvent) => {
@@ -2547,8 +2917,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     {
       id: 'omni_flow_studio',
       serialBn: '১৬',
-      label: 'এক্সট্রা: গুগল ওমনি এআই স্টুডিও',
-      subtitleBn: 'সফট পিঙ্ক ভিডিও ও শোরুম জেনারেটর',
+      label: 'গুগল ফ্লো এআই স্টুডিও',
+      subtitleBn: 'Veo 3 ভিডিও, ওমিনি, Imagen 3 ও ফর্ম জেনারেটর',
       icon: Video,
       badgeBg: 'bg-gradient-to-r from-[#E11D48] to-pink-600 text-white',
       categoryGroup: 'marketing',
@@ -2611,7 +2981,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               <span>লগআউট</span>
             </button>
 
-            {/* Corner Extra Menu Button for Google Omni AI Studio (Only visible after Admin Login) */}
+            {/* Corner Extra Menu Button for Google Flow AI Studio */}
             <button
               onClick={() => setActiveTool('omni_flow_studio')}
               className={`px-4 py-2.5 text-xs sm:text-sm font-extrabold rounded-2xl border-2 flex items-center gap-2 shadow-xs transition-all cursor-pointer ${
@@ -2619,10 +2989,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   ? 'bg-gradient-to-r from-[#E11D48] to-pink-600 text-white border-rose-600'
                   : 'bg-[#FFF0F3] hover:bg-[#FFE4E9] text-[#E11D48] border-rose-300'
               }`}
-              title="শুধুমাত্র অ্যাডমিনদের জন্য এক্সট্রা মেনু: Google Omni AI স্টুডিও"
+              title="Google Flow ও AI এজেন্ট স্টুডিও (Veo 3, Gemini Omni, Imagen 3, Nano Banana)"
             >
               <Video className="w-4 h-4" />
-              <span>✨ এক্সট্রা মেনু: Google Omni স্টুডিও</span>
+              <span>⚡ গুগল ফ্লো এআই স্টুডিও</span>
             </button>
           </div>
         </div>
@@ -4351,6 +4721,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               <div className="flex items-center justify-center gap-1.5">
                                 <button
                                   type="button"
+                                  onClick={() => handleOpenEditOrder(o)}
+                                  className="px-2.5 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-[11px] font-extrabold cursor-pointer transition-all flex items-center gap-1 shadow-2xs"
+                                  title="কাস্টমারের ফোন, ঠিকানা, অর্ডারকৃত পণ্য ও মূল্য লাইভ এডিট করুন"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5 text-blue-600" />
+                                  <span>এডিট</span>
+                                </button>
+                                <button
+                                  type="button"
                                   onClick={() => setSelectedOrderForView(o)}
                                   className="px-2.5 py-1.5 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-900 text-[11px] font-extrabold cursor-pointer transition-all flex items-center gap-1 shadow-2xs"
                                   title="অর্ডারের সম্পূর্ণ ঠিকানা ও পণ্যের বিবরণ দেখুন"
@@ -4548,7 +4927,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   </div>
 
                   {/* Actions */}
-                  <div className="flex items-center justify-end gap-2.5 pt-2">
+                  <div className="flex flex-wrap items-center justify-end gap-2.5 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const ord = selectedOrderForView;
+                        handleOpenEditOrder(ord);
+                      }}
+                      className="px-4 py-2 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Edit3 className="w-4 h-4 text-blue-600" />
+                      <span>✏️ অর্ডার তথ্য এডিট করুন</span>
+                    </button>
                     <button
                       type="button"
                       onClick={() => {
@@ -7460,14 +7850,24 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               ৳{exp.amount.toLocaleString()}
                             </td>
                             <td className="p-3 text-center whitespace-nowrap">
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteExpense(exp.id)}
-                                className="p-1 text-stone-400 hover:text-rose-600 cursor-pointer"
-                                title="খরচটি মুছুন"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
+                              <div className="flex items-center justify-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenEditExpense(exp)}
+                                  className="p-1 text-stone-500 hover:text-blue-600 cursor-pointer"
+                                  title="খরচের পরিমাণ বা বিবরণ এডিট করুন"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteExpense(exp.id)}
+                                  className="p-1 text-stone-400 hover:text-rose-600 cursor-pointer"
+                                  title="খরচটি মুছুন"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))
@@ -7511,6 +7911,448 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
           );
         })()}
+
+        {/* =====================================================================
+            TOOL: HERO BANNER & SLIDER DESIGN (হোমপেজ ও ক্যাটাগরি ব্যানার ডিজাইন)
+           ===================================================================== */}
+        {activeTool === 'banners' && (
+          <div className="bg-white rounded-3xl border border-rose-200 p-6 shadow-xs space-y-8 animate-in fade-in">
+            {/* Header with Title and Quick Save Button */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-rose-100">
+              <div>
+                <h3 className="text-base font-extrabold text-stone-900 flex items-center gap-2">
+                  <ImageIcon className="w-5 h-5 text-[#E11D48]" />
+                  <span>হিরো ব্যানার ও স্লাইডার ডিজাইন (হোমপেজ ও ক্যাটাগরি ব্যানার)</span>
+                </h3>
+                <p className="text-xs text-stone-500 mt-0.5">
+                  হোমপেজের মূল ক্যারোসেল ব্যানার এবং ১১টি ক্যাটাগরির ব্যানার ছবি, শিরোনাম ও বাটন সরাসরি পরিবর্তন করুন। লাইভ স্টোরে তাৎক্ষণিক কার্যকর হবে।
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleAddHeroSlide}
+                  className="px-4 py-2 bg-rose-50 hover:bg-rose-100 text-[#E11D48] border border-rose-200 rounded-xl text-xs font-extrabold flex items-center gap-1.5 cursor-pointer transition-all shadow-2xs"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>+ নতুন স্লাইড যোগ করুন</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveHeroSlides}
+                  className="px-5 py-2 bg-[#E11D48] hover:bg-[#BE123C] text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5 cursor-pointer shadow-xs transition-all"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>💾 লাইভ স্টোরে ব্যানার সেভ করুন</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Slider Speed Controls Bar */}
+            <div className="p-4 rounded-2xl bg-[#FFF8F9] border border-rose-200 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+              <div>
+                <label className="block font-extrabold text-stone-800 mb-2 flex items-center gap-1.5">
+                  <Clock className="w-4 h-4 text-[#E11D48]" />
+                  <span>হোমপেজ হিরো ব্যানার অটো-স্ক্রোল স্পিড:</span>
+                </label>
+                <div className="flex flex-wrap items-center gap-2">
+                  {[
+                    { ms: 3000, label: '৩ সেকেন্ড (দ্রুত)' },
+                    { ms: 5000, label: '৫ সেকেন্ড (ডিফল্ট/প্রস্তাবিত)' },
+                    { ms: 8000, label: '৮ সেকেন্ড (ধীর)' },
+                    { ms: 10000, label: '১০ সেকেন্ড' },
+                  ].map((speed) => (
+                    <button
+                      key={speed.ms}
+                      type="button"
+                      onClick={() => handleSaveCarouselSpeed(speed.ms)}
+                      className={`px-3 py-1.5 rounded-xl font-bold cursor-pointer transition-all ${
+                        carouselInterval === speed.ms
+                          ? 'bg-[#E11D48] text-white shadow-xs'
+                          : 'bg-white text-stone-700 border border-rose-200 hover:bg-rose-50'
+                      }`}
+                    >
+                      {speed.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-extrabold text-stone-800 mb-2 flex items-center gap-1.5">
+                  <Play className="w-4 h-4 text-[#E11D48]" />
+                  <span>বেস্ট-সেলিং প্রোডাক্ট ক্যারোসেল স্ক্রোল স্পিড:</span>
+                </label>
+                <div className="flex flex-wrap items-center gap-2">
+                  {[
+                    { ms: 3000, label: '৩ সেকেন্ড' },
+                    { ms: 4000, label: '৪ সেকেন্ড (প্রস্তাবিত)' },
+                    { ms: 6000, label: '৬ সেকেন্ড' },
+                    { ms: 8000, label: '৮ সেকেন্ড' },
+                  ].map((speed) => (
+                    <button
+                      key={speed.ms}
+                      type="button"
+                      onClick={() => handleSaveBestSellingSpeed(speed.ms)}
+                      className={`px-3 py-1.5 rounded-xl font-bold cursor-pointer transition-all ${
+                        bestSellingInterval === speed.ms
+                          ? 'bg-[#E11D48] text-white shadow-xs'
+                          : 'bg-white text-stone-700 border border-rose-200 hover:bg-rose-50'
+                      }`}
+                    >
+                      {speed.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* SECTION 1: HOMEPAGE HERO BANNER SLIDES */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-extrabold text-stone-900 flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#E11D48]" />
+                    <span>হোমপেজ হিরো ব্যানার স্লাইডসমূহ ({siteContent.heroSlides?.length || 0}টি স্লাইড):</span>
+                  </h4>
+                  <p className="text-[11px] text-stone-500 mt-0.5">
+                    স্লাইডগুলোর ছবি ও লেখা সরাসরি এডিট করুন, উপরে-নিচে সাজান অথবা নতুন ব্যানার যুক্ত করুন।
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleAddHeroSlide}
+                  className="px-3.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-[#E11D48] border border-rose-200 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>স্লাইড যোগ করুন</span>
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                {(siteContent.heroSlides || []).map((slide, idx) => (
+                  <div
+                    key={slide.id || idx}
+                    className="p-5 rounded-3xl border-2 border-stone-200 hover:border-rose-300 bg-white transition-all space-y-4 shadow-2xs"
+                  >
+                    {/* Slide Header: Index and Reordering / Delete Actions */}
+                    <div className="flex items-center justify-between pb-3 border-b border-stone-100">
+                      <div className="flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-full bg-[#E11D48] text-white font-extrabold text-xs flex items-center justify-center">
+                          {idx + 1}
+                        </span>
+                        <span className="text-xs font-extrabold text-stone-900">
+                          ব্যানার স্লাইড #{idx + 1}
+                        </span>
+                        {slide.tag && (
+                          <span className="px-2 py-0.5 rounded-md bg-rose-50 border border-rose-200 text-[#E11D48] font-bold text-[10px]">
+                            {slide.tag}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleMoveHeroSlide(idx, -1)}
+                          disabled={idx === 0}
+                          className="p-1.5 rounded-lg border border-stone-200 hover:bg-stone-100 disabled:opacity-30 cursor-pointer"
+                          title="উপরে নিন"
+                        >
+                          <ChevronUp className="w-4 h-4 text-stone-600" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleMoveHeroSlide(idx, 1)}
+                          disabled={idx === (siteContent.heroSlides?.length || 1) - 1}
+                          className="p-1.5 rounded-lg border border-stone-200 hover:bg-stone-100 disabled:opacity-30 cursor-pointer"
+                          title="নিচে নিন"
+                        >
+                          <ChevronDown className="w-4 h-4 text-stone-600" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteHeroSlide(idx)}
+                          className="p-1.5 rounded-lg border border-rose-200 hover:bg-rose-50 text-rose-600 cursor-pointer"
+                          title="এই স্লাইডটি মুছুন"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Slide Content Grid: Preview & Form */}
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+                      {/* Live Visual Preview of Slide */}
+                      <div className="lg:col-span-1 space-y-2">
+                        <span className="block text-[11px] font-bold text-stone-500 uppercase tracking-wider">
+                          স্লাইডার লাইভ প্রিভিউ:
+                        </span>
+                        <div className="relative rounded-2xl overflow-hidden aspect-[16/9] border border-stone-200 bg-stone-900 group shadow-sm">
+                          <img
+                            src={slide.image}
+                            alt={slide.title}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 opacity-90"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src =
+                                'https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?auto=format&fit=crop&w=1600&q=80';
+                            }}
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent p-3.5 flex flex-col justify-end text-white">
+                            {slide.tag && (
+                              <span className="inline-block px-2 py-0.5 rounded bg-[#E11D48] text-white text-[9px] font-extrabold mb-1 w-max">
+                                {slide.tag}
+                              </span>
+                            )}
+                            <h5 className="font-extrabold text-xs line-clamp-1 text-white">
+                              {slide.title}
+                            </h5>
+                            <p className="text-[10px] text-stone-300 line-clamp-2 mt-0.5">
+                              {slide.subtitle}
+                            </p>
+                            {slide.ctaText && (
+                              <div className="mt-2">
+                                <span className="inline-block px-2.5 py-1 rounded-lg bg-[#E11D48] text-[9px] font-extrabold text-white">
+                                  {slide.ctaText} →
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* File Upload Button */}
+                        <div className="pt-1">
+                          <label className="w-full py-2 px-3 bg-stone-100 hover:bg-rose-50 text-stone-800 hover:text-[#E11D48] border border-stone-300 hover:border-rose-300 rounded-xl font-bold text-xs cursor-pointer flex items-center justify-center gap-2 transition-all">
+                            <ImageIcon className="w-3.5 h-3.5 text-[#E11D48]" />
+                            <span>📁 কম্পিউটার/মোবাইল থেকে ছবি আপলোড করুন</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={(e) => handleHeroSlideImageUpload(idx, e)}
+                              className="hidden"
+                            />
+                          </label>
+                        </div>
+                      </div>
+
+                      {/* Editable Inputs for this Slide */}
+                      <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                        <div className="sm:col-span-2">
+                          <label className="block font-bold text-stone-700 mb-1">
+                            স্লাইডার ছবির লিংক (Image URL):
+                          </label>
+                          <input
+                            type="text"
+                            value={slide.image}
+                            onChange={(e) => handleUpdateHeroSlide(idx, 'image', e.target.value)}
+                            placeholder="https://images.unsplash.com/..."
+                            className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl font-mono text-[11px] focus:border-[#E11D48] focus:bg-white"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block font-bold text-stone-700 mb-1">
+                            ট্যাগ / ব্যাজ (Slide Tag):
+                          </label>
+                          <input
+                            type="text"
+                            value={slide.tag || ''}
+                            onChange={(e) => handleUpdateHeroSlide(idx, 'tag', e.target.value)}
+                            placeholder="যেমন: 🔥 স্পেশাল অফার"
+                            className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl font-bold focus:border-[#E11D48] focus:bg-white"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block font-bold text-stone-700 mb-1">
+                            বাটন টেক্সট (CTA Text):
+                          </label>
+                          <input
+                            type="text"
+                            value={slide.ctaText || ''}
+                            onChange={(e) => handleUpdateHeroSlide(idx, 'ctaText', e.target.value)}
+                            placeholder="যেমন: এখনই অর্ডার করুন"
+                            className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl font-bold focus:border-[#E11D48] focus:bg-white"
+                          />
+                        </div>
+
+                        <div className="sm:col-span-2">
+                          <label className="block font-bold text-stone-700 mb-1">
+                            মূল শিরোনাম (Slide Headline):
+                          </label>
+                          <input
+                            type="text"
+                            value={slide.title}
+                            onChange={(e) => handleUpdateHeroSlide(idx, 'title', e.target.value)}
+                            placeholder="যেমন: আনব্রেকেবল ওয়াল মিরর কালেকশন"
+                            className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl font-bold text-stone-900 focus:border-[#E11D48] focus:bg-white"
+                          />
+                        </div>
+
+                        <div className="sm:col-span-2">
+                          <label className="block font-bold text-stone-700 mb-1">
+                            সাবটাইটেল / বিবরণ (Subtitle):
+                          </label>
+                          <textarea
+                            rows={2}
+                            value={slide.subtitle}
+                            onChange={(e) => handleUpdateHeroSlide(idx, 'subtitle', e.target.value)}
+                            placeholder="যেমন: ডেলিভারি ম্যানের সামনে পার্সেল চেক করে ক্যাশ অন ডেলিভারিতে নেওয়ার নিশ্চয়তা।"
+                            className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl focus:border-[#E11D48] focus:bg-white"
+                          />
+                        </div>
+
+                        <div className="sm:col-span-2">
+                          <label className="block font-bold text-stone-700 mb-1">
+                            বাটনের গন্তব্য লিংক (CTA Link):
+                          </label>
+                          <input
+                            type="text"
+                            value={slide.ctaLink || ''}
+                            onChange={(e) => handleUpdateHeroSlide(idx, 'ctaLink', e.target.value)}
+                            placeholder="#products-catalog অথবা ক্যাটাগরি আইডি"
+                            className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl font-mono text-[11px] focus:border-[#E11D48] focus:bg-white"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* SECTION 2: 11 CATEGORY HERO BANNERS DESIGNER */}
+            <div className="space-y-4 pt-6 border-t border-rose-100">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-extrabold text-stone-900 flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#E11D48]" />
+                    <span>১১টি ক্যাটাগরির ল্যান্ডিং পেজ ব্যানার কাস্টমাইজেশন:</span>
+                  </h4>
+                  <p className="text-[11px] text-stone-500 mt-0.5">
+                    প্রতিটি ক্যাটাগরিতে ক্লিক করলে যে ব্যানার ও অফার মেসেজ দেখায়, তা সরাসরি পরিবর্তন করুন।
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {OFFICIAL_CATEGORIES.map((cat) => {
+                  const heroConfig =
+                    siteContent.categoryHeroes?.[cat.id] ||
+                    DEFAULT_CATEGORY_HEROES[cat.id] || {
+                      title: `${cat.nameBn} স্পেশাল অফার`,
+                      subtitle: '১০০% অরিজিনাল পণ্য ও ক্যাশ অন ডেলিভারি সুবিধা।',
+                      image: cat.image,
+                      tag: cat.nameBn,
+                      ctaText: 'কালেকশন দেখুন',
+                    };
+                  return (
+                    <div
+                      key={cat.id}
+                      className="p-4 rounded-2xl border border-stone-200 bg-stone-50/50 space-y-3 text-xs hover:border-rose-300 transition-all"
+                    >
+                      <div className="flex items-center justify-between pb-2 border-b border-stone-200">
+                        <span className="font-extrabold text-stone-900 text-sm flex items-center gap-1.5">
+                          <span>{cat.icon}</span>
+                          <span>{cat.nameBn}</span>
+                          <span className="text-[10px] text-stone-400 font-mono">({cat.id})</span>
+                        </span>
+                      </div>
+
+                      {/* Category Banner Preview */}
+                      <div className="relative rounded-xl overflow-hidden aspect-[21/9] bg-stone-900 border border-stone-200">
+                        <img
+                          src={heroConfig.image}
+                          alt={cat.nameBn}
+                          className="w-full h-full object-cover opacity-85"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src = cat.image;
+                          }}
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-transparent p-2.5 flex flex-col justify-end text-white">
+                          <span className="text-[9px] font-bold text-rose-300">{heroConfig.tag}</span>
+                          <div className="font-extrabold text-xs line-clamp-1">{heroConfig.title}</div>
+                          <div className="text-[9px] text-stone-300 line-clamp-1">{heroConfig.subtitle}</div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <div>
+                          <label className="block text-[10.5px] font-bold text-stone-700 mb-1">
+                            ব্যানার ছবি (ফাইল আপলোড বা লিংক):
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <label className="px-2.5 py-1.5 bg-white border border-stone-300 hover:border-rose-300 text-stone-700 rounded-lg font-bold text-[10px] cursor-pointer shrink-0">
+                              📁 আপলোড
+                              <input
+                                type="file"
+                                accept="image/*"
+                                onChange={(e) => handleCategoryHeroImageUpload(cat.id, e)}
+                                className="hidden"
+                              />
+                            </label>
+                            <input
+                              type="text"
+                              value={heroConfig.image}
+                              onChange={(e) =>
+                                handleUpdateCategoryHero(cat.id, 'image', e.target.value)
+                              }
+                              placeholder="https://..."
+                              className="w-full px-2.5 py-1.5 bg-white border border-stone-300 rounded-lg font-mono text-[10.5px]"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-[10.5px] font-bold text-stone-700 mb-1">
+                            ব্যানার শিরোনাম:
+                          </label>
+                          <input
+                            type="text"
+                            value={heroConfig.title}
+                            onChange={(e) =>
+                              handleUpdateCategoryHero(cat.id, 'title', e.target.value)
+                            }
+                            className="w-full px-2.5 py-1.5 bg-white border border-stone-300 rounded-lg font-bold"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[10.5px] font-bold text-stone-700 mb-1">
+                            ব্যানার বিবরণ / সাবটাইটেল:
+                          </label>
+                          <input
+                            type="text"
+                            value={heroConfig.subtitle}
+                            onChange={(e) =>
+                              handleUpdateCategoryHero(cat.id, 'subtitle', e.target.value)
+                            }
+                            className="w-full px-2.5 py-1.5 bg-white border border-stone-300 rounded-lg text-stone-700"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Bottom Save Action Button */}
+            <div className="pt-4 border-t border-rose-100 flex flex-wrap items-center justify-between gap-3">
+              <span className="text-xs text-stone-500 font-medium">
+                ✓ সেভ বাটনে ক্লিক করার সাথে সাথে ফায়ারস্টোর ক্লাউড ও লাইভ ডোমেইনে আপডেট কার্যকর হবে।
+              </span>
+              <button
+                type="button"
+                onClick={handleSaveHeroSlides}
+                className="px-6 py-2.5 bg-[#E11D48] hover:bg-[#BE123C] text-white rounded-xl text-xs font-extrabold flex items-center gap-2 cursor-pointer shadow-sm transition-all"
+              >
+                <Save className="w-4 h-4" />
+                <span>💾 সকল ব্যানার লাইভ স্টোরে সেভ করুন</span>
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* =====================================================================
             TOOL 9: WEBSITE & DELIVERY FEE SETTINGS
@@ -8457,6 +9299,422 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   className="px-5 py-2 bg-[#E11D48] text-white rounded-xl font-bold hover:bg-[#BE123C] transition-colors cursor-pointer shadow-xs disabled:opacity-50"
                 >
                   ✅ সেভ ও লাইভ প্রকাশ করুন
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Order Modal (Real-time live persistence to Firestore + state) */}
+      {isEditOrderModalOpen && editingOrder && (
+        <div className="fixed inset-0 z-50 bg-stone-950/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-2xl w-full p-6 space-y-5 shadow-2xl border border-stone-200 text-xs my-auto max-h-[92vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-rose-100 sticky top-0 bg-white z-10">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+                  <Edit3 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-stone-900">
+                    অর্ডার তথ্য এডিট করুন (অর্ডার #{editingOrder.id})
+                  </h3>
+                  <p className="text-[11px] text-stone-500">
+                    কাস্টমারের নাম, ফোন, ডেলিভারি ঠিকানা, প্রোডাক্ট ও মূল্য এডিট করুন। সাথে সাথে ডাটাবেজে আপডেট হবে।
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsEditOrderModalOpen(false);
+                  setEditingOrder(null);
+                }}
+                className="text-stone-400 hover:text-stone-700 cursor-pointer text-base font-bold p-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditedOrder} className="space-y-4">
+              {/* Customer Information Section */}
+              <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 space-y-3">
+                <span className="font-extrabold text-stone-800 text-xs block">
+                  👤 কাস্টমার ও ডেলিভারি তথ্য:
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-bold text-stone-700 mb-1">কাস্টমারের নাম *</label>
+                    <input
+                      type="text"
+                      required
+                      value={editOrderName}
+                      onChange={(e) => setEditOrderName(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl font-bold"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-stone-700 mb-1">মোবাইল নম্বর (১১ ডিজিট) *</label>
+                    <input
+                      type="tel"
+                      required
+                      value={editOrderPhone}
+                      onChange={(e) => setEditOrderPhone(e.target.value)}
+                      placeholder="01XXXXXXXXX"
+                      className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl font-mono font-bold text-[#E11D48]"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="block font-bold text-stone-700 mb-1">সম্পূর্ণ ঠিকানা (বাসা/রোড/এলাকা) *</label>
+                    <input
+                      type="text"
+                      required
+                      value={editOrderAddress}
+                      onChange={(e) => setEditOrderAddress(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl font-bold"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-stone-700 mb-1">ডেলিভারি এরিয়া *</label>
+                    <select
+                      value={editOrderArea}
+                      onChange={(e) => {
+                        const area = e.target.value as 'inside_dhaka' | 'outside_dhaka';
+                        setEditOrderArea(area);
+                        const fee =
+                          area === 'inside_dhaka'
+                            ? Number(deliverySettings.dhakaFee) || 70
+                            : Number(deliverySettings.outsideDhakaFee) || 130;
+                        setEditOrderShipping(fee);
+                      }}
+                      className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl font-bold"
+                    >
+                      <option value="inside_dhaka">ঢাকার ভেতরে (Inside Dhaka)</option>
+                      <option value="outside_dhaka">ঢাকার বাইরে (Outside Dhaka)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-stone-700 mb-1">জেলা (District)</label>
+                    <input
+                      type="text"
+                      value={editOrderDistrict}
+                      onChange={(e) => setEditOrderDistrict(e.target.value)}
+                      placeholder="যেমন: ঢাকা / চট্টগ্রাম / সিলেট"
+                      className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl font-bold"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-stone-700 mb-1">অর্ডার স্ট্যাটাস *</label>
+                    <select
+                      value={editOrderStatus}
+                      onChange={(e) => setEditOrderStatus(e.target.value as OrderStatus)}
+                      className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl font-bold"
+                    >
+                      <option value="pending">পেন্ডিং (Pending)</option>
+                      <option value="confirmed">কনফার্মড (Confirmed)</option>
+                      <option value="packed">প্যাকড (Packed)</option>
+                      <option value="in_transit">কুরিয়ারে (In Transit)</option>
+                      <option value="delivered">ডেলিভারড (Delivered)</option>
+                      <option value="cancelled">বাতিল (Cancelled)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-stone-700 mb-1">স্পেশাল নোট / নির্দেশনা</label>
+                    <input
+                      type="text"
+                      value={editOrderNotes}
+                      onChange={(e) => setEditOrderNotes(e.target.value)}
+                      placeholder="যেমন: দ্রুত ডেলিভারি বা গিফট বক্স"
+                      className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Ordered Items List & Quantity/Price Edits */}
+              <div className="p-4 rounded-2xl bg-[#FFF8F9] border border-rose-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-extrabold text-stone-900 text-xs">
+                    🛍️ অর্ডারকৃত পণ্যের তালিকা ({editOrderItems.length}টি আইটেম):
+                  </span>
+                  <span className="text-[11px] font-bold text-[#E11D48]">
+                    সাবটোটাল: ৳
+                    {editOrderItems
+                      .reduce((sum, it) => sum + it.price * it.quantity, 0)
+                      .toLocaleString()}
+                  </span>
+                </div>
+
+                <div className="border border-stone-200 rounded-xl divide-y divide-stone-100 bg-white overflow-hidden">
+                  {editOrderItems.map((item, idx) => (
+                    <div key={idx} className="p-3 flex items-center justify-between gap-3 text-xs">
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                        {item.image && (
+                          <img
+                            src={item.image}
+                            alt={item.name}
+                            className="w-10 h-10 rounded-lg object-cover border border-stone-200 shrink-0"
+                          />
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="font-bold text-stone-900 truncate">{item.name}</p>
+                          <div className="flex items-center gap-3 mt-1">
+                            <div className="flex items-center gap-1">
+                              <span className="text-stone-500 text-[10px]">মূল্য: ৳</span>
+                              <input
+                                type="number"
+                                min={1}
+                                value={item.price}
+                                onChange={(e) =>
+                                  handleEditOrderItemPrice(idx, Math.max(1, Number(e.target.value)))
+                                }
+                                className="w-16 px-1.5 py-0.5 border border-stone-300 rounded text-center font-mono font-bold text-[#E11D48] text-xs"
+                              />
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <span className="text-stone-500 text-[10px]">পরিমাণ:</span>
+                              <input
+                                type="number"
+                                min={1}
+                                value={item.quantity}
+                                onChange={(e) =>
+                                  handleEditOrderItemQuantity(idx, Math.max(1, Number(e.target.value)))
+                                }
+                                className="w-12 px-1.5 py-0.5 border border-stone-300 rounded text-center font-mono font-bold text-stone-900 text-xs"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3 shrink-0">
+                        <span className="font-mono font-extrabold text-stone-900">
+                          ৳{(item.price * item.quantity).toLocaleString()}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveOrderItem(idx)}
+                          className="p-1 text-stone-400 hover:text-rose-600 cursor-pointer"
+                          title="এই আইটেমটি অর্ডার থেকে সরান"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Add More Product to this Order */}
+                <div className="pt-2 flex flex-col sm:flex-row items-center gap-2">
+                  <select
+                    value={editOrderAddProdId}
+                    onChange={(e) => setEditOrderAddProdId(e.target.value)}
+                    className="w-full sm:flex-1 px-3 py-2 bg-white border border-stone-300 rounded-xl font-bold text-stone-800 text-xs"
+                  >
+                    <option value="">+ ক্যাটালগ থেকে আরও একটি পণ্য নির্বাচন করুন...</option>
+                    {products.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} — ৳{p.price}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => handleAddProductToEditOrder(editOrderAddProdId)}
+                    disabled={!editOrderAddProdId}
+                    className="w-full sm:w-auto px-4 py-2 bg-[#E11D48] hover:bg-[#BE123C] text-white rounded-xl font-bold text-xs flex items-center justify-center gap-1 cursor-pointer disabled:opacity-40 shrink-0"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>অর্ডারে যোগ করুন</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Order Financial Calculation Breakdown */}
+              <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 space-y-2 text-xs">
+                <div className="flex justify-between items-center text-stone-600">
+                  <span>পণ্যের মোট মূল্য (Subtotal):</span>
+                  <span className="font-mono font-bold text-stone-900 text-sm">
+                    ৳
+                    {editOrderItems
+                      .reduce((sum, it) => sum + it.price * it.quantity, 0)
+                      .toLocaleString()}
+                  </span>
+                </div>
+
+                <div className="flex justify-between items-center text-stone-600">
+                  <span>ডেলিভারি চার্জ (Shipping Fee):</span>
+                  <div className="flex items-center gap-1">
+                    <span className="font-mono">৳</span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={editOrderShipping}
+                      onChange={(e) => setEditOrderShipping(Math.max(0, Number(e.target.value)))}
+                      className="w-20 px-2 py-1 bg-white border border-stone-300 rounded-lg text-right font-mono font-bold text-stone-900"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-between items-center text-emerald-700">
+                  <span>ডিসকাউন্ট (Discount):</span>
+                  <div className="flex items-center gap-1">
+                    <span className="font-mono">-৳</span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={editOrderDiscount}
+                      onChange={(e) => setEditOrderDiscount(Math.max(0, Number(e.target.value)))}
+                      className="w-20 px-2 py-1 bg-white border border-stone-300 rounded-lg text-right font-mono font-bold text-emerald-700"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-between items-center pt-2 border-t border-stone-200 text-sm font-extrabold text-[#E11D48]">
+                  <span>সর্বমোট প্রদেয় বিল (Total Payable):</span>
+                  <span className="font-mono text-base font-black">
+                    ৳
+                    {Math.max(
+                      0,
+                      editOrderItems.reduce((sum, it) => sum + it.price * it.quantity, 0) +
+                        editOrderShipping -
+                        editOrderDiscount
+                    ).toLocaleString()}{' '}
+                    BDT
+                  </span>
+                </div>
+              </div>
+
+              {/* Modal Action Buttons */}
+              <div className="flex items-center justify-end gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditOrderModalOpen(false);
+                    setEditingOrder(null);
+                  }}
+                  className="px-4 py-2 border border-stone-300 rounded-xl text-stone-700 font-bold hover:bg-stone-50 cursor-pointer"
+                >
+                  বাতিল
+                </button>
+                <button
+                  type="submit"
+                  disabled={editOrderSaving}
+                  className="px-6 py-2.5 bg-[#E11D48] hover:bg-[#BE123C] text-white rounded-xl font-bold flex items-center gap-2 cursor-pointer shadow-xs disabled:opacity-50"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>{editOrderSaving ? 'সংরক্ষণ হচ্ছে...' : '✅ অর্ডার এডিট সম্পন্ন ও সেভ করুন'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Expense Modal (Instant Live Persistence) */}
+      {isEditExpenseModalOpen && editingExpense && (
+        <div className="fixed inset-0 z-50 bg-stone-950/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-stone-200 text-xs my-auto">
+            <div className="flex items-center justify-between pb-2 border-b border-rose-100">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-rose-50 text-[#E11D48] flex items-center justify-center font-bold">
+                  <Edit3 className="w-3.5 h-3.5" />
+                </div>
+                <h3 className="text-sm font-extrabold text-stone-900">খরচের এন্ট্রি এডিট করুন</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsEditExpenseModalOpen(false);
+                  setEditingExpense(null);
+                }}
+                className="text-stone-400 hover:text-stone-700 cursor-pointer text-base font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateExpense} className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-bold text-stone-700 mb-1">তারিখ *</label>
+                <input
+                  type="date"
+                  required
+                  value={editExpenseDate}
+                  onChange={(e) => setEditExpenseDate(e.target.value)}
+                  className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-stone-700 mb-1">খরচের খাত *</label>
+                <select
+                  value={editExpenseCategory}
+                  onChange={(e) => setEditExpenseCategory(e.target.value as any)}
+                  className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl font-bold"
+                >
+                  <option value="ad_cost">মেটা ও টিকটক অ্যাড স্পেন্ড</option>
+                  <option value="courier_return_charge">কুরিয়ার রিটার্ন চার্জ (Courier Return Charge)</option>
+                  <option value="courier_charge">কুরিয়ার ও ডেলিভারি খরচ</option>
+                  <option value="packaging">বক্স ও প্যাকেজিং খরচ</option>
+                  <option value="product_buying">পণ্য ক্রয় / সোর্সিং</option>
+                  <option value="transport_fare">রিকশা / গাড়ি / যাতায়াত ভাড়া</option>
+                  <option value="office_utility">অফিস / নাস্তা / ইউটিলিটি</option>
+                  <option value="other">অন্যান্য বিবিধ খরচ</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-stone-700 mb-1">
+                  টাকার পরিমাণ (BDT) *
+                </label>
+                <input
+                  type="number"
+                  required
+                  min={1}
+                  value={editExpenseAmount}
+                  onChange={(e) => setEditExpenseAmount(Number(e.target.value))}
+                  className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl font-mono font-bold text-[#E11D48] text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-stone-700 mb-1">
+                  বিবরণ / নোট (ঐচ্ছিক)
+                </label>
+                <input
+                  type="text"
+                  value={editExpenseNote}
+                  onChange={(e) => setEditExpenseNote(e.target.value)}
+                  placeholder="যেমন: চকবাজার সোর্সিং রিকশা ভাড়া"
+                  className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditExpenseModalOpen(false);
+                    setEditingExpense(null);
+                  }}
+                  className="px-4 py-2 border border-stone-300 rounded-xl text-stone-700 font-bold hover:bg-stone-50 cursor-pointer"
+                >
+                  বাতিল
+                </button>
+                <button
+                  type="submit"
+                  disabled={editExpenseSaving}
+                  className="px-5 py-2 bg-[#E11D48] hover:bg-[#BE123C] text-white rounded-xl font-bold flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>{editExpenseSaving ? 'আপডেট হচ্ছে...' : '✅ খরচ আপডেট করুন'}</span>
                 </button>
               </div>
             </form>

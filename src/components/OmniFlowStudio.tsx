@@ -38,6 +38,9 @@ import {
   EyeOff,
   ChevronRight,
   Sliders,
+  Copy,
+  ExternalLink,
+  Film,
 } from 'lucide-react';
 import { Product } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -115,6 +118,22 @@ export interface AgentChatMessage {
     awaitingApproval?: boolean;
     approved?: boolean;
   };
+}
+
+export interface GoogleFlowProductionForm {
+  id: string;
+  campaignGoalBn: string;
+  targetPlatform: 'reels_9_16' | 'banner_16_9';
+  productTitleBn: string;
+  productPriceBn: string;
+  productHighlightBn: string;
+  showroomStyleBn: string;
+  cameraMovementBn: string;
+  spokenScriptBn: string;
+  callToActionBn: string;
+  executableFlowPrompt: string;
+  targetModel: 'veo_3' | 'imagen_3' | 'gemini_omni';
+  createdAt: number;
 }
 
 interface OmniFlowStudioProps {
@@ -207,7 +226,7 @@ export const OmniFlowStudio: React.FC<OmniFlowStudioProps> = ({
   products,
   onAttachVideoToProduct,
   defaultBrandName = 'দোকানদারি (Dokandari)',
-  defaultExpandedEditMode = false,
+  defaultExpandedEditMode = true,
 }) => {
   const { firebaseUser, userProfile, signInWithGoogle, signInWithGmailDirect, signOutUser } = useAuth();
   const connectedEmail = firebaseUser?.email || userProfile?.email || '';
@@ -281,6 +300,11 @@ export const OmniFlowStudio: React.FC<OmniFlowStudioProps> = ({
   const [currentScriptBn, setCurrentScriptBn] = useState<string>('');
   const [currentOmniPrompt, setCurrentOmniPrompt] = useState<string>('');
   const [currentScenes, setCurrentScenes] = useState<FlowScene[]>([]);
+
+  // Autonomous Google Flow Production Form Generator State
+  const [activeFlowForm, setActiveFlowForm] = useState<GoogleFlowProductionForm | null>(null);
+  const [isBuildingForm, setIsBuildingForm] = useState<boolean>(false);
+  const [copiedFormNotice, setCopiedFormNotice] = useState<string>('');
 
   // Language-Switching Utility & Structured Prompt-Builder State (Hidden/Collapsed by default for clean UI)
   const [languageMode, setLanguageMode] = useState<AssistantLanguageMode>('bn_strict');
@@ -565,6 +589,175 @@ export const OmniFlowStudio: React.FC<OmniFlowStudioProps> = ({
       setTimeout(() => setStatusBanner(''), 3500);
     }
     e.target.value = '';
+  };
+
+  /**
+   * Autonomous Google Flow Form Generator:
+   * Analyzes the selected product, generates a structured production form with
+   * Campaign Goal, USP, Showroom, Camera Choreography, Bengali Script, CTA,
+   * and Google Flow Executable Prompt (for Veo 3 / Imagen 3).
+   */
+  const handleBuildAutonomousFlowForm = async (overrideTargetProd?: Product) => {
+    setErrorBanner('');
+    setIsBuildingForm(true);
+    setCopiedFormNotice('');
+
+    const targetImages =
+      uploadedImages.length > 0
+        ? uploadedImages
+        : overrideTargetProd?.images?.slice(0, 3) || products[0]?.images?.slice(0, 3) || [];
+
+    const prodTitle =
+      productTitleInput.trim() ||
+      overrideTargetProd?.name ||
+      products[0]?.name ||
+      'দোকানদারি প্রিমিয়াম ক্যাটালগ পণ্য';
+    const prodPrice =
+      productPriceInput.trim() ||
+      (overrideTargetProd?.price ? String(overrideTargetProd.price) : '৭৫০');
+
+    appendStoreLog(
+      'চিত্রনাট্য ও অনুমোদন',
+      `গুগল ফ্লো এআই এজেন্ট "${prodTitle}" পণ্যের তথ্য বিশ্লেষণ করে স্বয়ংক্রিয় ফর্ম তৈরি করছে...`,
+      'info'
+    );
+
+    if (!isFullEditMode) {
+      setIsFullEditMode(true);
+    }
+
+    try {
+      const response = await fetch('/api/flow/agent-plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          images: targetImages,
+          brandName,
+          brandSlogan,
+          showroomStyle: selectedShowroom.labelBn,
+          avatarName: selectedAvatar.nameBn,
+          avatarDesc: `${selectedAvatar.roleBn} (${selectedAvatar.descPrompt})`,
+          productTitle: prodTitle,
+          productPrice: prodPrice,
+          aspectRatio,
+          duration,
+          userCommand: `আমাদের দোকানদারির "${prodTitle}" পণ্যের জন্য একটি স্বয়ংক্রিয় গুগল ফ্লো প্রোডাকশন ফর্ম তৈরি করুন যাতে Veo 3 ভিডিও এবং Imagen 3 ব্যানার তৈরি করা যায়।`,
+        }),
+      });
+
+      const data = await response.json();
+      const detectedTitle = data.detectedProductBn || prodTitle;
+      const scriptBn =
+        data.spokenScriptBn ||
+        `আসসালামু আলাইকুম! ${brandName}-এর অফিশিয়াল শোরুমে আপনাদের স্বাগতম। আজ আপনাদের জন্য নিয়ে এসেছি ${detectedTitle}। ১০০% অরিজিনাল কোয়ালিটি ও আকর্ষণীয় ফিনিশিং। অফার মূল্য মাত্র ৳${prodPrice}! ${brandSlogan}। আজই অর্ডার করুন!`;
+      const flowPrompt =
+        data.omniVideoPrompt ||
+        `Cinematic commercial video of "${detectedTitle}" in an ultra-luxurious soft pink boutique showroom with 3D illuminated metallic sign "${brandName}". Dynamic studio lighting, soft golden spotlights, high-end marble pedestals. Camera smoothly dollies forward, focuses closely on product details with shallow depth of field, 4k photorealistic, elegant presentation.`;
+
+      const newForm: GoogleFlowProductionForm = {
+        id: `flow-form-${Date.now()}`,
+        campaignGoalBn: `ফেসবুক ও টিকটক রিলসে ${detectedTitle} ভাইরাল সেলস ও ব্র্যান্ডিং ক্যাম্পেইন`,
+        targetPlatform: aspectRatio === '9:16' ? 'reels_9_16' : 'banner_16_9',
+        productTitleBn: detectedTitle,
+        productPriceBn: `৳${prodPrice}`,
+        productHighlightBn: `১০০% অরিজিনাল কোয়ালিটি, প্রিমিয়াম ফিনিশিং, দীর্ঘস্থায়ী টেকসই ও ক্যাশ অন ডেলিভারি সুবিধা`,
+        showroomStyleBn: `${selectedShowroom.labelBn} • নরম গোল্ডেন স্পটলাইট ও "${brandName}" থ্রিডি সাইনবোর্ড`,
+        cameraMovementBn: `৩-ফেজ ক্যামেরা শট: ওয়াইড ডলি ইন (০-৩ সে.) -> ৫০মিমি মাইক্রো প্রোডাক্ট ফোকাস (৩-৭ সে.) -> ডায়নামিক স্লো প্যান ও শোরুম আউট্রো (৭-১০ সে.)`,
+        spokenScriptBn: scriptBn,
+        callToActionBn: `সারা দেশে ক্যাশ অন ডেলিভারিতে পেতে এখনই Shop Now বাটনে চাপুন অথবা ইনবক্স করুন!`,
+        executableFlowPrompt: flowPrompt,
+        targetModel: 'veo_3',
+        createdAt: Date.now(),
+      };
+
+      setActiveFlowForm(newForm);
+      setCurrentScriptBn(scriptBn);
+      setCurrentOmniPrompt(flowPrompt);
+      setHasGeneratedPlan(true);
+      setStatusBanner(
+        `⚡ এজেন্ট সফলভাবে "${detectedTitle}"-এর গুগল ফ্লো প্রোডাকশন ফর্ম তৈরি করেছে! নিচে ফর্মটি দেখে এক ক্লিকে Veo 3 ভিডিও তৈরি করুন বা Google Flow অ্যাপে চালান।`
+      );
+      appendStoreLog(
+        'চিত্রনাট্য ও অনুমোদন',
+        `গুগল ফ্লো প্রোডাকশন ফর্ম সফলভাবে তৈরি হয়েছে (Veo 3 ও Imagen 3 রেডি)।`,
+        'success'
+      );
+    } catch {
+      const fallbackTitle = prodTitle;
+      const fallbackScript = `আসসালামু আলাইকুম! ${brandName}-এর অফিশিয়াল শোরুমে আপনাদের স্বাগতম। আজ আপনাদের জন্য নিয়ে এসেছি ${fallbackTitle}। ১০০% অরিজিনাল কোয়ালিটি, মূল্য মাত্র ৳${prodPrice}! ${brandSlogan}। সারা বাংলাদেশে ক্যাশ অন ডেলিভারি!`;
+      const fallbackPrompt = `Cinematic commercial video of "${fallbackTitle}" inside an ultra-luxury modern boutique showroom with 3D glowing "${brandName}" sign on the soft-pink marble wall. Smooth cinematic dolly shot gliding towards the product on a pedestal, natural soft ambient lighting, 4K resolution, hyper-realistic details.`;
+
+      const fallbackForm: GoogleFlowProductionForm = {
+        id: `flow-form-${Date.now()}`,
+        campaignGoalBn: `ফেসবুক ও টিকটক রিলসে ${fallbackTitle} ভাইরাল সেলস ক্যাম্পেইন`,
+        targetPlatform: aspectRatio === '9:16' ? 'reels_9_16' : 'banner_16_9',
+        productTitleBn: fallbackTitle,
+        productPriceBn: `৳${prodPrice}`,
+        productHighlightBn: `১০০% অরিজিনাল কোয়ালিটি, প্রিমিয়াম ফিনিশিং ও হোম ডেলিভারি সুবিধা`,
+        showroomStyleBn: `${selectedShowroom.labelBn} • "${brandName}" শোরুম ব্যাকগ্রাউন্ড`,
+        cameraMovementBn: `ওয়াইড ডলি ইন -> ক্লোজ-আপ ৫০মিমি ডিটেইলস -> স্লো প্যান আউট্রো`,
+        spokenScriptBn: fallbackScript,
+        callToActionBn: `সারা দেশে ক্যাশ অন ডেলিভারিতে পেতে এখনই Shop Now বাটনে চাপুন!`,
+        executableFlowPrompt: fallbackPrompt,
+        targetModel: 'veo_3',
+        createdAt: Date.now(),
+      };
+
+      setActiveFlowForm(fallbackForm);
+      setCurrentScriptBn(fallbackScript);
+      setCurrentOmniPrompt(fallbackPrompt);
+      setHasGeneratedPlan(true);
+      setStatusBanner(`⚡ এজেন্ট সফলভাবে "${fallbackTitle}"-এর গুগল ফ্লো ফর্ম তৈরি করেছে!`);
+    } finally {
+      setIsBuildingForm(false);
+    }
+  };
+
+  /**
+   * Copy the complete Google Flow Production Form & Executable Prompt to Clipboard in 1 Click
+   */
+  const handleCopyFlowFormAndPrompt = () => {
+    if (!activeFlowForm) return;
+    const content = `📋 Google Flow Production Form (গুগল ফ্লো প্রোডাকশন ফর্ম)
+--------------------------------------------------
+🎯 ক্যাম্পেইন গোল: ${activeFlowForm.campaignGoalBn}
+📱 টার্গেট প্ল্যাটফর্ম: ${activeFlowForm.targetPlatform === 'reels_9_16' ? '9:16 রিলস (TikTok / Reels / Shorts)' : '16:9 ব্যানার ও ওয়েবসাইট'}
+📦 পণ্য: ${activeFlowForm.productTitleBn} (${activeFlowForm.productPriceBn})
+⭐ পণ্যের হাইলাইটস: ${activeFlowForm.productHighlightBn}
+🏛️ শোরুম পরিবেশ: ${activeFlowForm.showroomStyleBn}
+🎥 ক্যামেরা কোরিওগ্রাফি: ${activeFlowForm.cameraMovementBn}
+🎙️ বাংলা ভয়েসওভার স্ক্রিপ্ট: ${activeFlowForm.spokenScriptBn}
+📣 কল-টু-অ্যাকশন (CTA): ${activeFlowForm.callToActionBn}
+--------------------------------------------------
+⚡ গুগল ফ্লো এক্সিকিউটেবল প্রম্পট (Veo 3 / Imagen 3 Ready):
+${activeFlowForm.executableFlowPrompt}
+--------------------------------------------------
+সংযুক্ত জিমেইল: ${connectedEmail || 'dokandari.shop@gmail.com'}
+ব্র্যান্ড: ${brandName}`;
+
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(content);
+      setCopiedFormNotice('✅ সম্পূর্ণ ফর্ম ও গুগল ফ্লো প্রম্পট ক্লিপবোর্ডে কপি হয়েছে!');
+      setTimeout(() => setCopiedFormNotice(''), 4500);
+    }
+  };
+
+  /**
+   * Launch official Google Flow Web App (https://flow.google/) with Auto-Copied Prompt
+   */
+  const handleLaunchInGoogleFlowApp = () => {
+    const promptToCopy =
+      activeFlowForm?.executableFlowPrompt || currentOmniPrompt || compiledPromptResult.compiledOmniPrompt;
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(promptToCopy);
+    }
+    setCopiedFormNotice(
+      '🚀 গুগল ফ্লো প্রম্পট কপি হয়েছে এবং অফিসিয়াল Google Flow অ্যাপ খোলা হয়েছে! সেখানে পেস্ট করে Veo 3 বা Imagen 3 মডেল সিলেক্ট করুন।'
+    );
+    setTimeout(() => setCopiedFormNotice(''), 6000);
+    if (typeof window !== 'undefined') {
+      window.open('https://flow.google/', '_blank', 'noopener,noreferrer');
+    }
   };
 
   /**
@@ -1640,14 +1833,14 @@ export const OmniFlowStudio: React.FC<OmniFlowStudioProps> = ({
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <h2 className="text-base sm:text-lg font-extrabold tracking-tight text-rose-950">
-                Google Flow • Gemini Omni 1.1 Flash ও Nano Banana স্টুডিও (সফট পিঙ্ক এডিটর)
+                ⚡ গুগল ফ্লো এআই স্টুডিও (Google Flow AI Studio)
               </h2>
               <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
-                ✓ জিমেইল সাবস্ক্রিপশন সক্রিয় (No Billing Required)
+                ✓ dokandari.shop@gmail.com সাবস্ক্রিপশন ও ক্রেডিট সক্রিয়
               </span>
             </div>
             <p className="text-xs text-rose-900/80 mt-0.5 font-medium">
-              প্রতিটি ফিচার নিচে আলাদা আলাদা বক্সে সাজানো হয়েছে: ১. ক্যাটালগ ছবি নির্বাচন &rarr; ২. ব্র্যান্ড ও শোরুম সেটআপ &rarr; ৩. প্রম্পট ও বাংলা স্ক্রিপ্ট এডিট &rarr; ৪. রিয়েল ভিডিও তৈরি
+              উপলব্ধ মডেল: <strong>Google Veo 3 (ভিডিও)</strong> • <strong>Gemini Omni (মাল্টিমোডাল)</strong> • <strong>Imagen 3 & Nano Banana (ব্যানার)</strong> | এজেন্ট স্বয়ংক্রিয়ভাবে ফর্ম বানাবে এবং ফর্ম অ্যানালাইসিস করে ভিডিও ও ছবি তৈরি করবে।
             </p>
           </div>
         </div>
@@ -1802,13 +1995,13 @@ export const OmniFlowStudio: React.FC<OmniFlowStudioProps> = ({
               { id: 'all_media', label: 'সব মিডিয়া ও এডিটর', icon: Layers, count: mediaItems.length },
               {
                 id: 'images',
-                label: 'শোরুম ছবি (Nano Banana)',
+                label: 'শোরুম ছবি (Imagen 3)',
                 icon: ImageIcon,
                 count: mediaItems.filter((m) => m.type === 'image').length,
               },
               {
                 id: 'videos',
-                label: 'ভিডিও (Omni 1.1)',
+                label: 'ভিডিও (Veo 3 ও Omni)',
                 icon: Video,
                 count: mediaItems.filter((m) => m.type === 'video').length,
               },
@@ -2083,34 +2276,325 @@ export const OmniFlowStudio: React.FC<OmniFlowStudioProps> = ({
               </div>
             </div>
 
-            {/* Primary Step 1 Action Buttons: Generate Prompt & Script + Antigravity Agent API */}
-            <div className="pt-1 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
+            {/* Primary Autonomous Form Generation Buttons */}
+            <div className="pt-1 space-y-2">
               <button
                 type="button"
-                onClick={handleAskBengaliAgentToPlan}
-                disabled={isPlanning || isGeneratingVideo}
-                className="flex-1 py-3 px-4 rounded-xl bg-stone-900 hover:bg-stone-800 text-white text-xs sm:text-sm font-extrabold flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer disabled:opacity-50"
+                onClick={() => handleBuildAutonomousFlowForm()}
+                disabled={isBuildingForm || isPlanning || isGeneratingVideo}
+                className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-[#E11D48] via-rose-600 to-pink-600 hover:from-[#BE123C] hover:to-rose-700 text-white text-xs sm:text-sm font-black flex items-center justify-center gap-2.5 shadow-md transition-all cursor-pointer disabled:opacity-50"
               >
-                <Wand2 className="w-4 h-4 text-rose-400" />
+                <Zap className="w-5 h-5 text-amber-300 animate-bounce" />
                 <span>
-                  {isPlanning
-                    ? 'ছবি বিশ্লেষণ করে বাংলা প্রম্পট ও স্ক্রিপ্ট তৈরি হচ্ছে...'
-                    : '১. প্রম্পট ও বাংলা স্ক্রিপ্ট জেনারেট করুন'}
+                  {isBuildingForm
+                    ? 'এজেন্ট প্রোডাক্ট অ্যানালাইসিস করে গুগল ফ্লো ফর্ম বানাচ্ছে...'
+                    : '⚡ এজেন্ট দিয়ে গুগল ফ্লো ফর্ম তৈরি করুন (Auto Form Generator)'}
                 </span>
               </button>
 
-              <button
-                type="button"
-                onClick={handleRunAntigravityAgent}
-                disabled={isPlanning || isGeneratingVideo}
-                className="py-3 px-4 rounded-xl bg-gradient-to-r from-rose-700 to-[#E11D48] hover:from-rose-800 hover:to-[#BE123C] text-white text-xs font-extrabold flex items-center justify-center gap-1.5 shadow-sm transition-all cursor-pointer disabled:opacity-50"
-                title="Antigravity Agent API (antigravity-preview-09-2026)"
-              >
-                <Bot className="w-4 h-4 text-rose-200" />
-                <span>🤖 Antigravity এজেন্ট রান করুন</span>
-              </button>
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={handleAskBengaliAgentToPlan}
+                  disabled={isPlanning || isGeneratingVideo || isBuildingForm}
+                  className="flex-1 py-2.5 px-3 rounded-xl bg-stone-900 hover:bg-stone-800 text-white text-xs font-extrabold flex items-center justify-center gap-2 shadow-2xs transition-all cursor-pointer disabled:opacity-50"
+                >
+                  <Wand2 className="w-3.5 h-3.5 text-rose-400" />
+                  <span>
+                    {isPlanning
+                      ? 'স্ক্রিপ্ট তৈরি হচ্ছে...'
+                      : '১. প্রম্পট ও স্ক্রিপ্ট তৈরি'}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleRunAntigravityAgent}
+                  disabled={isPlanning || isGeneratingVideo || isBuildingForm}
+                  className="py-2.5 px-3 rounded-xl bg-gradient-to-r from-rose-700 to-[#E11D48] hover:from-rose-800 hover:to-[#BE123C] text-white text-xs font-extrabold flex items-center justify-center gap-1.5 shadow-2xs transition-all cursor-pointer disabled:opacity-50"
+                  title="Antigravity Agent API (antigravity-preview-09-2026)"
+                >
+                  <Bot className="w-3.5 h-3.5 text-rose-200" />
+                  <span>🤖 Antigravity এজেন্ট রান</span>
+                </button>
+              </div>
             </div>
           </div>
+
+          {/* AUTONOMOUS GOOGLE FLOW PRODUCTION FORM CARD */}
+          {activeFlowForm ? (
+            <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-white via-[#FFF5F7] to-[#FFE4E9] border-2 border-rose-400 space-y-4 shadow-md">
+              {/* Header */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-3 border-b-2 border-rose-200">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-[#E11D48] to-pink-600 text-white flex items-center justify-center shadow-xs shrink-0">
+                    <Zap className="w-5 h-5 text-amber-200" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs sm:text-sm font-black text-rose-950">
+                        গুগল ফ্লো স্বয়ংক্রিয় প্রোডাকশন ফর্ম
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full text-[10.5px] font-extrabold bg-[#E11D48] text-white">
+                        AI Agent Generated
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full text-[10.5px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                        Veo 3 & Imagen 3 Ready
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-stone-600 mt-0.5">
+                      আমাদের এজেন্ট নিজে এই ফর্ম বানিয়েছে। এই ফর্ম অ্যানালাইসিস করে নিচে ১-ক্লিকে Veo 3 ভিডিও বা Imagen 3 ব্যানার তৈরি করুন।
+                    </p>
+                  </div>
+                </div>
+
+                {/* Top Quick Action Buttons */}
+                <div className="flex items-center gap-1.5 self-start sm:self-auto shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleCopyFlowFormAndPrompt}
+                    className="px-3 py-1.5 rounded-xl bg-white hover:bg-rose-50 text-[#E11D48] border border-rose-300 text-xs font-bold flex items-center gap-1.5 shadow-2xs cursor-pointer transition-all"
+                    title="সম্পূর্ণ ফর্ম ও প্রম্পট কপি করুন"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>ফর্ম কপি</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleLaunchInGoogleFlowApp}
+                    className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-[#E11D48] to-indigo-600 hover:from-[#BE123C] hover:to-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs cursor-pointer transition-all"
+                    title="অফিশিয়াল flow.google অ্যাপ খুলুন"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Google Flow অ্যাপ</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Copied Notice Banner */}
+              {copiedFormNotice && (
+                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs font-bold flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{copiedFormNotice}</span>
+                </div>
+              )}
+
+              {/* Form Fields Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {/* Field 1: Campaign Goal */}
+                <div className="space-y-1">
+                  <label className="block text-[11px] font-black text-stone-800">
+                    🎯 ক্যাম্পেইন গোল ও টার্গেট প্ল্যাটফর্ম:
+                  </label>
+                  <input
+                    type="text"
+                    value={activeFlowForm.campaignGoalBn}
+                    onChange={(e) =>
+                      setActiveFlowForm({ ...activeFlowForm, campaignGoalBn: e.target.value })
+                    }
+                    className="w-full px-3 py-2 rounded-xl bg-white border border-rose-200 text-xs text-stone-900 font-bold focus:outline-none focus:border-[#E11D48]"
+                  />
+                </div>
+
+                {/* Field 2: Product Name & Price */}
+                <div className="space-y-1">
+                  <label className="block text-[11px] font-black text-stone-800">
+                    📦 পণ্য ও অফার মূল্য:
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={activeFlowForm.productTitleBn}
+                      onChange={(e) =>
+                        setActiveFlowForm({ ...activeFlowForm, productTitleBn: e.target.value })
+                      }
+                      className="flex-1 px-3 py-2 rounded-xl bg-white border border-rose-200 text-xs text-stone-900 font-bold focus:outline-none focus:border-[#E11D48]"
+                    />
+                    <input
+                      type="text"
+                      value={activeFlowForm.productPriceBn}
+                      onChange={(e) =>
+                        setActiveFlowForm({ ...activeFlowForm, productPriceBn: e.target.value })
+                      }
+                      className="w-24 px-3 py-2 rounded-xl bg-white border border-rose-200 text-xs text-[#E11D48] font-black focus:outline-none focus:border-[#E11D48]"
+                    />
+                  </div>
+                </div>
+
+                {/* Field 3: Product Highlights & USP */}
+                <div className="space-y-1 md:col-span-2">
+                  <label className="block text-[11px] font-black text-stone-800">
+                    ⭐ পণ্যের মূল ইউএসপি ও হাইলাইটস (USP):
+                  </label>
+                  <input
+                    type="text"
+                    value={activeFlowForm.productHighlightBn}
+                    onChange={(e) =>
+                      setActiveFlowForm({ ...activeFlowForm, productHighlightBn: e.target.value })
+                    }
+                    className="w-full px-3 py-2 rounded-xl bg-white border border-rose-200 text-xs text-stone-800 focus:outline-none focus:border-[#E11D48]"
+                  />
+                </div>
+
+                {/* Field 4: Showroom & Lighting */}
+                <div className="space-y-1">
+                  <label className="block text-[11px] font-black text-stone-800">
+                    🏛️ শোরুম পরিবেশ ও লাইটিং:
+                  </label>
+                  <input
+                    type="text"
+                    value={activeFlowForm.showroomStyleBn}
+                    onChange={(e) =>
+                      setActiveFlowForm({ ...activeFlowForm, showroomStyleBn: e.target.value })
+                    }
+                    className="w-full px-3 py-2 rounded-xl bg-white border border-rose-200 text-xs text-stone-800 focus:outline-none focus:border-[#E11D48]"
+                  />
+                </div>
+
+                {/* Field 5: Camera Movement */}
+                <div className="space-y-1">
+                  <label className="block text-[11px] font-black text-stone-800">
+                    🎥 ক্যামেরা কোরিওগ্রাফি (ডলি/প্যান/ফোকাস):
+                  </label>
+                  <input
+                    type="text"
+                    value={activeFlowForm.cameraMovementBn}
+                    onChange={(e) =>
+                      setActiveFlowForm({ ...activeFlowForm, cameraMovementBn: e.target.value })
+                    }
+                    className="w-full px-3 py-2 rounded-xl bg-white border border-rose-200 text-xs text-stone-800 focus:outline-none focus:border-[#E11D48]"
+                  />
+                </div>
+
+                {/* Field 6: Bengali Spoken Script */}
+                <div className="space-y-1 md:col-span-2">
+                  <label className="block text-[11px] font-black text-stone-800">
+                    🎙️ ভার্চুয়াল উপস্থাপকের বাংলা ভয়েসওভার স্ক্রিপ্ট:
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={activeFlowForm.spokenScriptBn}
+                    onChange={(e) => {
+                      setActiveFlowForm({ ...activeFlowForm, spokenScriptBn: e.target.value });
+                      setCurrentScriptBn(e.target.value);
+                    }}
+                    className="w-full px-3 py-2 rounded-xl bg-white border border-rose-200 text-xs text-stone-900 leading-relaxed focus:outline-none focus:border-[#E11D48]"
+                  />
+                </div>
+
+                {/* Field 7: Call to Action */}
+                <div className="space-y-1 md:col-span-2">
+                  <label className="block text-[11px] font-black text-stone-800">
+                    📣 কল-টু-অ্যাকশন (CTA):
+                  </label>
+                  <input
+                    type="text"
+                    value={activeFlowForm.callToActionBn}
+                    onChange={(e) =>
+                      setActiveFlowForm({ ...activeFlowForm, callToActionBn: e.target.value })
+                    }
+                    className="w-full px-3 py-2 rounded-xl bg-white border border-rose-200 text-xs text-stone-800 focus:outline-none focus:border-[#E11D48]"
+                  />
+                </div>
+
+                {/* Field 8: Google Flow Executable Prompt */}
+                <div className="space-y-1 md:col-span-2">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-[11px] font-black text-stone-800">
+                      ⚡ গুগল ফ্লো এক্সিকিউটেবল প্রম্পট (Veo 3 / Imagen 3 Ready):
+                    </label>
+                    <span className="text-[10px] text-stone-500 font-mono">
+                      flow.google কম্প্যাটিবল
+                    </span>
+                  </div>
+                  <textarea
+                    rows={3}
+                    value={activeFlowForm.executableFlowPrompt}
+                    onChange={(e) => {
+                      setActiveFlowForm({
+                        ...activeFlowForm,
+                        executableFlowPrompt: e.target.value,
+                      });
+                      setCurrentOmniPrompt(e.target.value);
+                    }}
+                    className="w-full p-3 rounded-xl bg-white border border-rose-200 text-xs font-mono text-stone-900 leading-relaxed focus:outline-none focus:border-[#E11D48]"
+                  />
+                </div>
+              </div>
+
+              {/* 1-Click Execution Action Buttons */}
+              <div className="pt-2 border-t border-rose-200 flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleExecuteRealVideoGeneration(
+                      undefined,
+                      activeFlowForm.productTitleBn,
+                      activeFlowForm.spokenScriptBn,
+                      activeFlowForm.executableFlowPrompt
+                    )
+                  }
+                  disabled={isGeneratingVideo || isPlanning}
+                  className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-[#E11D48] to-rose-600 hover:from-[#BE123C] hover:to-rose-700 text-white text-xs sm:text-sm font-black flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer disabled:opacity-50"
+                >
+                  <Film className="w-4 h-4" />
+                  <span>
+                    {isGeneratingVideo
+                      ? 'Veo 3 ভিডিও তৈরি হচ্ছে...'
+                      : '🎬 এই ফর্ম থেকে Veo 3 ভিডিও তৈরি করুন'}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleGenerateRealShowroomFrameOnly}
+                  disabled={isGeneratingFrame || isGeneratingVideo}
+                  className="py-3 px-4 rounded-xl bg-white hover:bg-rose-50 text-[#E11D48] border-2 border-rose-300 text-xs font-extrabold flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  <ImageIcon className="w-4 h-4" />
+                  <span>
+                    {isGeneratingFrame
+                      ? 'ছবি তৈরি হচ্ছে...'
+                      : '📸 এই ফর্ম থেকে Imagen 3 ব্যানার'}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleLaunchInGoogleFlowApp}
+                  className="py-3 px-4 rounded-xl bg-gradient-to-r from-stone-900 to-indigo-950 hover:bg-black text-white text-xs font-extrabold flex items-center justify-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                  title="flow.google অফিশিয়াল ওয়েবসাইটে প্রম্পট নিয়ে যান"
+                >
+                  <ExternalLink className="w-4 h-4 text-indigo-300" />
+                  <span>🚀 Google Flow-তে পেস্ট করুন</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="p-4 rounded-2xl bg-gradient-to-r from-[#FFF0F3] to-[#FFE4E9] border-2 border-dashed border-rose-300 flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-[#FFE4E9] border border-rose-300 flex items-center justify-center text-[#E11D48] shrink-0">
+                  <Zap className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-xs sm:text-sm font-black text-rose-950">
+                    স্বয়ংক্রিয় গুগল ফ্লো প্রোডাকশন ফর্ম জেনারেটর
+                  </h4>
+                  <p className="text-[11px] text-rose-900/80 mt-0.5">
+                    উপরের <strong>"⚡ এজেন্ট দিয়ে গুগল ফ্লো ফর্ম তৈরি করুন"</strong> বাটনে ক্লিক করলে এজেন্ট নিজে প্রডাক্ট অ্যানালাইসিস করে ফর্ম বানাবে এবং সেই ফর্ম দিয়ে Veo 3 ভিডিও ও Imagen 3 ব্যানার তৈরি করা যাবে।
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleBuildAutonomousFlowForm()}
+                disabled={isBuildingForm}
+                className="px-4 py-2 rounded-xl bg-[#E11D48] hover:bg-[#BE123C] text-white text-xs font-black shrink-0 cursor-pointer shadow-xs"
+              >
+                ফর্ম তৈরি করুন &rarr;
+              </button>
+            </div>
+          )}
 
           {/* FEATURE CARD 2: EDITABLE PROMPT & BENGALI SCRIPT WORKSPACE (Soft Pink Card) */}
           <div className="p-4 sm:p-5 rounded-2xl bg-[#FFE4E9]/65 border-2 border-rose-300 space-y-4 shadow-2xs">
@@ -2164,7 +2648,7 @@ export const OmniFlowStudio: React.FC<OmniFlowStudioProps> = ({
             {/* Editable Omni 1.1 & Nano Banana Video/Image Prompt */}
             <div className="space-y-1.5">
               <label className="block text-xs font-extrabold text-stone-800">
-                🎬 গুগল ওমনি ১.১ ও ন্যানো ব্যানানা ভিডিও/ইমেজ প্রম্পট (এডিট ও মডিফাই করুন):
+                🎬 গুগল ফ্লো (Veo 3 ও Imagen 3) এক্সিকিউটেবল প্রম্পট (এডিট ও মডিফাই করুন):
               </label>
               <textarea
                 rows={4}
@@ -2189,8 +2673,8 @@ export const OmniFlowStudio: React.FC<OmniFlowStudioProps> = ({
                 <Video className="w-4 h-4" />
                 <span>
                   {isGeneratingVideo
-                    ? 'রিয়েল Omni 1.1 ভিডিও তৈরি হচ্ছে...'
-                    : '🎬 ২. রিয়েল Omni 1.1 ভিডিও জেনারেট করুন (100% Real)'}
+                    ? 'Veo 3 / Omni ভিডিও তৈরি হচ্ছে...'
+                    : '🎬 ২. Veo 3 / Omni ভিডিও জেনারেট করুন (100% Real)'}
                 </span>
               </button>
 
@@ -2204,7 +2688,7 @@ export const OmniFlowStudio: React.FC<OmniFlowStudioProps> = ({
                 <span>
                   {isGeneratingFrame
                     ? 'ইমেজ তৈরি হচ্ছে...'
-                    : '🖼️ রিয়েল Nano Banana শোরুম ছবি'}
+                    : '🖼️ Imagen 3 / Nano Banana শোরুম ছবি'}
                 </span>
               </button>
             </div>

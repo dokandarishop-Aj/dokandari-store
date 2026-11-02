@@ -1175,5 +1175,759 @@ export const INITIAL_PRODUCTS: Product[] = [
       '/uploads/product/organic-spice-combo.jpg',
     ],
   },
+  {
+    "id": "dkd-1793441064898-680",
+    "name": "লাক্সারি রাউন্ড ডেকোরেটিভ ওয়াল মিরর - বেভেলড এজ এইচডি রিফ্লেকশন",
+    "titleEn": "Luxury Round Decorative Wall Mirror",
+    "category": "home_decor",
+    "price": 1999,
+    "originalPrice": 2499,
+    "description": "Dokandari আন্তর্জাতিক মানের মাল্টি-ক্যাটাগরি পণ্য। ১০০% অরিজিনাল কোয়ালিটি গ্যারান্টি, সারা বাংলাদেশে ক্যাশ অন ডেলিভারি এবং ডেলিভারি ম্যানের সামনে পার্সেল খুলে দেখে মূল্য পরিশোধের সুবিধা।",
+    "fabric": "HD ক্লিয়ার ফ্লোট গ্লাস ও সেফটি অ্যান্টি-শাটার কোটিং",
+    "sku": "DKD-HOM-4409",
+    "inStock": true,
+    "rating": 5,
+    "reviewCount": 1,
+    "tag": "AI ভেরিফাইড",
+    "status": "published",
+    "variants": {
+      "sizes": [
+        "Standard 18x24 Inch",
+        "Medium 24x36 Inch",
+        "Full Length 24x60 Inch"
+      ],
+      "colors": [
+        "Frameless Beveled Edge",
+        "Gold Metal Frame",
+        "Black Alloy Frame"
+      ]
+    },
+    "features": [
+      "১০০% অরিজিনাল কোয়ালিটি পণ্য",
+      "সারা দেশে ক্যাশ অন ডেলিভারি সুবিধা",
+      "ডেলিভারি ম্যানের সামনে পণ্য দেখে মূল্য পরিশোধ",
+      "৭ দিনের সহজ এক্সচেঞ্জ ও রিটার্ন গ্যারান্টি"
+    ],
+    "images": [
+      "/uploads/product/Gemini_Generated_Image_vid5cyvid5cyvid5.jpg",
+      "/uploads/product/Gemini_Generated_Image_vid5cyvid5cyvid5.jpg",
+      "/uploads/product/Gemini_Generated_Image_vid5cyvid5cyvid5.jpg"
+    ]
+  },
+  {
+    "id": "dkd-1793442168807-962",
+    "name": "খিলান আকৃতির আনব্রেকেবল সেলফ-অ্যাডহেসিভ অ্যাক্রিলিক ওয়াল মিরর",
+    "titleEn": "Arch Unbreakable Mirror Home Wall Decor",
+    "category": "home_decor",
+    "price": 1650,
+    "originalPrice": 2063,
+    "description": "খিলান আকৃতির আনব্রেকেবল সেলফ-অ্যাডহেসিভ অ্যাক্রিলিক ওয়াল মিরর - হোম ডেকোর — Dokandari আন্তর্জাতিক মানের মাল্টি-ক্যাটাগরি পণ্য। ১০০% অরিজিনাল কোয়ালিটি গ্যারান্টি, সারা বাংলাদেশে ক্যাশ অন ডেলিভারি এবং ডেলিভারি ম্যানের সামনে পার্সেল খুলে দেখে মূল্য পরিশোধের সুবিধা।",
+    "fabric": "HD আনব্রেকেবল অ্যাক্রিলিক মিরর ও ওয়াটারপ্রুফ ব্যাক অ্যাডহেসিভ",
+    "sku": "DKD-HOM-5943",
+    "inStock": true,
+    "rating": 5,
+    "reviewCount": 5,
+    "tag": "AI ভেরিফাইড",
+    "status": "published",
+    "variants": {
+      "sizes": [
+        "20x60 cm (Standard Arch)",
+        "30x90 cm (Medium Arch)",
+        "40x120 cm (Full Length)"
+      ],
+      "colors": [
+        "Frameless HD Silver (ফ্রেমলেস সিলভার)",
+        "Warm Gold Border"
+      ]
+    },
+    "features": [
+      "১০০% অরিজিনাল কোয়ালিটি পণ্য",
+      "সারা দেশে ক্যাশ অন ডেলিভারি সুবিধা",
+      "ডেলিভারি ম্যানের সামনে পণ্য দেখে মূল্য পরিশোধ",
+      "৭ দিনের সহজ এক্সচেঞ্জ ও রিটার্ন গ্যারান্টি"
+    ],
+    "images": [
+      "/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg",
+      "/uploads/product/He1e7d0e527634b5196f9d7cd961eb694M.jpg",
+      "/uploads/product/H25ea4841afd5463591250f1d029873acN.jpg"
+    ]
+  },
+  {
+    "id": "dkd-1793442199680-197",
+    "name": "খিলান আকৃতির আনব্রেকেবল সেলফ-অ্যাডহেসিভ অ্যাক্রিলিক ওয়াল মিরর",
+    "titleEn": "Arch Unbreakable Mirror Home Wall Decor Miroir Autocollant Custom Self Adhesive Acrylic Dressing Mirror Wall Sticker Waterproof",
+    "category": "home_decor",
+    "price": 1650,
+    "originalPrice": 2063,
+    "description": "খিলান আকৃতির আনব্রেকেবল সেলফ-অ্যাডহেসিভ অ্যাক্রিলিক ওয়াল মিরর - হোম ডেকোর — Dokandari আন্তর্জাতিক মানের মাল্টি-ক্যাটাগরি পণ্য। ১০০% অরিজিনাল কোয়ালিটি গ্যারান্টি, সারা বাংলাদেশে ক্যাশ অন ডেলিভারি এবং ডেলিভারি ম্যানের সামনে পার্সেল খুলে দেখে মূল্য পরিশোধের সুবিধা।",
+    "fabric": "HD আনব্রেকেবল অ্যাক্রিলিক মিরর ও ওয়াটারপ্রুফ ব্যাক অ্যাডহেসিভ",
+    "sku": "DKD-HOM-9376",
+    "inStock": true,
+    "rating": 5,
+    "reviewCount": 7,
+    "tag": "AI ভেরিফাইড",
+    "status": "published",
+    "variants": {
+      "sizes": [
+        "20x60 cm (Standard Arch)",
+        "30x90 cm (Medium Arch)",
+        "40x120 cm (Full Length)"
+      ],
+      "colors": [
+        "Frameless HD Silver (ফ্রেমলেস সিলভার)",
+        "Warm Gold Border"
+      ]
+    },
+    "features": [
+      "১০০% অরিজিনাল কোয়ালিটি পণ্য",
+      "সারা দেশে ক্যাশ অন ডেলিভারি সুবিধা",
+      "ডেলিভারি ম্যানের সামনে পণ্য দেখে মূল্য পরিশোধ",
+      "৭ দিনের সহজ এক্সচেঞ্জ ও রিটার্ন গ্যারান্টি"
+    ],
+    "images": [
+      "/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg",
+      "/uploads/product/He1e7d0e527634b5196f9d7cd961eb694M.jpg",
+      "/uploads/product/H25ea4841afd5463591250f1d029873acN.jpg"
+    ]
+  },
+  {
+    "id": "dkd-1793519834913-596",
+    "name": "Monster Eye Solar Powered Flashing Light (অরিজিনাল প্রিমিয়াম কোয়ালিটি)",
+    "titleEn": "Monster Eye Solar Powered Flashing Light",
+    "category": "gadgets_electronics",
+    "price": 1490,
+    "originalPrice": 1863,
+    "description": "Monster Eye Solar Powered Flashing Light (অরিজিনাল প্রিমিয়াম কোয়ালিটি) (Monster Eye Solar Powered Flashing Light) — ১০০% অরিজিনাল ইমপোর্টেড কোয়ালিটি গ্যারান্টি। সারা বাংলাদেশে দ্রুত হোম ডেলিভারি এবং ডেলিভারি ম্যানের সামনে পণ্য দেখে মূল্য পরিশোধের সুবিধা।",
+    "fabric": "প্রিমিয়াম এবিএস পলিমার ও রিচার্জেবল লিথিয়াম ব্যাটারি",
+    "sku": "DKD-GAD-7699",
+    "inStock": true,
+    "rating": 5,
+    "reviewCount": 1,
+    "tag": "AI ভেরিফাইড",
+    "status": "published",
+    "variants": {
+      "colors": [
+        "Matte Black",
+        "Pearl White",
+        "Standard Color"
+      ],
+      "sizes": [
+        "Standard Size"
+      ]
+    },
+    "features": [
+      "মডেল ও নাম: Monster Eye Solar Powered Flashing Light",
+      "১০০% অরিজিনাল ও ভেরিফাইড কোয়ালিটি পণ্য",
+      "সারা বাংলাদেশে ক্যাশ অন ডেলিভারি সুবিধা",
+      "ডেলিভারি ম্যানের সামনে পণ্য খুলে দেখে নেওয়ার সুবিধা"
+    ],
+    "images": [
+      "/uploads/product/1776523547-product_image_2130.jpg",
+      "/uploads/product/1777098758-eq34-plus-02-500x500.webp",
+      "/uploads/product/1777788826-1776932024-smart-watch-1.webp"
+    ],
+    "videos": [
+      "https://gv.videocdn.alibaba.com/icbu_vod_video/video_target/gv9f-a9e2b469-8bd1e1ce-9e1511c6-5a91/trans/aidc/mhswct-h264-sd.mp4"
+    ]
+  },
+  {
+    "id": "dkd-1793520258574-946",
+    "name": "Car Warning Light Decorative Light Solar (অরিজিনাল প্রিমিয়াম কোয়ালিটি)",
+    "titleEn": "Car Warning Light Decorative Light Solar",
+    "category": "home_decor",
+    "price": 1650,
+    "originalPrice": 2063,
+    "description": "Car Warning Light Decorative Light Solar (অরিজিনাল প্রিমিয়াম কোয়ালিটি) (Car Warning Light Decorative Light Solar) — ১০০% অরিজিনাল ইমপোর্টেড কোয়ালিটি গ্যারান্টি। সারা বাংলাদেশে দ্রুত হোম ডেলিভারি এবং ডেলিভারি ম্যানের সামনে পণ্য দেখে মূল্য পরিশোধের সুবিধা।",
+    "fabric": "HD আনব্রেকেবল অ্যাক্রিলিক ও ওয়াটারপ্রুফ প্রিমিয়াম ফিনিশ",
+    "sku": "DKD-HOM-5166",
+    "inStock": true,
+    "rating": 5,
+    "reviewCount": 1,
+    "tag": "AI ভেরিফাইড",
+    "status": "published",
+    "variants": {
+      "sizes": [
+        "Standard Size",
+        "Medium Size",
+        "Large Size"
+      ],
+      "colors": [
+        "Silver Mirror",
+        "Warm Gold",
+        "Standard Original"
+      ]
+    },
+    "features": [
+      "মডেল ও নাম: Car Warning Light Decorative Light Solar",
+      "১০০% অরিজিনাল ও ভেরিফাইড কোয়ালিটি পণ্য",
+      "সারা বাংলাদেশে ক্যাশ অন ডেলিভারি সুবিধা",
+      "ডেলিভারি ম্যানের সামনে পণ্য খুলে দেখে নেওয়ার সুবিধা"
+    ],
+    "images": [
+      "/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg",
+      "/uploads/product/1792322414-gemini_generated_image_b9teg6b9teg6b9te.jpg",
+      "/uploads/product/1792322524-gemini_generated_image_6tydck6tydck6tyd.jpg"
+    ],
+    "videos": [
+      "https://gv.videocdn.alibaba.com/icbu_vod_video/video_target/gv9d-8132eb7e-a1ac22a4-9c2cfe81-6e16/trans/aidc/gh6jmf-h264-sd.mp4"
+    ]
+  },
+  {
+    "id": "dkd-1793523979311-833",
+    "name": "নন-গ্লাস আনব্রেকেবল মিরর বেবি হোম ওয়াল সাজসজ্জা স্ব-আঠালো কাস্টম স্ব-আঠালো এক্রাইলিক মিরর ওয়াল স্টিকার",
+    "titleEn": "Non Glass Unbreakable Mirror Baby Home Wall Decor Self Adhesive Custom Self Adhesive Acrylic Mirror Wall Sticker",
+    "category": "home_decor",
+    "price": 850,
+    "originalPrice": 2063,
+    "description": "নন-গ্লাস আনব্রেকেবল মিরর বেবি হোম ওয়াল সাজসজ্জা স্ব-আঠালো কাস্টম স্ব-আঠালো এক্রাইলিক মিরর ওয়াল স্টিকার (Non Glass Unbreakable Mirror Baby Home Wall Decor Self Adhesive Custom Self Adhesive Acrylic Mirror Wall Sticker) — রঙ: সিলভার | আকার:কাস্টম আকার গৃহীত | মিরর বেধ: 2mm/কাস্টমাইজড | বহু উদ্দেশ্য: ওয়াল-মাউন্টেড | সার্টিফিকেট:ISO9001, FCCA, CE, BSCI, ROHS, SCAN, ETC। | ব্যবহারের দৃশ্য: বেডরুম/লিভিং রুম/ড্রেসিং রুম/ক্লোকরুম/লকার রুম | প্যাকেজ: শক্ত কাগজ + ফেনা | লোগো:লোগো নেই | কাস্টমাইজড গ্রহণ করুন | বিচ্ছিন্ন প্রমাণ: ক্রেতার মতে। Dokandari (দোকানদারি) অফিশিয়াল স্টোরের ১০০% অরিজিনাল ও ভেরিফাইড কোয়ালিটি পণ্য। সারা বাংলাদেশে দ্রুত ক্যাশ অন ডেলিভারি এবং ডেলিভারি ম্যানের সামনে পার্সেল খুলে দেখে মূল্য পরিশোধের সুবিধা।",
+    "fabric": "HD আনব্রেকেবল অ্যাক্রিলিক ও ওয়াটারপ্রুফ প্রিমিয়াম ফিনিশ",
+    "sku": "DKD-HOM-6396",
+    "inStock": true,
+    "rating": 5,
+    "reviewCount": 2,
+    "tag": "AI ভেরিফাইড",
+    "status": "published",
+    "variants": {
+      "colors": [
+        "Silver Mirror",
+        "Warm Gold"
+      ],
+      "sizes": [
+        "Standard Size",
+        "Large Size"
+      ]
+    },
+    "features": [
+      "মডেল ও নাম: Non Glass Unbreakable Mirror Baby Home Wall Decor Self Adhesive Custom Self Adhesive Acrylic Mirror Wall Sticker",
+      "স্পেসিফিকেশন: রঙ: সিলভার | আকার:কাস্টম আকার গৃহীত | মিরর বেধ: 2mm/কাস্টমাইজড | বহু উদ্দেশ্য: ওয়াল-মাউন্টেড | সার্টিফিকেট:ISO9001, FCCA, CE, BSCI, ROHS, S",
+      "Dokandari ১০০% অরিজিনাল ও ভেরিফাইড কোয়ালিটি পণ্য",
+      "সারা বাংলাদেশে ক্যাশ অন ডেলিভারি ও দেখে নেওয়ার সুবিধা"
+    ],
+    "images": [
+      "https://sc04.alicdn.com/kf/Haab1c496f92f47f7a2aefb4925608bd47.png",
+      "https://sc04.alicdn.com/kf/H5b44962a267b4f5fa83b94614e850bd3K.jpg",
+      "https://sc04.alicdn.com/kf/H6d08f569273b4775929844905c75e839v.jpg",
+      "https://sc04.alicdn.com/kf/H7f3f4a9cb2ad4b8fa03d98476d0a94f3Z.jpg",
+      "https://sc04.alicdn.com/kf/H8d373756ee914dc585e8d240faff843aA.jpg",
+      "https://sc04.alicdn.com/kf/Haba5b3115a154ebabbc7addf5fb8102bI.jpg"
+    ],
+    "videos": [
+      "https://gv.videocdn.alibaba.com/icbu_vod_video/video_target/gv94-05e050b5-a1ace553-93b8a4ce-7c2d/trans/aidc/e1jici-h264-sd.mp4"
+    ]
+  },
+  {
+    "id": "dkd-1793610538096-571",
+    "name": "ব্যবসা এবং বাড়ির সাজসজ্জার জন্য কাস্টম সোশ্যাল মিডিয়া প্রোফাইল সম্পূর্ণ দৈর্ঘ্যের আয়না | ভাইরাল ওমেন বিডি",
+    "titleEn": "ব্যবসা এবং বাড়ির সাজসজ্জার জন্য কাস্টম সোশ্যাল মিডিয়া প্রোফাইল সম্পূর্ণ দৈর্ঘ্যের আয়না",
+    "category": "home_decor",
+    "price": 999,
+    "originalPrice": 1249,
+    "description": "ব্যবসা এবং বাড়ির সাজসজ্জার জন্য কাস্টম সোশ্যাল মিডিয়া প্রোফাইল সম্পূর্ণ দৈর্ঘ্যের আয়না | ভাইরাল ওমেন বিডি (Custom Social Media Profile Full-Length Mirror for Business &amp; Home Decor | Viral Woman BD) — আপনার অনলাইন বিজনেস, শোরুম বা পার্সোনাল রুমের জন্য নিয়ে এলাম প্রিমিয়াম কোয়ালিটির কাস্টম প্রোফাইল মিরর। আপনার ফেসবুক পেজ, ইনস্টাগ্রাম ইউজারনেম বা ব্র্যান্ড লোগো দিয়ে আয়নাটি কাস্টমাইজ করে নিতে পারবেন। এটি নিখুঁত প্রিন্টিং এবং হাই-কোয়ালিটি গ্লাস দিয়ে তৈরি, যা আপনার স্পেসকে দিবে একটি প্রফেশনাল ভাইব। সহজে দেয়ালে ফিটিং করার সুবিধা রয়েছে। সারা বাংলাদেশে ক্যাশ অন ডেলিভারি সুবিধা রয়েছে।। Dokandari (দোকানদারি) অফিশিয়াল স্টোরের ১০০% অরিজিনাল ও ভেরিফাইড কোয়ালিটি পণ্য। সারা বাংলাদেশে দ্রুত ক্যাশ অন ডেলিভারি এবং ডেলিভারি ম্যানের সামনে পার্সেল খুলে দেখে মূল্য পরিশোধের সুবিধা।",
+    "fabric": "HD আনব্রেকেবল অ্যাক্রিলিক ও ওয়াটারপ্রুফ প্রিমিয়াম ফিনিশ",
+    "sku": "DKD-HOM-4200",
+    "inStock": true,
+    "rating": 5,
+    "reviewCount": 1,
+    "tag": "AI ভেরিফাইড",
+    "status": "published",
+    "variants": {
+      "colors": [
+        "অরিজিনাল কালার (Original Picture Color)"
+      ],
+      "sizes": [
+        "স্ট্যান্ডার্ড সাইজ (Standard Pack)"
+      ]
+    },
+    "features": [
+      "মডেল ও নাম: Custom Social Media Profile Full-Length Mirror for Business &amp; Home Decor | Viral Woman BD",
+      "স্পেসিফিকেশন: আপনার অনলাইন বিজনেস, শোরুম বা পার্সোনাল রুমের জন্য নিয়ে এলাম প্রিমিয়াম কোয়ালিটির কাস্টম প্রোফাইল মিরর। আপনার ফেসবুক পেজ, ইনস্টাগ্রাম ইউজারনে",
+      "Dokandari ১০০% অরিজিনাল ও ভেরিফাইড কোয়ালিটি পণ্য",
+      "সারা বাংলাদেশে ক্যাশ অন ডেলিভারি ও দেখে নেওয়ার সুবিধা"
+    ],
+    "images": [
+      "/uploads/product/dkd-1793610538096-571-0.jpg",
+      "/uploads/product/dkd-1793610538096-571-1.jpg",
+      "/uploads/product/dkd-1793610538096-571-2.jpg"
+    ],
+    "videos": [
+      "https://www.youtube.com/shorts/AxWtyMdWRLw"
+    ]
+  },
+  {
+    "id": "dkd-1793611408928-666",
+    "name": "স্ব-আঠালো এক্রাইলিক মিরর ওয়াল স্টিকার - অনন্য আকার (প্রজাপতি, বিড়াল, হার্ট এবং স্কোয়ার)",
+    "titleEn": "স্ব-আঠালো এক্রাইলিক মিরর ওয়াল স্টিকার - অনন্য আকার (প্রজাপতি, বিড়াল, হার্ট এবং স্কোয়ার)",
+    "category": "home_decor",
+    "price": 599,
+    "originalPrice": 749,
+    "description": "স্ব-আঠালো এক্রাইলিক মিরর ওয়াল স্টিকার - অনন্য আকার (প্রজাপতি, বিড়াল, হার্ট এবং স্কোয়ার) (Self-Adhesive Acrylic Mirror Wall Sticker - Unique Shapes (Butterfly, Cat, Heart & Square)) — ঘরের সৌন্দর্য বহুগুণ বাড়িয়ে তুলতে নিয়ে এলাম প্রিমিয়াম কোয়ালিটির Self-Adhesive Acrylic Mirror Wall Stickers । এটি দেয়ালে বা যেকোনো মসৃণ জায়গায় সহজে লাগানো যায় এবং ঘরের লুকে নিয়ে আসে এক ডাইনামিক ও আভিজাত্যের ছোঁয়া । এইচডি ক্লিয়ার রিফ্লেকশন (HD Reflection): উচ্চমানের এক্রিলিক দিয়ে তৈরি, যা স্পষ্ট প্রতিবিম্ব প্রদান করে । সহজে ইনস্টলেশন (Self-Adhesive & Easy to Install): কোনো ড্রিল বা পেরেক মারার প্রয়োজন নেই । সাথে দেওয়া ডাবল-সাইড গ্লু দিয়ে সহজেই ইনস্টল করা যায় । নিরাপদ ও ভাঙবে না (Shatterproof & Safe): সাধারণ কাঁচের মতো ভেঙে যাওয়ার ভয় নেই, ফলে ছোট শিশুদের ঘরের জন্যও পুরোপুরি নিরাপদ । মাল্টি-পারপ। Dokandari (দোকানদারি) অফিশিয়াল স্টোরের ১০০% অরিজিনাল ও ভেরিফাইড কোয়ালিটি পণ্য। সারা বাংলাদেশে দ্রুত ক্যাশ অন ডেলিভারি এবং ডেলিভারি ম্যানের সামনে পার্সেল খুলে দেখে মূল্য পরিশোধের সুবিধা।",
+    "fabric": "HD আনব্রেকেবল অ্যাক্রিলিক ও ওয়াটারপ্রুফ প্রিমিয়াম ফিনিশ",
+    "sku": "DKD-HOM-8742",
+    "inStock": true,
+    "rating": 5,
+    "reviewCount": 6,
+    "tag": "AI ভেরিফাইড",
+    "status": "published",
+    "variants": {
+      "sizes": [
+        "Standard Size",
+        "Large Size"
+      ],
+      "colors": [
+        "Silver Mirror",
+        "Warm Gold"
+      ]
+    },
+    "features": [
+      "মডেল ও নাম: Self-Adhesive Acrylic Mirror Wall Sticker - Unique Shapes (Butterfly, Cat, Heart & Square)",
+      "স্পেসিফিকেশন: ঘরের সৌন্দর্য বহুগুণ বাড়িয়ে তুলতে নিয়ে এলাম প্রিমিয়াম কোয়ালিটির Self-Adhesive Acrylic Mirror Wall Stickers । এটি দেয়ালে বা যেকোনো মসৃণ জায়গ",
+      "Dokandari ১০০% অরিজিনাল ও ভেরিফাইড কোয়ালিটি পণ্য",
+      "সারা বাংলাদেশে ক্যাশ অন ডেলিভারি ও দেখে নেওয়ার সুবিধা"
+    ],
+    "images": [
+      "/uploads/product/dkd-1793611408928-666-0.jpg",
+      "/uploads/product/dkd-1793611408928-666-1.jpg",
+      "/uploads/product/dkd-1793611408928-666-2.jpg"
+    ]
+  },
+  {
+    "id": "dkd-1793613621412-332",
+    "name": "Seven Herbs White Handmade Glycerin Soap Mite Removal Back Acne Treatment Oil Control Long-Lasting Fragrance — ডোকানদারি অরিজিনাল কালেকশন",
+    "titleEn": "Seven Herbs White Handmade Glycerin Soap Mite Removal Back Acne Treatment Oil Control Long-Lasting Fragrance — ডোকানদারি অরিজিনাল কালেকশন",
+    "category": "beauty_personal_care",
+    "price": 599,
+    "originalPrice": 3125,
+    "description": "Seven Herbs White Handmade Glycerin Soap Mite Removal Back Acne Treatment Oil Control Long-Lasting Fragrance — ডোকানদারি অরিজিনাল কালেকশন — Packaging:Basic packaging | style:Bar Soap | handmade:Yes | ingredient:Glycerin | Skin Type:normal skin | Skin Type:All skin types | place of origin:CN | model number:1 | type:Cleansing soap | Logo/Pattern:None | form:Solid state | Application:Face and body washing | feature:Mite removal, oil control, long-lasting fragrance | Shelf Life:Three years। Dokandari (দোকানদারি) অফিশিয়াল স্টোরের ১০০% অরিজিনাল প্রোডাক্ট গ্যারান্টি, সারা বাংলাদেশে ক্যাশ অন ডেলিভারি এবং ডেলিভারি ম্যানের সামনে পার্সেল খুলে দেখে মূল্য পরিশোধের সুবিধা।",
+    "fabric": "১০০% ন্যাচারাল বোটানিক্যাল এক্সট্র্যাক্ট ও ডার্মাটোলজিক্যালি টেস্টেড ফর্মুলা",
+    "sku": "DKD-BEA-2480",
+    "inStock": true,
+    "rating": 5,
+    "reviewCount": 2,
+    "tag": "AI ভেরিফাইড",
+    "status": "published",
+    "variants": {
+      "sizes": [
+        "Standard Size"
+      ],
+      "colors": [
+        "১ পিস অরিজিনাল প্যাক",
+        "২ পিস কম্বো প্যাক"
+      ]
+    },
+    "features": [
+      "মডেল ও নাম: Seven Herbs White Handmade Glycerin Soap Mite Removal Back Acne Treatment Oil Control Long-Lasting Fragrance",
+      "Dokandari ১০০% অরিজিনাল ও ভেরিফাইড কোয়ালিটি পণ্য",
+      "সারা বাংলাদেশে ক্যাশ অন ডেলিভারি ও দেখে নেওয়ার সুবিধা"
+    ],
+    "images": [
+      "/uploads/product/dkd-1793613621412-332-0.webp",
+      "/uploads/product/dkd-1793613621412-332-1.webp",
+      "/uploads/product/dkd-1793613621412-332-2.webp"
+    ]
+  },
+  {
+    "id": "dkd-1793613770498-186",
+    "name": "Skin Brightening Soap Alpha Arbutin Tranexamic Acid Gentle Cleansing Face Body Whitening Soap — ডোকানদারি অরিজিনাল কালেকশন",
+    "titleEn": " Skin Brightening Soap Alpha Arbutin Tranexamic Acid Gentle Cleansing Face Body Whitening Soap — ডোকানদারি অরিজিনাল কালেকশন",
+    "category": "beauty_personal_care",
+    "price": 599,
+    "originalPrice": 1829,
+    "description": "Skin Brightening Soap Alpha Arbutin Tranexamic Acid Gentle Cleansing Face Body Whitening Soap — ডোকানদারি অরিজিনাল কালেকশন — style:Bar Soap | handmade:No | transparent:No | medicated:No | ingredient:Other | place of origin:CN | Logo/Pattern:None | type:niacinamide soap | form:soap | feature:brightening, acne control, anti-inflammatory, soothing | model number:PC001 | Shelf Life:None | Skin Type:None। Dokandari (দোকানদারি) অফিশিয়াল স্টোরের ১০০% অরিজিনাল প্রোডাক্ট গ্যারান্টি, সারা বাংলাদেশে ক্যাশ অন ডেলিভারি এবং ডেলিভারি ম্যানের সামনে পার্সেল খুলে দেখে মূল্য পরিশোধের সুবিধা।",
+    "fabric": "১০০% ন্যাচারাল বোটানিক্যাল এক্সট্র্যাক্ট ও ডার্মাটোলজিক্যালি টেস্টেড ফর্মুলা",
+    "sku": "DKD-BEA-2489",
+    "inStock": true,
+    "rating": 5,
+    "reviewCount": 1,
+    "tag": "AI ভেরিফাইড",
+    "status": "published",
+    "variants": {
+      "colors": [
+        "১ পিস অরিজিনাল প্যাক",
+        "২ পিস কম্বো প্যাক"
+      ],
+      "sizes": [
+        "Standard Size"
+      ]
+    },
+    "features": [
+      "মডেল ও নাম: Private Label Niacinamide Skin Brightening Soap Alpha Arbutin Tranexamic Acid Gentle Cleansing Face Body Whitening Soap",
+      "Dokandari ১০০% অরিজিনাল ও ভেরিফাইড কোয়ালিটি পণ্য",
+      "সারা বাংলাদেশে ক্যাশ অন ডেলিভারি ও দেখে নেওয়ার সুবিধা"
+    ],
+    "images": [
+      "/uploads/product/dkd-1793613770498-186-0.webp",
+      "/uploads/product/dkd-1793613770498-186-1.webp",
+      "/uploads/product/dkd-1793613770498-186-2.webp",
+      "/uploads/product/dkd-1793613770498-186-3.webp",
+      "/uploads/product/dkd-1793613770498-186-4.webp"
+    ]
+  },
+  {
+    "id": "dkd-anc-wireless-earbuds-pro",
+    "name": "প্রো ট্রু ওয়্যারলেস ব্লুটুথ ইয়ারবাডস - অ্যাক্টিভ নয়েজ ক্যান্সেলেশন ও ডিপ বেস",
+    "titleEn": "Pro TWS Wireless ANC Earbuds with Spatial Audio",
+    "category": "gadgets_electronics",
+    "price": 2450,
+    "originalPrice": 3499,
+    "description": "প্রো কোয়ালিটি অ্যাক্টিভ নয়েজ ক্যান্সেলেশন (ANC) ও এনভায়রনমেন্টাল নয়েজ ক্যান্সেলেশন (ENC) ট্রু ওয়্যারলেস স্টেরিও ইয়ারবাডস। গেমিং ও মিউজিকের জন্য আল্ট্রা লো-লেটেন্সি এবং ২৪ ঘণ্টা ব্যাটারি ব্যাকআপ।",
+    "fabric": "অ্যালুমিনিয়াম অ্যালয় চার্জিং কেস ও ম্যাট ফিনিশ",
+    "sku": "DKD-GAD-02",
+    "inStock": true,
+    "rating": 5,
+    "reviewCount": 94,
+    "tag": "টপ ট্রেন্ডিং",
+    "status": "published",
+    "variants": {
+      "sizes": [
+        "Universal In-Ear (S, M, L Tips)"
+      ],
+      "colors": [
+        "Space Grey",
+        "Matte Black",
+        "Pearl White"
+      ]
+    },
+    "features": [
+      "৩৫ ডেসিবল পর্যন্ত হাইব্রিড অ্যাক্টিভ নয়েজ ক্যান্সেলেশন",
+      "ব্লুটুথ ৫.৩ স্টেবল কানেক্টিভিটি ও হাই-ফাই স্টুডিও সাউন্ড",
+      "এক চার্জে ৮ ঘণ্টা এবং কেস সহ মোট ২৮ ঘণ্টা প্লেটাইম"
+    ],
+    "images": [
+      "https://images.unsplash.com/photo-1590658268037-6bf12165a8df?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1590658268037-6bf12165a8df?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1590658268037-6bf12165a8df?auto=format&fit=crop&w=1200&q=80"
+    ]
+  },
+  {
+    "id": "dkd-deep-tissue-massage-gun",
+    "name": "প্রফেশনাল ডিপ টিস্যু পারকাশন ম্যাসাজ গান - ৬ স্পিড ও ৪টি ইন্টারচেঞ্জেবল হেড",
+    "titleEn": "Professional Deep Tissue Percussion Muscle Massage Gun",
+    "category": "health_fitness",
+    "price": 2250,
+    "originalPrice": 3200,
+    "description": "শরীর ও মাংসপেশির ব্যথা দূর করতে, ওয়ার্কআউট পরবর্তী রিকভারির জন্য শক্তিশালী পারকাশন থেরাপি ম্যাসাজ গান। সাইলেন্ট ব্রাশলেস মোটর ও দীর্ঘস্থায়ী ব্যাটারি।",
+    "fabric": "শক-অ্যাবজরবিং সিলিকন গ্রিপ ও প্রিমিয়াম অ্যালয় বডি",
+    "sku": "DKD-FIT-09",
+    "inStock": true,
+    "rating": 5,
+    "reviewCount": 31,
+    "tag": "ফিটনেস",
+    "status": "published",
+    "variants": {
+      "colors": [
+        "Carbon Black",
+        "Metallic Red",
+        "Silver Grey"
+      ],
+      "sizes": [
+        "Pro Edition with 4 Attachments"
+      ]
+    },
+    "features": [
+      "৩২০০০ আরপিএম হাই-টর্ক ব্রাশলেস মোটর উইথ কোয়াইট গ্লাইড টেকনোলজি",
+      "৪টি ভিন্ন বডি পার্টের জন্য কাস্টমাইজড ম্যাসাজ হেডস",
+      "টাইপ-সি ফাস্ট রিচার্জেবল ২৫০০ mAh লিথিয়াম ব্যাটারি"
+    ],
+    "images": [
+      "https://images.unsplash.com/photo-1517838277536-f5f99be501cd?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1517838277536-f5f99be501cd?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1517838277536-f5f99be501cd?auto=format&fit=crop&w=1200&q=80"
+    ]
+  },
+  {
+    "id": "dkd-electric-chopper-grinder",
+    "name": "মাল্টিফাংশন ৪-ব্লেড ইলেকট্রিক ফুড চপার, মিট গ্রাইন্ডার ও কিচেন প্রসেসর",
+    "titleEn": "Stainless Steel 2L Electric Meat Grinder & Food Chopper",
+    "category": "home_kitchen",
+    "price": 1650,
+    "originalPrice": 2200,
+    "description": "শক্তিশালী ৩০০ ওয়াট কপার মোটর এবং ৪টি ধারালো এস-শেপ স্টেইনলেস স্টিল ব্লেড। মাত্র ৫ সেকেন্ডে মাংস কিমা, পেঁয়াজ, রসুন, আদা ও শাকসবজি নিখুঁত কুচি করার অত্যাধুনিক সমাধান।",
+    "fabric": "ফুড গ্রেড ৩০৪ স্টেইনলেস স্টিল বোল ও এবিএস হাউজিং",
+    "sku": "DKD-KIT-05",
+    "inStock": true,
+    "rating": 5,
+    "reviewCount": 45,
+    "tag": "স্মার্ট কিচেন",
+    "status": "published",
+    "variants": {
+      "colors": [
+        "Silver Stainless Steel",
+        "Rose Gold Limited Edition"
+      ],
+      "sizes": [
+        "2.0 Litre Capacity",
+        "3.0 Litre Family Size"
+      ]
+    },
+    "features": [
+      "৩০০W পিউর কপার মোটর উইথ থার্মাল ওভারহিট প্রোটেকশন",
+      "খাবারের বিশুদ্ধতা নিশ্চিত করতে ২ লিটার ফুড-গ্রেড স্টিল বোল",
+      "২ স্পিড মোড — সফট সবজি ও শক্ত মাংসের জন্য আলাদা কন্ট্রোল"
+    ],
+    "images": [
+      "https://images.unsplash.com/photo-1556911220-e15b29be8c8f?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1556911220-e15b29be8c8f?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1556911220-e15b29be8c8f?auto=format&fit=crop&w=1200&q=80"
+    ]
+  },
+  {
+    "id": "dkd-ergonomic-baby-carrier",
+    "name": "এরগনোমিক মাল্টি-পজিশন ব্রিদেবল বেবি ক্যারিয়ার উইথ হিপ সিট",
+    "titleEn": "Ergonomic 6-in-1 Baby Hip Seat Carrier with Lumbar Support",
+    "category": "kids_baby",
+    "price": 1950,
+    "originalPrice": 2800,
+    "description": "শিশুর আরাম ও মা-বাবার পিঠের সুরক্ষায় এরগনোমিক এম-শেপ হিপ সিট ক্যারিয়ার। ৩ থেকে ৩৬ মাস বয়সী শিশুদের জন্য ৬টি ভিন্ন পজিশনে ব্যবহারযোগ্য।",
+    "fabric": "১০০% ব্রিদেবল ৩ডি মেশ ও ন্যাচারাল কটন",
+    "sku": "DKD-KID-10",
+    "inStock": true,
+    "rating": 5,
+    "reviewCount": 46,
+    "tag": "প্যারেন্টিং",
+    "status": "published",
+    "variants": {
+      "sizes": [
+        "Universal Adjustable (0-36 Months / Up to 20kg)"
+      ],
+      "colors": [
+        "Soft Mint Green",
+        "Classic Denim Blue",
+        "Light Coral"
+      ]
+    },
+    "features": [
+      "আন্তর্জাতিক প্যাডিয়াট্রিক চিকিৎসকদের দ্বারা স্বীকৃত এরগনোমিক এম-পজিশন সিট",
+      "ভারসাম্য বজায় রেখে কাঁধ ও কোমরের চাপ কমাতে ওয়াইড কুশন স্ট্র্যাপ",
+      "দুধের বোতল, ডায়াপার ও ফোন রাখার উপযোগী মাল্টিপল ইউটিলিটি পকেট"
+    ],
+    "images": [
+      "https://images.unsplash.com/photo-1515488042361-ee00e0ddd4e4?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1515488042361-ee00e0ddd4e4?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1515488042361-ee00e0ddd4e4?auto=format&fit=crop&w=1200&q=80"
+    ]
+  },
+  {
+    "id": "dkd-expandable-travel-backpack",
+    "name": "ওয়াটারপ্রুফ অ্যান্টি-থেফট এক্সপান্ডেবল ট্রাভেল ও বিজনেস ব্যাকপ্যাক",
+    "titleEn": "Waterproof Expandable 40L Carry-On Travel Backpack with Laptop Sleeve",
+    "category": "travel_outdoor",
+    "price": 2750,
+    "originalPrice": 3800,
+    "description": "আন্তর্জাতিক ফ্লাইটের কেবিন সাইজ অনুমোদিত ৪০ লিটার এক্সপান্ডেবল ব্যাকপ্যাক। ১৭ ইঞ্চি ল্যাপটপ স্লিপ, জুতো রাখার আলাদা পকেট এবং ওয়াটারপ্রুফ ড্রিম ফ্যাব্রিক।",
+    "fabric": "হাই-ডেনসিটি ওয়াটারপ্রুফ অক্সফোর্ড ও পলিয়েস্টার কোটিং",
+    "sku": "DKD-TRV-08",
+    "inStock": true,
+    "rating": 5,
+    "reviewCount": 39,
+    "tag": "এক্সক্লুসিভ",
+    "status": "published",
+    "variants": {
+      "sizes": [
+        "30L Normal (Expandable to 40L)"
+      ],
+      "colors": [
+        "Charcoal Black",
+        "Navy Blue",
+        "Military Green"
+      ]
+    },
+    "features": [
+      "১৮০ ডিগ্রি স্যুটকেস-স্টাইল ওপেনিং সিস্টেম",
+      "ইউএসবি ফাস্ট চার্জিং পোর্ট ও লাগেজ ট্রলি স্ট্র্যাপ",
+      "হিডেন অ্যান্টি-থেফট ব্যাক পকেট ও টিএসএ লক স্লট"
+    ],
+    "images": [
+      "https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=1200&q=80"
+    ]
+  },
+  {
+    "id": "dkd-herbal-brightening-soap",
+    "name": "কিউবাই সেভেন হোয়াইট হারবাল স্কিন ব্রাইটেনিং ও ডিপ ক্লেন্সিং ফেসিয়াল সোপ",
+    "titleEn": "Seven White Herbs & Centella Deep Cleansing Facial Bar",
+    "category": "beauty_personal_care",
+    "price": 699,
+    "originalPrice": 950,
+    "description": "সাতটি দুর্লভ প্রাকৃতিক ঔষধি উদ্ভিদ ও সেন্টেলা এশিয়াটিকা সমৃদ্ধ ডিপ ক্লিনিং অর্গানিক সোপ। ত্বক মসৃণ, সতেজ ও প্রাকৃতিকভাবে উজ্জ্বল রাখতে কার্যকর।",
+    "fabric": "১০০% ন্যাচারাল হারবাল এক্সট্র্যাক্ট ও কোল্ড-প্রেসড অয়েল",
+    "sku": "DKD-BTY-04",
+    "inStock": true,
+    "rating": 5,
+    "reviewCount": 112,
+    "tag": "বেস্ট সেলিং",
+    "status": "published",
+    "variants": {
+      "sizes": [
+        "100g Bar"
+      ],
+      "colors": [
+        "১ পিস রেগুলার",
+        "২ পিস কম্বো প্যাক",
+        "৩ পিস ফ্যামিলি অফার"
+      ]
+    },
+    "features": [
+      "ন্যাচারাল হারবাল ফর্মুলা, কোনো ক্ষতিকর কেমিক্যাল মুক্ত",
+      "অতিরিক্ত তেল ও ধুলাবালি দূর করে স্কিন ব্যারিয়ার সুরক্ষিত রাখে",
+      "নারী-পুরুষ উভয়ের ত্বকের জন্য শতভাগ নিরাপদ ও উপযোগী"
+    ],
+    "images": [
+      "https://images.unsplash.com/photo-1601049541289-9b1b7bbbfe19?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1601049541289-9b1b7bbbfe19?auto=format&fit=crop&w=1200&q=80"
+    ]
+  },
+  {
+    "id": "dkd-insulated-thermal-flask",
+    "name": "স্মার্ট টেম্পারেচার ডিসপ্লে ভ্যাকুয়াম ইনসুলেটেড থার্মাল ফ্লাস্ক বোতল (৭৫০ মিলি)",
+    "titleEn": "Smart LED Temperature Display Vacuum Insulated Flask 750ml",
+    "category": "lifestyle",
+    "price": 890,
+    "originalPrice": 1350,
+    "description": "স্মার্ট এলইডি টাচ স্ক্রিন টেম্পারেচার ডিসপ্লে যুক্ত ডাবল-ওয়াল ভ্যাকুয়াম ইনসুলেটেড বোতল। ২৪ ঘণ্টা বরফ ঠান্ডা ও ১২ ঘণ্টা গরম রাখার আন্তর্জাতিক কোয়ালিটি।",
+    "fabric": "ফুড-গ্রেড ৩০৪ স্টেইনলেস স্টিল ডাবল ওয়াল ইনসুলেশন",
+    "sku": "DKD-LFT-07",
+    "inStock": true,
+    "rating": 5,
+    "reviewCount": 52,
+    "tag": "ট্রেন্ডিং",
+    "status": "published",
+    "variants": {
+      "colors": [
+        "Matte Black",
+        "Emerald Green",
+        "Pastel Pink",
+        "Royal Blue"
+      ],
+      "sizes": [
+        "500ml Compact",
+        "750ml Standard",
+        "1000ml Large"
+      ]
+    },
+    "features": [
+      "এলইডি টাচ স্ক্রিনে রিয়েল-টাইম তরলের তাপমাত্রা প্রদর্শন",
+      "১০০% লিক-প্রুফ ফুড-গ্রেড সিলিকন সিল লক ক্যাপ",
+      "অফিস, জিম, স্পোর্টস ও ভ্রমণের জন্য আদর্শ লাইফস্টাইল বোতল"
+    ],
+    "images": [
+      "https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?auto=format&fit=crop&w=1200&q=80"
+    ]
+  },
+  {
+    "id": "dkd-magnetic-powerbank-10000",
+    "name": "ম্যাগনেটিক ওয়্যারলেস ফাস্ট চার্জিং পাওয়ার ব্যাংক ১০০০০ mAh - টাইপ-সি পিডি ২০W",
+    "titleEn": "10000mAh Magnetic Wireless Fast Charging Power Bank 20W PD",
+    "category": "mobile_accessories",
+    "price": 1950,
+    "originalPrice": 2750,
+    "description": "স্মার্ট স্লিম পকেট সাইজ ম্যাগনেটিক পাওয়ার ব্যাংক। আইফোন ও স্যামসাং সহ যেকোনো কিউআই ওয়্যারলেস সমর্থিত ফোনের পেছনে শক্তিশালী ম্যাগনেটে আটকে চার্জ করার আধুনিক ডিভাইস।",
+    "fabric": "ফায়ারপ্রুফ পলিকার্বনেট ও অ্যালুমিনিয়াম ম্যাগনেটিক রিং",
+    "sku": "DKD-MOB-06",
+    "inStock": true,
+    "rating": 5,
+    "reviewCount": 88,
+    "tag": "পপুলার",
+    "status": "published",
+    "variants": {
+      "sizes": [
+        "10,000 mAh Ultra Slim",
+        "20,000 mAh High Capacity"
+      ],
+      "colors": [
+        "Titanium Grey",
+        "Deep Navy Blue",
+        "Matte White"
+      ]
+    },
+    "features": [
+      "১৫W ওয়্যারলেস চার্জিং এবং ২০W টাইপ-সি পিডি ফাস্ট আউটপুট",
+      "শক্তিশালী ম্যাগনেটিক গ্রিপ — চার্জ চলাকালে একহাতে ফোন ব্যবহার",
+      "এলইডি ডিজিটাল ডিসপ্লেতে নিখুঁত ব্যাটারি পার্সেন্টেজ শো"
+    ],
+    "images": [
+      "https://images.unsplash.com/photo-1584438784894-089d6a62b8fa?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1584438784894-089d6a62b8fa?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1584438784894-089d6a62b8fa?auto=format&fit=crop&w=1200&q=80"
+    ]
+  },
+  {
+    "id": "dkd-memory-foam-lumbar-cushion",
+    "name": "এরগনোমিক মেমোরি ফোম লাম্বার সাপোর্ট ব্যাক কুশন ও সিট কমফোর্ট প্যাড",
+    "titleEn": "Ergonomic Memory Foam Back Lumbar Support Cushion for Office Chair",
+    "category": "office_essentials",
+    "price": 1350,
+    "originalPrice": 1950,
+    "description": "অফিস বা পড়ার টেবিলে দীর্ঘক্ষণ বসে কাজ করার সময় মেরুদণ্ড সোজা রাখতে ও পিঠের ব্যথা দূর করতে অর্থোপেডিক প্রিমিয়াম মেমোরি ফোম লাম্বার কুশন।",
+    "fabric": "১০০% হাই-ডেনসিটি মেমোরি ফোম ও ব্রিদেবল মেশ কভার",
+    "sku": "DKD-OFC-11",
+    "inStock": true,
+    "rating": 5,
+    "reviewCount": 58,
+    "tag": "অফিস সেরা",
+    "status": "published",
+    "variants": {
+      "sizes": [
+        "Standard Ergonomic Contour (Universal Fit)"
+      ],
+      "colors": [
+        "Executive Black",
+        "Navy Blue",
+        "Silver Slate"
+      ]
+    },
+    "features": [
+      "শরীরের শেপ অনুযায়ী অ্যাডজাস্ট হওয়া থার্মো-সংবেদনশীল পিওর মেমোরি ফোম",
+      "সহজে খুলে ধোয়ার উপযোগী জিপার দেওয়া ব্রিদেবল মেশ ফ্যাব্রিক কভার",
+      "চেয়ারের সাথে শক্তভাবে আটকে রাখার জন্য ডাবল অ্যাডজাস্টেবল ইলাস্টিক স্ট্র্যাপ"
+    ],
+    "images": [
+      "https://images.unsplash.com/photo-1497215728101-856f4ea42174?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1497215728101-856f4ea42174?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1497215728101-856f4ea42174?auto=format&fit=crop&w=1200&q=80"
+    ]
+  },
+  {
+    "id": "dkd-unisex-heavyweight-hoodie",
+    "name": "ইউনিসেক্স প্রিমিয়াম হেভিওয়েট কটন ওভারসাইজড ড্রপ-শোল্ডার হুডি",
+    "titleEn": "Unisex Premium Heavyweight 380 GSM Cotton Oversized Hoodie",
+    "category": "fashion_clothing",
+    "price": 1850,
+    "originalPrice": 2400,
+    "description": "৩৮০ জিএসএম প্রিমিয়াম খাঁটি ব্রাশড কটন ফ্লিস দিয়ে তৈরি আন্তর্জাতিক মানের ড্রপ শোল্ডার ওভারসাইজড হুডি। সকল জেন্ডারের জন্য স্টাইলিশ, টেকসই এবং শীতের দিনে চরম আরামদায়ক।",
+    "fabric": "৩৮০ GSM ১০০% কম্বড ব্রাশড অর্গানিক কটন ফ্লিস",
+    "sku": "DKD-FAS-03",
+    "inStock": true,
+    "rating": 5,
+    "reviewCount": 63,
+    "tag": "হট ড্রপ",
+    "status": "published",
+    "variants": {
+      "colors": [
+        "Midnight Black",
+        "Oatmeal Heather",
+        "Deep Forest Green",
+        "Espresso Brown"
+      ],
+      "sizes": [
+        "M (Oversized)",
+        "L (Oversized)",
+        "XL (Oversized)",
+        "XXL"
+      ]
+    },
+    "features": [
+      "প্রিমিয়াম অ্যান্টি-পিলিং সফট ব্রাশড ফ্লিস ফেব্রিক",
+      "ডাবল-লেয়ার হুড ও মেটাল টিপযুক্ত ড্রস্ট্রিং",
+      "কাঙ্গারু পকেট ও নিখুঁত রিইনফোর্সড ডাবল স্টিচিং"
+    ],
+    "images": [
+      "https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=1200&q=80"
+    ]
+  },
 ];
-

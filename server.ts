@@ -1598,6 +1598,39 @@ async function startServer() {
     }
   });
 
+  // 0.05 Product Images Static Upload Endpoint (/api/upload-product-images)
+  // Converts base64 data:image/... product photos into fast static /uploads/product/<id>-<idx>.<ext> files
+  // so Firestore product documents stay tiny (<5KB) and load in milliseconds across all browsers!
+  app.post('/api/upload-product-images', (req, res) => {
+    try {
+      const { productId, images } = req.body as { productId?: string; images?: string[] };
+      if (!productId || !Array.isArray(images)) {
+        res.status(400).json({ success: false, error: 'productId and images array required' });
+        return;
+      }
+      const safeId = String(productId).replace(/[^a-zA-Z0-9_-]/g, '');
+      const uploadDir = path.join(__dirname, 'public', 'uploads', 'product');
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
+      const urls = images.map((img, idx) => {
+        if (typeof img === 'string' && img.startsWith('data:image/')) {
+          const match = img.match(/^data:image\/([a-zA-Z0-9+.-]+);base64,(.+)$/);
+          if (match) {
+            const ext = match[1].includes('webp') ? 'webp' : match[1].includes('png') ? 'png' : 'jpg';
+            const fname = `${safeId}-${idx}.${ext}`;
+            fs.writeFileSync(path.join(uploadDir, fname), Buffer.from(match[2], 'base64'));
+            return `/uploads/product/${fname}`;
+          }
+        }
+        return img;
+      });
+      res.json({ success: true, images: urls });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Failed to save product images' });
+    }
+  });
+
   // 0. Unique Domain-Relative Image Endpoint (/images/:productId/:index?src=...)
   // Ensures every product image has its own unique URL after the main domain (dokandari.com/images/<product-id>/<index>)
   app.get('/images/:productId/:index', (req, res) => {

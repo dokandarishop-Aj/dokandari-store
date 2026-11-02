@@ -46,7 +46,8 @@ import {
   saveProductPersisted,
   deleteProductPersisted,
   setRemoteDeletedProductIds,
-  syncAllLocalProductsToFirestore,
+  resolveProductByIdOrAlias,
+  LEGACY_PRODUCT_ID_ALIASES,
   compressImageFileToDataUrl,
   getPersistedOrders,
   syncStoreContentToLocalCache,
@@ -86,13 +87,62 @@ function normalizeCategoryId(cat: string, productName = ''): string {
   return 'home_decor';
 }
 
+function extractUrlProductRoute(): {
+  rawProdId: string | null;
+  isCheckoutStep: boolean;
+} {
+  if (typeof window === 'undefined') {
+    return { rawProdId: null, isCheckoutStep: false };
+  }
+  const pathname = window.location.pathname || '';
+  const searchParams = new URLSearchParams(window.location.search || '');
+  const hash = window.location.hash || '';
+
+  if (pathname.startsWith('/products/') || pathname.startsWith('/product/')) {
+    const cleaned = pathname.replace(/^\/products?\//, '').replace(/^\/+|\/+$/g, '');
+    const segments = cleaned.split('/').filter(Boolean);
+    const rawProdId = segments[0] ? decodeURIComponent(segments[0]).trim() : null;
+    const isCheckoutStep = segments[1] === 'checkout';
+    return { rawProdId, isCheckoutStep };
+  }
+
+  const queryProdId = searchParams.get('product') || searchParams.get('id');
+  if (queryProdId) {
+    return { rawProdId: queryProdId.trim(), isCheckoutStep: searchParams.get('step') === 'checkout' };
+  }
+
+  if (hash.startsWith('#/products/') || hash.startsWith('#/product/')) {
+    const cleaned = hash.replace(/^#\/products?\//, '').split('?')[0].replace(/^\/+|\/+$/g, '');
+    const segments = cleaned.split('/').filter(Boolean);
+    const rawProdId = segments[0] ? decodeURIComponent(segments[0]).trim() : null;
+    const isCheckoutStep = segments[1] === 'checkout';
+    return { rawProdId, isCheckoutStep };
+  }
+
+  return { rawProdId: null, isCheckoutStep: false };
+}
+
 function StoreMain() {
   const initialStore = useMemo(() => getInitialStoreContent(), []);
   const [products, setProducts] = useState<Product[]>(() => mergeCatalogProducts(INITIAL_PRODUCTS));
+  const initialUrlProdRoute = useMemo(() => extractUrlProductRoute(), []);
   const [activeCategory, setActiveCategory] = useState<ProductCategory>('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [detailedProduct, setDetailedProduct] = useState<Product | null>(null);
-  const [detailedProductStep, setDetailedProductStep] = useState<'product' | 'checkout' | 'thank_you'>('product');
+  const [detailedProduct, setDetailedProduct] = useState<Product | null>(() => {
+    if (initialUrlProdRoute.rawProdId) {
+      const initialList = mergeCatalogProducts(INITIAL_PRODUCTS);
+      return resolveProductByIdOrAlias(initialList, initialUrlProdRoute.rawProdId) || null;
+    }
+    return null;
+  });
+  const [detailedProductStep, setDetailedProductStep] = useState<'product' | 'checkout' | 'thank_you'>(() =>
+    initialUrlProdRoute.isCheckoutStep ? 'checkout' : 'product'
+  );
+  const [isResolvingUrlProduct, setIsResolvingUrlProduct] = useState<boolean>(() => {
+    if (!initialUrlProdRoute.rawProdId) return false;
+    const initialList = mergeCatalogProducts(INITIAL_PRODUCTS);
+    return !resolveProductByIdOrAlias(initialList, initialUrlProdRoute.rawProdId);
+  });
   const [thankYouOrder, setThankYouOrder] = useState<Order | null>(null);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -194,12 +244,8 @@ function StoreMain() {
 
   const hasFounderProfileDocRef = useRef(false);
 
-  // Seed initial catalog, recover any broken WordPress/Unsplash images from buy.dokandari.com, & attach real-time Firestore listeners
+  // Attach real-time Firestore listeners with zero startup write-storm for fast millisecond load times
   useEffect(() => {
-    seedProductsIfEmpty();
-    fetch('/api/catalog/recover-real-images', { method: 'POST' }).catch(() => null);
-    syncAllLocalProductsToFirestore().catch(() => null);
-
     let latestRemoteList: Product[] = INITIAL_PRODUCTS;
 
     const unsubProducts = onSnapshot(
@@ -207,16 +253,30 @@ function StoreMain() {
       (snap) => {
         if (!snap.empty) {
           const list: Product[] = [];
-          snap.forEach((docSnap) => list.push(docSnap.data() as Product));
+          snap.forEach((docSnap) => {
+            const data = docSnap.data() as Product;
+            list.push({ ...data, id: data.id || docSnap.id });
+          });
           latestRemoteList = list;
           const merged = mergeCatalogProducts(list);
           setProducts(merged);
           setDetailedProduct((current) => {
-            if (!current) return null;
-            const updated = merged.find((p) => p.id === current.id);
+            if (!current) {
+              const route = extractUrlProductRoute();
+              if (route.rawProdId) {
+                const matchedFromUrl = resolveProductByIdOrAlias(merged, route.rawProdId);
+                if (matchedFromUrl) {
+                  setIsResolvingUrlProduct(false);
+                  return matchedFromUrl;
+                }
+              }
+              return null;
+            }
+            const updated = resolveProductByIdOrAlias(merged, current.id);
             return updated || current;
           });
         } else {
+          seedProductsIfEmpty();
           latestRemoteList = INITIAL_PRODUCTS;
           setProducts(mergeCatalogProducts(INITIAL_PRODUCTS));
         }
@@ -226,113 +286,42 @@ function StoreMain() {
       }
     );
 
-    const unsubDeletedProducts = onSnapshot(
-      doc(db, 'settings', 'deleted_products'),
-      (snap) => {
-        if (snap.exists()) {
-          const data = snap.data();
-          if (Array.isArray(data?.ids)) {
-            setRemoteDeletedProductIds(data.ids);
-            const merged = mergeCatalogProducts(latestRemoteList);
-            setProducts(merged);
-          }
-        }
-      },
-      (err) => {
-        console.warn('Realtime deleted_products listener note', err);
+    // Initialize local pixel credentials immediately at 0ms while Firestore snapshot connects
+    const localCredsRaw = localStorage.getItem('dokandari_api_credentials');
+    if (localCredsRaw) {
+      try {
+        const creds = JSON.parse(localCredsRaw);
+        initializeMultiPixels(creds?.facebookPixelId, creds?.tiktokPixelId, creds?.youtubeTagId);
+        initializeGoogleSeoAndTags({
+          gtmContainerId: creds?.gtmContainerId,
+          ga4MeasurementId: creds?.ga4MeasurementId || creds?.youtubeTagId,
+          googleSearchConsoleCode: creds?.googleSearchConsoleCode,
+        });
+        trackPixelPageView();
+      } catch {
+        // ignore
       }
-    );
+    }
 
-    const unsubSettings = onSnapshot(
-      doc(db, 'settings', 'store_content'),
+    // Unified single collection listener for `settings` (fetches deleted_products, store_content, api_credentials, founder_profile in 1 stream)
+    const unsubAllSettings = onSnapshot(
+      collection(db, 'settings'),
       (snap) => {
-        if (snap.exists()) {
-          const data = snap.data();
-          const mergedContent = mergeStoreContent(data);
-          if (!hasFounderProfileDocRef.current) {
-            setFounderData(mergedContent.founder);
-            setPageContent(mergedContent.pageContent!);
-            syncStoreContentToLocalCache({
-              founder: mergedContent.founder,
-              pageContent: mergedContent.pageContent,
-            });
-          }
-          setSocialLinks(mergedContent.socialLinks!);
-          setWhatsappNumber(mergedContent.whatsappNumber);
-          setHotlineNumber(mergedContent.hotlineNumber);
-          setOfficialEmail(
-            mergedContent.officialEmail || DEFAULT_STORE_CONTENT.officialEmail || 'dokandari.shop@gmail.com'
-          );
-          if (Array.isArray(mergedContent.heroSlides) && mergedContent.heroSlides.length > 0) {
-            setHeroSlides(mergedContent.heroSlides);
-          }
-          if (mergedContent.categoryHeroes) {
-            setCategoryHeroes(mergedContent.categoryHeroes);
-          }
-          if (typeof mergedContent.carouselInterval === 'number' && mergedContent.carouselInterval >= 1000) {
-            setCarouselInterval(mergedContent.carouselInterval);
-          }
-          if (
-            typeof mergedContent.bestSellingInterval === 'number' &&
-            mergedContent.bestSellingInterval >= 1000
-          ) {
-            setBestSellingInterval(mergedContent.bestSellingInterval);
-          }
-          if (Array.isArray(mergedContent.categoryOrder) && mergedContent.categoryOrder.length > 0) {
-            setCategoryOrder(mergedContent.categoryOrder);
-            localStorage.setItem('dokandari_category_order', JSON.stringify(mergedContent.categoryOrder));
-          }
+        const docsMap: Record<string, any> = {};
+        snap.forEach((d) => {
+          docsMap[d.id] = d.data();
+        });
+
+        // 1. Deleted products
+        if (docsMap.deleted_products && Array.isArray(docsMap.deleted_products.ids)) {
+          setRemoteDeletedProductIds(docsMap.deleted_products.ids);
+          const merged = mergeCatalogProducts(latestRemoteList);
+          setProducts(merged);
         }
-      },
-      (err) => {
-        console.warn('Realtime settings listener note', err);
-      }
-    );
 
-    const unsubCredentials = onSnapshot(
-      doc(db, 'settings', 'api_credentials'),
-      (snap) => {
-        if (snap.exists()) {
-          const creds = snap.data();
-          localStorage.setItem('dokandari_api_credentials', JSON.stringify(creds));
-          const metaIds = creds?.facebookPixelId || '';
-          const tiktokIds = creds?.tiktokPixelId || '';
-          const youtubeIds = creds?.youtubeTagId || '';
-          initializeMultiPixels(metaIds, tiktokIds, youtubeIds);
-          initializeGoogleSeoAndTags({
-            gtmContainerId: creds?.gtmContainerId,
-            ga4MeasurementId: creds?.ga4MeasurementId || creds?.youtubeTagId,
-            googleSearchConsoleCode: creds?.googleSearchConsoleCode,
-          });
-          trackPixelPageView();
-        } else {
-          const local = localStorage.getItem('dokandari_api_credentials');
-          if (local) {
-            try {
-              const creds = JSON.parse(local);
-              initializeMultiPixels(creds?.facebookPixelId, creds?.tiktokPixelId, creds?.youtubeTagId);
-              initializeGoogleSeoAndTags({
-                gtmContainerId: creds?.gtmContainerId,
-                ga4MeasurementId: creds?.ga4MeasurementId || creds?.youtubeTagId,
-                googleSearchConsoleCode: creds?.googleSearchConsoleCode,
-              });
-              trackPixelPageView();
-            } catch {
-              // ignore
-            }
-          }
-        }
-      },
-      (err) => {
-        console.warn('Realtime credentials listener note', err);
-      }
-    );
-
-    const unsubFounderProfile = onSnapshot(
-      doc(db, 'settings', 'founder_profile'),
-      (snap) => {
-        if (snap.exists()) {
-          const data = snap.data();
+        // 2. Founder profile (process before store_content so hasFounderProfileDocRef is set)
+        if (docsMap.founder_profile) {
+          const data = docsMap.founder_profile;
           hasFounderProfileDocRef.current = true;
           if (data?.founder) {
             const rawPhoto = String(data.founder.photo || '').trim();
@@ -344,8 +333,14 @@ function StoreMain() {
             const cleanedFounder = {
               ...data.founder,
               name: isLegacy ? DEFAULT_STORE_CONTENT.founder.name : data.founder.name,
-              title: isLegacy || data.founder.title === 'Founder & CEO, Dokandari' ? DEFAULT_STORE_CONTENT.founder.title : data.founder.title,
-              bio: isLegacy || String(data.founder.bio || '').includes('মাল্টি-ক্যাটাগরি') ? DEFAULT_STORE_CONTENT.founder.bio : data.founder.bio,
+              title:
+                isLegacy || data.founder.title === 'Founder & CEO, Dokandari'
+                  ? DEFAULT_STORE_CONTENT.founder.title
+                  : data.founder.title,
+              bio:
+                isLegacy || String(data.founder.bio || '').includes('মাল্টি-ক্যাটাগরি')
+                  ? DEFAULT_STORE_CONTENT.founder.bio
+                  : data.founder.bio,
               phone: isLegacyPhone ? DEFAULT_STORE_CONTENT.founder.phone : data.founder.phone,
               photo: cleanPhoto,
             };
@@ -363,30 +358,87 @@ function StoreMain() {
             });
           }
         }
+
+        // 3. Store content
+        if (docsMap.store_content) {
+          const mergedContent = mergeStoreContent(docsMap.store_content);
+          if (!hasFounderProfileDocRef.current) {
+            setFounderData(mergedContent.founder);
+            setPageContent(mergedContent.pageContent!);
+            syncStoreContentToLocalCache({
+              founder: mergedContent.founder,
+              pageContent: mergedContent.pageContent,
+            });
+          }
+          setSocialLinks(mergedContent.socialLinks!);
+          setWhatsappNumber(mergedContent.whatsappNumber);
+          setHotlineNumber(mergedContent.hotlineNumber);
+          setOfficialEmail(
+            mergedContent.officialEmail ||
+              DEFAULT_STORE_CONTENT.officialEmail ||
+              'dokandari.shop@gmail.com'
+          );
+          if (Array.isArray(mergedContent.heroSlides) && mergedContent.heroSlides.length > 0) {
+            setHeroSlides(mergedContent.heroSlides);
+          }
+          if (mergedContent.categoryHeroes) {
+            setCategoryHeroes(mergedContent.categoryHeroes);
+          }
+          if (
+            typeof mergedContent.carouselInterval === 'number' &&
+            mergedContent.carouselInterval >= 1000
+          ) {
+            setCarouselInterval(mergedContent.carouselInterval);
+          }
+          if (
+            typeof mergedContent.bestSellingInterval === 'number' &&
+            mergedContent.bestSellingInterval >= 1000
+          ) {
+            setBestSellingInterval(mergedContent.bestSellingInterval);
+          }
+          if (Array.isArray(mergedContent.categoryOrder) && mergedContent.categoryOrder.length > 0) {
+            setCategoryOrder(mergedContent.categoryOrder);
+            localStorage.setItem(
+              'dokandari_category_order',
+              JSON.stringify(mergedContent.categoryOrder)
+            );
+          }
+        }
+
+        // 4. API & Pixel credentials
+        if (docsMap.api_credentials) {
+          const creds = docsMap.api_credentials;
+          localStorage.setItem('dokandari_api_credentials', JSON.stringify(creds));
+          const metaIds = creds?.facebookPixelId || '';
+          const tiktokIds = creds?.tiktokPixelId || '';
+          const youtubeIds = creds?.youtubeTagId || '';
+          initializeMultiPixels(metaIds, tiktokIds, youtubeIds);
+          initializeGoogleSeoAndTags({
+            gtmContainerId: creds?.gtmContainerId,
+            ga4MeasurementId: creds?.ga4MeasurementId || creds?.youtubeTagId,
+            googleSearchConsoleCode: creds?.googleSearchConsoleCode,
+          });
+          trackPixelPageView();
+        }
       },
       (err) => {
-        console.warn('Realtime founder_profile listener note', err);
+        console.warn('Realtime settings collection listener note', err);
       }
     );
 
     return () => {
       unsubProducts();
-      unsubDeletedProducts();
-      unsubSettings();
-      unsubFounderProfile();
-      unsubCredentials();
+      unsubAllSettings();
     };
   }, []);
 
-  // Support clean domain-relative pathname routing (/products/:id, /thank-you/:orderId, /catalog/:catId) + query (?product=id) + hash
+  // Support clean domain-relative pathname routing (/products/:id, /product/:id, /thank-you/:orderId, /catalog/:catId) + query (?product=id) + hash
   useEffect(() => {
     const syncFromUrl = () => {
       const pathname = window.location.pathname;
-      const searchParams = new URLSearchParams(window.location.search);
-      const queryProdId = searchParams.get('product');
       const hash = window.location.hash;
 
-      // 1. Clean Pathname Routing: /thank-you/:orderId, /products/:id(/checkout), /catalog/:catId
+      // 1. Thank You Order Confirmation Route: /thank-you/:orderId
       if (pathname.startsWith('/thank-you/')) {
         const orderId = decodeURIComponent(pathname.replace('/thank-you/', '').split('/')[0]);
         if (orderId) {
@@ -396,10 +448,13 @@ function StoreMain() {
             const firstItemProdId =
               foundLocalOrder.items?.[0]?.productId || foundLocalOrder.items?.[0]?.id;
             const matchedProd =
-              products.find((p) => p.id === firstItemProdId) || products[0] || INITIAL_PRODUCTS[0];
+              resolveProductByIdOrAlias(products, firstItemProdId) ||
+              products[0] ||
+              INITIAL_PRODUCTS[0];
             setThankYouOrder(foundLocalOrder);
             setDetailedProductStep('thank_you');
             setDetailedProduct(matchedProd);
+            setIsResolvingUrlProduct(false);
             setActiveCategoryPage(null);
             setIsAboutOpen(false);
             setIsVideoGalleryOpen(false);
@@ -413,12 +468,13 @@ function StoreMain() {
                 const firstItemProdId =
                   remoteOrder.items?.[0]?.productId || remoteOrder.items?.[0]?.id;
                 const matchedProd =
-                  products.find((p) => p.id === firstItemProdId) ||
+                  resolveProductByIdOrAlias(products, firstItemProdId) ||
                   products[0] ||
                   INITIAL_PRODUCTS[0];
                 setThankYouOrder(remoteOrder);
                 setDetailedProductStep('thank_you');
                 setDetailedProduct(matchedProd);
+                setIsResolvingUrlProduct(false);
                 setActiveCategoryPage(null);
                 setIsAboutOpen(false);
                 setIsVideoGalleryOpen(false);
@@ -427,21 +483,54 @@ function StoreMain() {
             .catch(() => null);
           return;
         }
-      } else if (pathname.startsWith('/products/')) {
-        const segments = pathname.replace('/products/', '').split('/');
-        const prodId = decodeURIComponent(segments[0]);
-        const isCheckoutStep = segments[1] === 'checkout';
-        const found = products.find((p) => p.id === prodId && p.status !== 'draft');
+      }
+
+      // 2. Product Detail & Instant Checkout Routes (/products/:id, /product/:id, ?product=:id, #/products/:id)
+      const prodRoute = extractUrlProductRoute();
+      if (prodRoute.rawProdId) {
+        const found = resolveProductByIdOrAlias(products, prodRoute.rawProdId);
         if (found) {
           setThankYouOrder(null);
-          setDetailedProductStep(isCheckoutStep ? 'checkout' : 'product');
+          setDetailedProductStep(prodRoute.isCheckoutStep ? 'checkout' : 'product');
           setDetailedProduct(found);
+          setIsResolvingUrlProduct(false);
           setActiveCategoryPage(null);
           setIsAboutOpen(false);
           setIsVideoGalleryOpen(false);
           return;
         }
-      } else if (pathname.startsWith('/catalog/') || pathname.startsWith('/category/')) {
+
+        // Fast single-document Firestore lookup for newly created products pasted into another browser
+        setIsResolvingUrlProduct(true);
+        const targetDocId =
+          LEGACY_PRODUCT_ID_ALIASES[prodRoute.rawProdId] ||
+          LEGACY_PRODUCT_ID_ALIASES[prodRoute.rawProdId.toLowerCase()] ||
+          prodRoute.rawProdId;
+
+        getDoc(doc(db, 'products', targetDocId))
+          .then((snap) => {
+            if (snap.exists()) {
+              const remoteProd = { ...(snap.data() as Product), id: snap.id };
+              const merged = mergeCatalogProducts([remoteProd, ...products]);
+              const resolved = resolveProductByIdOrAlias(merged, remoteProd.id) || remoteProd;
+              setProducts(merged);
+              setThankYouOrder(null);
+              setDetailedProductStep(prodRoute.isCheckoutStep ? 'checkout' : 'product');
+              setDetailedProduct(resolved);
+              setActiveCategoryPage(null);
+              setIsAboutOpen(false);
+              setIsVideoGalleryOpen(false);
+            }
+          })
+          .catch(() => null)
+          .finally(() => {
+            setIsResolvingUrlProduct(false);
+          });
+        return;
+      }
+
+      // 3. Category & Page Routes
+      if (pathname.startsWith('/catalog/') || pathname.startsWith('/category/')) {
         const catId = decodeURIComponent(
           pathname.replace(/^\/(catalog|category)\//, '').split('/')[0]
         );
@@ -475,31 +564,7 @@ function StoreMain() {
         return;
       }
 
-      // 2. Query Parameter (?product=id)
-      if (queryProdId) {
-        const found = products.find((p) => p.id === queryProdId && p.status !== 'draft');
-        if (found) {
-          setThankYouOrder(null);
-          setDetailedProductStep('product');
-          setDetailedProduct(found);
-          return;
-        }
-      }
-
-      // 3. Hash Navigation fallback (#/products/id, #/category/id, #/catalog/id)
-      if (hash.startsWith('#/products/')) {
-        const prodId = decodeURIComponent(hash.replace('#/products/', ''));
-        const found = products.find((p) => p.id === prodId && p.status !== 'draft');
-        if (found) {
-          setThankYouOrder(null);
-          setDetailedProductStep('product');
-          setDetailedProduct(found);
-          setActiveCategoryPage(null);
-          setIsAboutOpen(false);
-          setIsVideoGalleryOpen(false);
-          return;
-        }
-      } else if (hash.startsWith('#/category/') || hash.startsWith('#/catalog/')) {
+      if (hash.startsWith('#/category/') || hash.startsWith('#/catalog/')) {
         const catId = decodeURIComponent(hash.replace(/^#\/(category|catalog)\//, ''));
         setActiveCategory(catId);
         setActiveCategoryPage(catId);
@@ -988,6 +1053,19 @@ function StoreMain() {
             }}
             onProductUpdated={handleAddProduct}
           />
+        ) : isResolvingUrlProduct ? (
+          <div className="max-w-6xl mx-auto px-4 py-12">
+            <div className="bg-white rounded-3xl border border-stone-200 p-6 sm:p-10 shadow-xs animate-pulse grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div className="aspect-square rounded-2xl bg-stone-200" />
+              <div className="space-y-4 py-2">
+                <div className="h-4 w-32 bg-rose-100 rounded-full" />
+                <div className="h-8 w-3/4 bg-stone-200 rounded-xl" />
+                <div className="h-10 w-40 bg-stone-200 rounded-xl" />
+                <div className="h-24 w-full bg-stone-100 rounded-2xl" />
+                <div className="h-14 w-full bg-rose-200 rounded-2xl" />
+              </div>
+            </div>
+          </div>
         ) : activeCategoryPage && activeCategoryPage !== 'all' ? (
           /* Dedicated Category Detail Page with Editable Category Hero Banner */
           <CategoryDetailPage

@@ -194,52 +194,48 @@ export const OmniAuth: React.FC<OmniAuthProps> = ({ onSessionChange, compact = f
 
   if (compact) {
     return (
-      <div className="flex flex-wrap items-center gap-2">
-        {session?.subscriptionVerified ? (
-          <div className="flex items-center gap-2.5 px-3.5 py-2 rounded-2xl bg-[#FFE4E9] border border-rose-300 shadow-2xs">
-            <div className="w-7 h-7 rounded-xl bg-[#E11D48] text-white flex items-center justify-center shrink-0">
-              <UserCheck className="w-4 h-4" />
-            </div>
-            <div className="text-left">
-              <div className="text-xs font-extrabold text-stone-900 leading-tight">
-                {session.email}
-              </div>
-              <div className="text-[10px] font-bold text-[#BE123C] flex items-center gap-1">
-                <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                <span>Gemini Omni সাবস্ক্রিপশন সক্রিয় (কোনো বিলিং প্রয়োজন নেই)</span>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowManualInput((prev) => !prev)}
-              className="px-2.5 py-1 rounded-lg bg-white/90 hover:bg-white text-[#E11D48] border border-rose-200 text-[11px] font-bold cursor-pointer"
-            >
-              জিমেইল বদলান
-            </button>
-            <button
-              type="button"
-              onClick={handleOmniLogout}
-              title="লগআউট"
-              className="p-1.5 rounded-lg bg-white/80 hover:bg-rose-100 text-stone-600 hover:text-[#E11D48] cursor-pointer"
-            >
-              <LogOut className="w-3.5 h-3.5" />
-            </button>
+      <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-2xl bg-gradient-to-r from-[#FFF0F3] via-white to-[#FFF0F3] border-2 border-rose-200">
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-[#E11D48] to-purple-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
+            <Sparkles className="w-4 h-4" />
           </div>
-        ) : (
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-black text-stone-900">
+                গুগল ফ্লো (Google Flow) কানেক্টেড জিমেইল:
+              </span>
+              <span className="px-2 py-0.5 rounded-lg bg-rose-50 text-[#E11D48] border border-rose-200 font-mono font-bold text-xs">
+                {session?.email || 'dokandari.shop@gmail.com'}
+              </span>
+              <span className="px-2 py-0.5 rounded-lg bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold text-[10.5px] flex items-center gap-1">
+                <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                <span>সাবস্ক্রিপশন ও ফ্রি ক্রেডিট সক্রিয়</span>
+              </span>
+            </div>
+            <p className="text-[10.5px] text-stone-500 mt-0.5">
+              উপলব্ধ মডেল: <strong>Google Veo 3 (ভিডিও)</strong> • <strong>Gemini Omni (মাল্টিমোডাল)</strong> • <strong>Imagen 3 & Nano Banana (ব্যানার)</strong>
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <a
+            href="https://flow.google/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-[#E11D48] to-indigo-600 hover:from-[#BE123C] hover:to-indigo-700 text-white text-[11px] font-extrabold flex items-center gap-1.5 shadow-2xs cursor-pointer transition-all"
+            title="গুগল ফ্লো অফিশিয়াল ওয়েব অ্যাপ নতুন ট্যাবে খুলুন"
+          >
+            <span>🚀 Google Flow অফিশিয়াল অ্যাপ</span>
+          </a>
           <button
             type="button"
-            onClick={handleGoogleOmniLogin}
-            disabled={loading}
-            className="px-4 py-2.5 rounded-2xl bg-[#E11D48] hover:bg-[#BE123C] text-white text-xs font-extrabold flex items-center gap-2 shadow-sm cursor-pointer transition-all"
+            onClick={() => setShowManualInput((prev) => !prev)}
+            className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-rose-50 text-stone-700 border border-stone-300 text-[11px] font-bold cursor-pointer"
           >
-            {loading ? (
-              <RefreshCw className="w-4 h-4 animate-spin" />
-            ) : (
-              <LogIn className="w-4 h-4" />
-            )}
-            <span>জিমেইল দিয়ে Google Omni লগইন করুন</span>
+            জিমেইল পরিবর্তন
           </button>
-        )}
+        </div>
       </div>
     );
   }
@@ -254,22 +250,22 @@ export const OmniAuth: React.FC<OmniAuthProps> = ({ onSessionChange, compact = f
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <span className="px-2.5 py-0.5 rounded-full bg-[#FFE4E9] text-[#BE123C] border border-rose-300 text-[11px] font-extrabold">
-                Omni Auth • জিমেইল সাবস্ক্রিপশন লগইন
+                Google Flow • সাবস্ক্রিপশন ও ক্রেডিট কানেকশন
               </span>
               {session?.subscriptionVerified && (
                 <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 text-[11px] font-extrabold flex items-center gap-1">
                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>সাবস্ক্রিপশন ভেরিফাইড ও সক্রিয়</span>
+                  <span>Google Flow সাবস্ক্রিপশন সক্রিয়</span>
                 </span>
               )}
             </div>
             <h3 className="text-sm sm:text-base font-extrabold text-stone-900 mt-1">
               {session?.subscriptionVerified
-                ? `সংযুক্ত জিমেইল: ${session.email}`
-                : 'আপনার জিমেইল অ্যাকাউন্ট দিয়ে Google Omni স্টুডিওতে লগইন করুন'}
+                ? `সংযুক্ত Google Flow অ্যাকাউন্ট: ${session.email}`
+                : 'আপনার সাবস্ক্রাইবড জিমেইল দিয়ে Google Flow স্টুডিও কানেক্ট করুন'}
             </h3>
             <p className="text-xs text-stone-600 mt-0.5">
-              জিমেইল লগইন করা থাকলে আলাদা কোনো বিলিং বা পেমেন্ট অপশন দেওয়ার প্রয়োজন নেই — আপনার সেশন স্বয়ংক্রিয়ভাবে সংরক্ষিত থাকবে এবং সকল প্রো ফিচার কাজ করবে।
+              Google Flow সাবস্ক্রিপশন বা ফ্রি ক্রেডিট থাকলে কোনো আলাদা API Key এর প্রয়োজন নেই — স্বয়ংক্রিয়ভাবে Veo 3, Gemini Omni ও Imagen 3 কাজ করবে।
             </p>
           </div>
         </div>

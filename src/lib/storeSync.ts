@@ -21,7 +21,8 @@ export const OFFICIAL_HOTLINE = '01348282356';
 
 const LS_STORE_CONTENT_KEY = 'dokandari_store_content_backup_v2';
 const LS_CUSTOM_PRODUCTS_KEY = 'dokandari_custom_products_v2';
-const LS_DELETED_PRODUCT_IDS_KEY = 'dokandari_deleted_product_ids_v2';
+const LS_DELETED_PRODUCT_IDS_KEY = 'dokandari_deleted_product_ids_v3';
+const LS_LIVE_CATALOG_CACHE_KEY = 'dokandari_live_catalog_cache_v1';
 const LS_ORDERS_BACKUP_KEY = 'dokandari_orders_backup_v1';
 
 export interface CategoryHeroConfig {
@@ -579,14 +580,10 @@ export async function saveStoreContentPersisted(
 let remoteDeletedProductIdsCache = new Set<string>();
 
 export function setRemoteDeletedProductIds(ids: string[]): void {
-  remoteDeletedProductIdsCache = new Set(Array.isArray(ids) ? ids.filter(Boolean) : []);
+  const cleanList = Array.isArray(ids) ? ids.filter(Boolean) : [];
+  remoteDeletedProductIdsCache = new Set(cleanList);
   try {
-    const localRaw = localStorage.getItem(LS_DELETED_PRODUCT_IDS_KEY);
-    const localArr = localRaw ? JSON.parse(localRaw) : [];
-    const merged = Array.from(
-      new Set([...(Array.isArray(localArr) ? localArr : []), ...remoteDeletedProductIdsCache])
-    );
-    localStorage.setItem(LS_DELETED_PRODUCT_IDS_KEY, JSON.stringify(merged));
+    localStorage.setItem(LS_DELETED_PRODUCT_IDS_KEY, JSON.stringify(cleanList));
   } catch {
     // ignore storage warning
   }
@@ -672,6 +669,20 @@ export const VALID_LOCAL_UPLOAD_FILES = new Set<string>([
   'organic-green-tea.jpg',
   'organic-patali-gur.jpg',
   'organic-spice-combo.jpg',
+  'dkd-1793610538096-571-0.jpg',
+  'dkd-1793610538096-571-1.jpg',
+  'dkd-1793610538096-571-2.jpg',
+  'dkd-1793611408928-666-0.jpg',
+  'dkd-1793611408928-666-1.jpg',
+  'dkd-1793611408928-666-2.jpg',
+  'dkd-1793613621412-332-0.webp',
+  'dkd-1793613621412-332-1.webp',
+  'dkd-1793613621412-332-2.webp',
+  'dkd-1793613770498-186-0.webp',
+  'dkd-1793613770498-186-1.webp',
+  'dkd-1793613770498-186-2.webp',
+  'dkd-1793613770498-186-3.webp',
+  'dkd-1793613770498-186-4.webp',
 ]);
 
 /**
@@ -1031,7 +1042,12 @@ function resolveVerifiedLocalUploadPath(
 ): string {
   const normalized = localPath.replace(/^\/public\/uploads\//, '/uploads/');
   const fname = normalized.replace(/^\/uploads\/product\//, '').split(/[?&]/)[0];
-  if (VALID_LOCAL_UPLOAD_FILES.has(fname)) {
+  if (
+    VALID_LOCAL_UPLOAD_FILES.has(fname) ||
+    fname.startsWith('dkd-') ||
+    fname.startsWith('prod-') ||
+    fname.startsWith('custom-')
+  ) {
     return `/uploads/product/${fname}`;
   }
   if (LEGACY_FILENAME_REMAP[fname]) {
@@ -1440,6 +1456,72 @@ function hasAuthenticCustomImage(p?: Product): boolean {
  * Merges INITIAL_PRODUCTS + remote Firestore products + local Admin custom/edited products,
  * while removing any product IDs deleted by the Admin and preserving real product images.
  */
+/**
+ * Legacy / duplicate ad campaign product ID alias map.
+ * Preserves 100% of existing product URLs without changing any links:
+ * if an ad campaign URL points to an older slug or duplicate ID, it resolves seamlessly to the live product.
+ */
+export const LEGACY_PRODUCT_ID_ALIASES: Record<string, string> = {
+  'dkd-mirror-film-wall-sticker': 'dkd-flexible-unbreakable-mirror-sheet',
+  'dkd-unbreakable-flexible-mirror': 'dkd-frameless-full-length-mirror',
+  'dkd-herbal-whitening-soap': 'dkd-herbal-brightening-soap',
+  'dkd-1793611045577-658': 'dkd-1793611408928-666',
+  'dkd-1793611081511-148': 'dkd-1793611408928-666',
+  'dkd-1793611136106-808': 'dkd-1793611408928-666',
+  'dkd-1793611454825-371': 'dkd-1793611408928-666',
+  'dkd-1793613344067-583': 'dkd-1793613621412-332',
+  'dkd-1793477643052-131': 'dkd-arch-unbreakable-wall-mirror',
+  'dkd-1793477610065-533': 'dkd-arch-unbreakable-wall-mirror',
+  'dkd-1793477305397-277': 'dkd-arch-unbreakable-wall-mirror',
+  'dkd-1793454681663-969': 'dkd-round-bathroom-vanity-mirror',
+  'dkd-1793454516519-198': 'dkd-round-bathroom-vanity-mirror',
+};
+
+/**
+ * Resolves a product by exact ID, URL-decoded/case-insensitive ID, SKU, or legacy campaign alias.
+ * Never alters any product ID or URL.
+ */
+export function resolveProductByIdOrAlias(
+  productList: Product[],
+  rawId: string | null | undefined
+): Product | undefined {
+  if (!rawId) return undefined;
+  let cleanId = String(rawId).trim();
+  try {
+    cleanId = decodeURIComponent(cleanId).trim();
+  } catch {
+    // ignore
+  }
+  cleanId = cleanId.replace(/^\/+|\/+$/g, '');
+  if (!cleanId) return undefined;
+
+  // 1. Exact ID match (primary fast path — 0ms)
+  const exact = productList.find((p) => p.id === cleanId && p.status !== 'draft');
+  if (exact) return exact;
+
+  // 2. Case-insensitive ID or SKU match
+  const lower = cleanId.toLowerCase();
+  const caseOrSku = productList.find(
+    (p) =>
+      p.status !== 'draft' &&
+      (p.id.toLowerCase() === lower || (p.sku && p.sku.toLowerCase() === lower))
+  );
+  if (caseOrSku) return caseOrSku;
+
+  // 3. Legacy or duplicate campaign alias resolution
+  const aliasTarget = LEGACY_PRODUCT_ID_ALIASES[cleanId] || LEGACY_PRODUCT_ID_ALIASES[lower];
+  if (aliasTarget) {
+    const aliased = productList.find((p) => p.id === aliasTarget && p.status !== 'draft');
+    if (aliased) return aliased;
+  }
+
+  return undefined;
+}
+
+/**
+ * Merges INITIAL_PRODUCTS + cached live catalog + remote Firestore products + local Admin custom/edited products,
+ * while removing any product IDs deleted by the Admin and preserving real product images.
+ */
 export function mergeCatalogProducts(remoteProducts?: Product[]): Product[] {
   const deletedIds = getDeletedProductIds();
   const customMap = getCustomPersistedProductsMap();
@@ -1452,11 +1534,31 @@ export function mergeCatalogProducts(remoteProducts?: Product[]): Product[] {
     }
   }
 
-  // 2. Overlay remote Firestore products (if not deleted) — Firestore is the source of truth across live domain!
+  // 1.5 Overlay any cached live catalog items from localStorage for 0ms startup before Firestore snapshot arrives
+  if (!remoteProducts || remoteProducts.length === 0) {
+    try {
+      const cachedRaw = localStorage.getItem(LS_LIVE_CATALOG_CACHE_KEY);
+      if (cachedRaw) {
+        const cachedList = JSON.parse(cachedRaw) as Product[];
+        if (Array.isArray(cachedList)) {
+          for (const cp of cachedList) {
+            if (cp && cp.id && !deletedIds.has(cp.id)) {
+              map.set(cp.id, normalizeProductImages(cp));
+            }
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // 2. Overlay remote Firestore products — Firestore `products` collection is the live source of truth!
+  //    (When a product is deleted via deleteProductPersisted, its document is deleted from `products` collection.)
   const remoteIdSet = new Set<string>();
   if (remoteProducts && remoteProducts.length > 0) {
     for (const p of remoteProducts) {
-      if (p && p.id && !deletedIds.has(p.id)) {
+      if (p && p.id) {
         remoteIdSet.add(p.id);
         map.set(p.id, normalizeProductImages(p));
       }
@@ -1483,9 +1585,28 @@ export function mergeCatalogProducts(remoteProducts?: Product[]): Product[] {
     }
   }
 
-  return Array.from(map.values()).sort(
+  const finalCatalog = Array.from(map.values()).sort(
     (a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0)
   );
+
+  // Cache lightweight catalog snapshot when remoteProducts arrives so future loads are 0ms
+  if (remoteProducts && remoteProducts.length > 0) {
+    try {
+      const lightweight = finalCatalog.map((item) => ({
+        ...item,
+        images: (item.images || []).map((img) =>
+          img.startsWith('data:') && img.length > 40000
+            ? getFallbackProductImage(item, 0)
+            : img
+        ),
+      }));
+      localStorage.setItem(LS_LIVE_CATALOG_CACHE_KEY, JSON.stringify(lightweight));
+    } catch {
+      // ignore storage quota
+    }
+  }
+
+  return finalCatalog;
 }
 
 /**
@@ -1557,7 +1678,7 @@ export async function restoreAllRealCatalogProducts(): Promise<Product[]> {
 function ensureFirestoreSafeProductPayload(product: Product): Product {
   const clone = { ...product, images: [...(product.images || [])] };
   let serialized = JSON.stringify(clone);
-  if (serialized.length <= 920000) {
+  if (serialized.length <= 850000) {
     return clone;
   }
 
@@ -1566,27 +1687,54 @@ function ensureFirestoreSafeProductPayload(product: Product): Product {
     clone.images = clone.images.slice(0, 8);
     serialized = JSON.stringify(clone);
   }
-  while (serialized.length > 920000 && clone.images.length > 5) {
+  while (serialized.length > 850000 && clone.images.length > 1) {
     clone.images = clone.images.slice(0, clone.images.length - 1);
     serialized = JSON.stringify(clone);
   }
-  while (serialized.length > 950000 && clone.images.length > 2) {
-    clone.images = clone.images.slice(0, clone.images.length - 1);
-    serialized = JSON.stringify(clone);
+  if (serialized.length > 900000) {
+    clone.images = [getFallbackProductImage(clone, 0)];
   }
   return clone;
 }
 
 /**
- * Persists a newly created or edited product to localStorage AND Firestore immediately
+ * Persists a newly created or edited product to localStorage AND Firestore immediately.
+ * Also uploads any base64 `data:image/...` photos to `/uploads/product/<id>-<idx>.<ext>`
+ * so the product loads in milliseconds across all browsers and ad clicks!
  */
 export async function saveProductPersisted(product: Product): Promise<Product> {
   const now = Date.now();
-  const cleanedProduct = normalizeProductImages(product);
+  const targetId = product.id || `prod-${now}`;
+  let incomingImages = Array.isArray(product.images) ? [...product.images] : [];
+
+  // Convert any base64 data:image/ URLs into fast static /uploads/product/ files on server
+  if (incomingImages.some((img) => typeof img === 'string' && img.startsWith('data:image/'))) {
+    try {
+      const uploadRes = await fetch('/api/upload-product-images', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productId: targetId, images: incomingImages }),
+      });
+      if (uploadRes.ok) {
+        const uploadJson = await uploadRes.json();
+        if (Array.isArray(uploadJson?.images) && uploadJson.images.length > 0) {
+          incomingImages = uploadJson.images;
+        }
+      }
+    } catch {
+      // fallback to base64 if server endpoint unreachable
+    }
+  }
+
+  const cleanedProduct = normalizeProductImages({
+    ...product,
+    id: targetId,
+    images: incomingImages,
+  });
 
   const normalized: Product = sanitizeForFirestore({
     ...cleanedProduct,
-    id: cleanedProduct.id || `prod-${now}`,
+    id: targetId,
     name: (cleanedProduct.name || 'নতুন প্রোডাক্ট').trim(),
     price: Number(cleanedProduct.price) || 0,
     originalPrice:
@@ -1630,7 +1778,7 @@ export async function saveProductPersisted(product: Product): Promise<Product> {
     console.warn('localStorage product save note:', e);
   }
 
-  // 2. Save to Firestore (guarded for 1MB limit while keeping 5+ images)
+  // 2. Save to Firestore (guarded for 1MB limit so it 100% succeeds across all browsers)
   try {
     const firestoreSafe = sanitizeForFirestore(ensureFirestoreSafeProductPayload(normalized));
     await setDoc(doc(db, 'products', normalized.id), firestoreSafe, { merge: true });
@@ -1788,7 +1936,18 @@ export async function deleteProductPersisted(productId: string): Promise<void> {
  * Persists a customer Order to both localStorage (instant backup) and Firestore `orders` collection
  */
 export async function saveOrderPersisted(order: Order): Promise<Order> {
-  const cleanOrder = sanitizeForFirestore(order);
+  const cleanOrder = sanitizeForFirestore({
+    ...order,
+    items: Array.isArray(order.items)
+      ? order.items.map((item) => ({
+          ...item,
+          image:
+            typeof item.image === 'string' && item.image.startsWith('data:') && item.image.length > 20000
+              ? getFallbackProductImage({ id: item.productId || item.id, name: item.name, category: item.category }, 0)
+              : item.image,
+        }))
+      : [],
+  });
 
   // 1. Save to localStorage backup so customer & admin never lose an order
   try {
@@ -1801,7 +1960,7 @@ export async function saveOrderPersisted(order: Order): Promise<Order> {
     console.warn('localStorage order backup note:', e);
   }
 
-  // 2. Save to Firestore `orders` collection
+  // 2. Save to Firestore `orders` collection immediately
   try {
     await setDoc(doc(db, 'orders', cleanOrder.id), cleanOrder, { merge: true });
   } catch (err) {
