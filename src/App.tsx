@@ -30,6 +30,7 @@ import { CustomerAuthModal } from './components/CustomerAuthModal';
 import { MenuDrawer } from './components/MenuDrawer';
 import { PolicyPage } from './components/PolicyPage';
 import { FounderSection, FounderData } from './components/FounderSection';
+import { CustomerUgcSection } from './components/CustomerUgcSection';
 import { Footer } from './components/Footer';
 import { FloatingAdminButton } from './components/FloatingAdminButton';
 import { AiAssistantModal } from './components/AiAssistantModal';
@@ -47,102 +48,54 @@ import {
   deleteProductPersisted,
   setRemoteDeletedProductIds,
   resolveProductByIdOrAlias,
+  resolveOrSynthesizeProductForUrl,
   LEGACY_PRODUCT_ID_ALIASES,
   compressImageFileToDataUrl,
   getPersistedOrders,
   syncStoreContentToLocalCache,
+  resolveCategoryIdFromUrl,
+  extractUrlProductRoute,
+  extractUrlCatalogRoute,
+  navigateToStoreRoute,
+  uploadBannerImageToServer,
 } from './lib/storeSync';
 import {
   initializeMultiPixels,
   initializeGoogleSeoAndTags,
   trackPixelPageView,
+  syncAutoCatalogWithPixels,
 } from './lib/pixelManager';
 import { ChevronLeft, ChevronRight, Clock, Sparkles, Upload, X, Loader2 } from 'lucide-react';
 
 // Map legacy category strings to the 11 official category IDs so all products match accurately
 function normalizeCategoryId(cat: string, productName = ''): string {
-  const officialIds = new Set(OFFICIAL_CATEGORIES.map((c) => c.id));
-  if (officialIds.has(cat as any)) return cat;
-
-  const lowerName = productName.toLowerCase();
-  if (
-    lowerName.includes('মধু') ||
-    lowerName.includes('honey') ||
-    lowerName.includes('ঘি') ||
-    lowerName.includes('ghee') ||
-    lowerName.includes('অর্গানিক') ||
-    lowerName.includes('organic') ||
-    lowerName.includes('খেজুর') ||
-    lowerName.includes('চিয়া')
-  ) {
-    return 'organic_food';
-  }
-  if (lowerName.includes('মিরর') || lowerName.includes('mirror') || lowerName.includes('ডেকোর')) {
-    return 'home_decor';
-  }
-  if (cat === 'skincare') return 'beauty_personal_care';
-  if (cat === 'fashion_clothing' || cat === 'abaya' || cat === 'festive' || cat === 'hijab') {
-    return 'organic_food';
-  }
-  return 'home_decor';
-}
-
-function extractUrlProductRoute(): {
-  rawProdId: string | null;
-  isCheckoutStep: boolean;
-} {
-  if (typeof window === 'undefined') {
-    return { rawProdId: null, isCheckoutStep: false };
-  }
-  const pathname = window.location.pathname || '';
-  const searchParams = new URLSearchParams(window.location.search || '');
-  const hash = window.location.hash || '';
-
-  if (pathname.startsWith('/products/') || pathname.startsWith('/product/')) {
-    const cleaned = pathname.replace(/^\/products?\//, '').replace(/^\/+|\/+$/g, '');
-    const segments = cleaned.split('/').filter(Boolean);
-    const rawProdId = segments[0] ? decodeURIComponent(segments[0]).trim() : null;
-    const isCheckoutStep = segments[1] === 'checkout';
-    return { rawProdId, isCheckoutStep };
-  }
-
-  const queryProdId = searchParams.get('product') || searchParams.get('id');
-  if (queryProdId) {
-    return { rawProdId: queryProdId.trim(), isCheckoutStep: searchParams.get('step') === 'checkout' };
-  }
-
-  if (hash.startsWith('#/products/') || hash.startsWith('#/product/')) {
-    const cleaned = hash.replace(/^#\/products?\//, '').split('?')[0].replace(/^\/+|\/+$/g, '');
-    const segments = cleaned.split('/').filter(Boolean);
-    const rawProdId = segments[0] ? decodeURIComponent(segments[0]).trim() : null;
-    const isCheckoutStep = segments[1] === 'checkout';
-    return { rawProdId, isCheckoutStep };
-  }
-
-  return { rawProdId: null, isCheckoutStep: false };
+  return resolveCategoryIdFromUrl(cat, productName);
 }
 
 function StoreMain() {
   const initialStore = useMemo(() => getInitialStoreContent(), []);
   const [products, setProducts] = useState<Product[]>(() => mergeCatalogProducts(INITIAL_PRODUCTS));
   const initialUrlProdRoute = useMemo(() => extractUrlProductRoute(), []);
-  const [activeCategory, setActiveCategory] = useState<ProductCategory>('all');
+  const initialUrlCatRoute = useMemo(() => extractUrlCatalogRoute(), []);
+  const [activeCategory, setActiveCategory] = useState<ProductCategory>(() =>
+    !initialUrlProdRoute.rawProdId && initialUrlCatRoute ? initialUrlCatRoute : 'all'
+  );
   const [searchQuery, setSearchQuery] = useState('');
   const [detailedProduct, setDetailedProduct] = useState<Product | null>(() => {
     if (initialUrlProdRoute.rawProdId) {
       const initialList = mergeCatalogProducts(INITIAL_PRODUCTS);
-      return resolveProductByIdOrAlias(initialList, initialUrlProdRoute.rawProdId) || null;
+      return (
+        resolveProductByIdOrAlias(initialList, initialUrlProdRoute.rawProdId) ||
+        resolveOrSynthesizeProductForUrl(initialList, initialUrlProdRoute.rawProdId) ||
+        null
+      );
     }
     return null;
   });
   const [detailedProductStep, setDetailedProductStep] = useState<'product' | 'checkout' | 'thank_you'>(() =>
     initialUrlProdRoute.isCheckoutStep ? 'checkout' : 'product'
   );
-  const [isResolvingUrlProduct, setIsResolvingUrlProduct] = useState<boolean>(() => {
-    if (!initialUrlProdRoute.rawProdId) return false;
-    const initialList = mergeCatalogProducts(INITIAL_PRODUCTS);
-    return !resolveProductByIdOrAlias(initialList, initialUrlProdRoute.rawProdId);
-  });
+  const [isResolvingUrlProduct, setIsResolvingUrlProduct] = useState<boolean>(false);
   const [thankYouOrder, setThankYouOrder] = useState<Order | null>(null);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -197,7 +150,11 @@ function StoreMain() {
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(() => {
     return isAdminSessionValid();
   });
-  const [activeCategoryPage, setActiveCategoryPage] = useState<string | null>(null);
+  const [activeCategoryPage, setActiveCategoryPage] = useState<string | null>(() =>
+    !initialUrlProdRoute.rawProdId && initialUrlCatRoute && initialUrlCatRoute !== 'all'
+      ? initialUrlCatRoute
+      : null
+  );
   const [isAboutOpen, setIsAboutOpen] = useState(false);
   const [isVideoGalleryOpen, setIsVideoGalleryOpen] = useState(false);
   const [isAccountOpen, setIsAccountOpen] = useState(false);
@@ -243,14 +200,55 @@ function StoreMain() {
   }, [heroSlides.length, carouselInterval]);
 
   const hasFounderProfileDocRef = useRef(false);
+  const hasAutoSyncedPixelCatalogRef = useRef(false);
 
-  // Attach real-time Firestore listeners with zero startup write-storm for fast millisecond load times
+  // Automatically emit full catalog Schema.org ItemList + Product Microdata to connected Meta & TikTok Pixels
+  useEffect(() => {
+    if (products.length > 0 && !hasAutoSyncedPixelCatalogRef.current) {
+      hasAutoSyncedPixelCatalogRef.current = true;
+      syncAutoCatalogWithPixels(products, { forceFullBroadcast: false }).catch(() => null);
+    }
+  }, [products]);
+
+  // Attach real-time Firestore listeners + Server Catalog Mirror fallback for 100% external/mobile browser reliability
   useEffect(() => {
     let latestRemoteList: Product[] = INITIAL_PRODUCTS;
+    let hasSeededThisSession = false;
+
+    // 0. Always fetch `/api/catalog/products` so external/mobile browsers get all live products even if WebChannel is slow/restricted
+    fetch('/api/catalog/products')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data && Array.isArray(data.products) && data.products.length > 0) {
+          const merged = mergeCatalogProducts([...data.products, ...latestRemoteList]);
+          latestRemoteList = merged;
+          setProducts(merged);
+          syncAutoCatalogWithPixels(merged, { forceFullBroadcast: false }).catch(() => null);
+          setDetailedProduct((current) => {
+            if (!current) {
+              const route = extractUrlProductRoute();
+              if (route.rawProdId) {
+                const matchedFromUrl = resolveProductByIdOrAlias(merged, route.rawProdId);
+                if (matchedFromUrl) {
+                  setIsResolvingUrlProduct(false);
+                  return matchedFromUrl;
+                }
+              }
+              return null;
+            }
+            return resolveProductByIdOrAlias(merged, current.id) || current;
+          });
+        }
+      })
+      .catch(() => null);
 
     const unsubProducts = onSnapshot(
       collection(db, 'products'),
       (snap) => {
+        if (!hasSeededThisSession) {
+          hasSeededThisSession = true;
+          seedProductsIfEmpty().catch(() => null);
+        }
         if (!snap.empty) {
           const list: Product[] = [];
           snap.forEach((docSnap) => {
@@ -276,7 +274,6 @@ function StoreMain() {
             return updated || current;
           });
         } else {
-          seedProductsIfEmpty();
           latestRemoteList = INITIAL_PRODUCTS;
           setProducts(mergeCatalogProducts(INITIAL_PRODUCTS));
         }
@@ -302,6 +299,27 @@ function StoreMain() {
         // ignore
       }
     }
+
+    // Fetch server-side store content mirror immediately on boot so live domains (dokandari.com / dukandari.com)
+    // always render the latest saved Hero Banners & Category Heroes even before Firestore WebChannel connects
+    fetch('/api/store/content')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.success && d?.content) {
+          const mergedServer = mergeStoreContent(d.content);
+          syncStoreContentToLocalCache(mergedServer);
+          if (Array.isArray(mergedServer.heroSlides) && mergedServer.heroSlides.length > 0) {
+            setHeroSlides(mergedServer.heroSlides);
+          }
+          if (mergedServer.categoryHeroes) {
+            setCategoryHeroes(mergedServer.categoryHeroes);
+          }
+          if (typeof mergedServer.carouselInterval === 'number' && mergedServer.carouselInterval >= 1000) {
+            setCarouselInterval(mergedServer.carouselInterval);
+          }
+        }
+      })
+      .catch(() => null);
 
     // Unified single collection listener for `settings` (fetches deleted_products, store_content, api_credentials, founder_profile in 1 stream)
     const unsubAllSettings = onSnapshot(
@@ -500,112 +518,155 @@ function StoreMain() {
           return;
         }
 
-        // Fast single-document Firestore lookup for newly created products pasted into another browser
+        // Fast dual lookup (Firestore + Server REST Mirror `/api/catalog/product/:id`) for any external/mobile browser
         setIsResolvingUrlProduct(true);
         const targetDocId =
           LEGACY_PRODUCT_ID_ALIASES[prodRoute.rawProdId] ||
           LEGACY_PRODUCT_ID_ALIASES[prodRoute.rawProdId.toLowerCase()] ||
           prodRoute.rawProdId;
 
-        getDoc(doc(db, 'products', targetDocId))
-          .then((snap) => {
-            if (snap.exists()) {
-              const remoteProd = { ...(snap.data() as Product), id: snap.id };
-              const merged = mergeCatalogProducts([remoteProd, ...products]);
-              const resolved = resolveProductByIdOrAlias(merged, remoteProd.id) || remoteProd;
-              setProducts(merged);
-              setThankYouOrder(null);
-              setDetailedProductStep(prodRoute.isCheckoutStep ? 'checkout' : 'product');
-              setDetailedProduct(resolved);
-              setActiveCategoryPage(null);
-              setIsAboutOpen(false);
-              setIsVideoGalleryOpen(false);
+        const applyResolvedProduct = (remoteProd: Product) => {
+          const merged = mergeCatalogProducts([remoteProd, ...products]);
+          const resolved = resolveProductByIdOrAlias(merged, remoteProd.id) || remoteProd;
+          setProducts(merged);
+          setThankYouOrder(null);
+          setDetailedProductStep(prodRoute.isCheckoutStep ? 'checkout' : 'product');
+          setDetailedProduct(resolved);
+          setIsResolvingUrlProduct(false);
+          setActiveCategoryPage(null);
+          setIsAboutOpen(false);
+          setIsVideoGalleryOpen(false);
+        };
+
+        Promise.allSettled([
+          getDoc(doc(db, 'products', targetDocId)).then((snap) =>
+            snap.exists() ? ({ ...(snap.data() as Product), id: snap.id } as Product) : null
+          ),
+          fetch(`/api/catalog/product/${encodeURIComponent(prodRoute.rawProdId)}`)
+            .then((r) => (r.ok ? r.json() : null))
+            .then((d) => (d?.product ? (d.product as Product) : null)),
+        ])
+          .then(async (results) => {
+            const fsProd = results[0].status === 'fulfilled' ? results[0].value : null;
+            const apiProd = results[1].status === 'fulfilled' ? results[1].value : null;
+            const chosen = fsProd || apiProd;
+            if (chosen) {
+              applyResolvedProduct(chosen);
+              return;
+            }
+            // Final fallback: fetch full catalog from server mirror and match by alias/slug or guaranteed product synthesis
+            try {
+              const allRes = await fetch('/api/catalog/products');
+              if (allRes.ok) {
+                const allData = await allRes.json();
+                if (Array.isArray(allData?.products)) {
+                  const mergedAll = mergeCatalogProducts([...allData.products, ...products]);
+                  setProducts(mergedAll);
+                  const matched =
+                    resolveProductByIdOrAlias(mergedAll, prodRoute.rawProdId) ||
+                    resolveOrSynthesizeProductForUrl(mergedAll, prodRoute.rawProdId);
+                  if (matched) {
+                    applyResolvedProduct(matched);
+                    return;
+                  }
+                }
+              }
+            } catch {
+              // ignore
+            }
+            // Guaranteed fallback so `/products/:id` on live domain never shows a blank page
+            const guaranteed = resolveOrSynthesizeProductForUrl(products, prodRoute.rawProdId);
+            if (guaranteed) {
+              applyResolvedProduct(guaranteed);
             }
           })
-          .catch(() => null)
           .finally(() => {
             setIsResolvingUrlProduct(false);
           });
         return;
       }
 
-      // 3. Category & Page Routes
-      if (pathname.startsWith('/catalog/') || pathname.startsWith('/category/')) {
-        const catId = decodeURIComponent(
-          pathname.replace(/^\/(catalog|category)\//, '').split('/')[0]
-        );
-        if (catId) {
-          setActiveCategory(catId);
-          setActiveCategoryPage(catId);
-          setDetailedProduct(null);
-          setIsAboutOpen(false);
-          setIsVideoGalleryOpen(false);
-          return;
-        }
-      } else if (pathname === '/about') {
-        setIsAboutOpen(true);
+      // 3. Category / Catalog Routes (/catalog/:catId, /category/:catId, ?catalog=:catId, #/catalog/:catId)
+      const catRoute = extractUrlCatalogRoute();
+      if (catRoute) {
+        setThankYouOrder(null);
+        setActiveCategory(catRoute as ProductCategory);
+        setActiveCategoryPage(catRoute === 'all' ? null : catRoute);
         setDetailedProduct(null);
-        setActiveCategoryPage(null);
-        return;
-      } else if (pathname === '/videos') {
-        setIsVideoGalleryOpen(true);
-        setDetailedProduct(null);
-        setActiveCategoryPage(null);
-        return;
-      } else if (pathname === '/privacy') {
-        setIsPolicyOpen(true);
-        setDetailedProduct(null);
-        setActiveCategoryPage(null);
-        return;
-      } else if (pathname === '/admin') {
-        setIsAdminOpen(true);
-        setDetailedProduct(null);
-        setActiveCategoryPage(null);
+        setIsResolvingUrlProduct(false);
+        setIsAboutOpen(false);
+        setIsVideoGalleryOpen(false);
+        setIsPolicyOpen(false);
+        setIsTrackingOpen(false);
+        setIsAdminOpen(false);
         return;
       }
 
-      if (hash.startsWith('#/category/') || hash.startsWith('#/catalog/')) {
-        const catId = decodeURIComponent(hash.replace(/^#\/(category|catalog)\//, ''));
-        setActiveCategory(catId);
-        setActiveCategoryPage(catId);
-        setDetailedProduct(null);
-        setIsAboutOpen(false);
-        setIsVideoGalleryOpen(false);
-      } else if (hash === '#/about') {
+      // 4. Static Page Routes
+      const normalizedPath = pathname.replace(/\/+$/, '') || '/';
+      if (normalizedPath === '/about' || hash === '#/about') {
         setIsAboutOpen(true);
         setDetailedProduct(null);
         setActiveCategoryPage(null);
         setIsVideoGalleryOpen(false);
         setIsPolicyOpen(false);
+        setIsTrackingOpen(false);
         setIsAdminOpen(false);
-      } else if (hash === '#/videos') {
+        return;
+      } else if (normalizedPath === '/videos' || hash === '#/videos') {
         setIsVideoGalleryOpen(true);
         setDetailedProduct(null);
         setActiveCategoryPage(null);
         setIsAboutOpen(false);
         setIsPolicyOpen(false);
+        setIsTrackingOpen(false);
         setIsAdminOpen(false);
-      } else if (hash === '#/privacy') {
+        return;
+      } else if (normalizedPath === '/privacy' || hash === '#/privacy') {
         setIsPolicyOpen(true);
         setDetailedProduct(null);
         setActiveCategoryPage(null);
         setIsAboutOpen(false);
         setIsVideoGalleryOpen(false);
+        setIsTrackingOpen(false);
         setIsAdminOpen(false);
-      } else if (hash === '#/admin') {
+        return;
+      } else if (normalizedPath === '/track' || normalizedPath === '/tracking' || hash === '#/track') {
+        setIsTrackingOpen(true);
+        setDetailedProduct(null);
+        setActiveCategoryPage(null);
+        setIsAboutOpen(false);
+        setIsVideoGalleryOpen(false);
+        setIsPolicyOpen(false);
+        setIsAdminOpen(false);
+        return;
+      } else if (normalizedPath === '/admin' || hash === '#/admin') {
         setIsAdminOpen(true);
         setDetailedProduct(null);
         setActiveCategoryPage(null);
         setIsAboutOpen(false);
         setIsVideoGalleryOpen(false);
+        setIsPolicyOpen(false);
+        setIsTrackingOpen(false);
+        return;
+      } else if (normalizedPath === '/' && (!hash || hash === '#' || hash === '#/')) {
+        // Explicit Home Route fallback: ensure no stale detail or overlay page blocks the storefront
+        setDetailedProduct(null);
+        setActiveCategoryPage(null);
+        setIsResolvingUrlProduct(false);
+        setIsAboutOpen(false);
+        setIsVideoGalleryOpen(false);
+        setIsPolicyOpen(false);
       }
     };
     syncFromUrl();
     window.addEventListener('hashchange', syncFromUrl);
     window.addEventListener('popstate', syncFromUrl);
+    window.addEventListener('dokandari:urlchange', syncFromUrl);
     return () => {
       window.removeEventListener('hashchange', syncFromUrl);
       window.removeEventListener('popstate', syncFromUrl);
+      window.removeEventListener('dokandari:urlchange', syncFromUrl);
     };
   }, [products]);
 
@@ -659,10 +720,10 @@ function StoreMain() {
     return counts;
   }, [publishedProducts]);
 
-  // Filter products by category & search
+  // Filter products by category & search (with automatic non-empty catalog fallback when searchQuery is empty)
   const filteredProducts = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
-    return publishedProducts.filter((p) => {
+    const matched = publishedProducts.filter((p) => {
       const normCat = normalizeCategoryId(p.category, p.name);
       if (activeCategory === 'all' && !q && (p.category === 'organic_food' || normCat === 'organic_food')) {
         return false;
@@ -677,15 +738,14 @@ function StoreMain() {
         p.description.toLowerCase().includes(q);
       return matchCat && matchQuery;
     });
-  }, [publishedProducts, activeCategory, searchQuery]);
+    if (matched.length === 0 && !q) {
+      return homepageNonOrganicProducts.length > 0 ? homepageNonOrganicProducts : publishedProducts;
+    }
+    return matched;
+  }, [publishedProducts, homepageNonOrganicProducts, activeCategory, searchQuery]);
 
   // Handle instant order click (from "অর্ডার করুন" button -> opens dedicated Instant Checkout Page)
   const handleInstantOrder = (product: Product) => {
-    window.history.pushState(
-      null,
-      '',
-      `/products/${encodeURIComponent(product.id)}/checkout?brand=dokandari`
-    );
     setThankYouOrder(null);
     setDetailedProductStep('checkout');
     setDetailedProduct(product);
@@ -695,7 +755,7 @@ function StoreMain() {
     setIsPolicyOpen(false);
     setIsTrackingOpen(false);
     setIsAdminOpen(false);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    navigateToStoreRoute(`/products/${encodeURIComponent(product.id)}/checkout?brand=dokandari`);
   };
 
   const handleAddProduct = async (newProd: Product) => {
@@ -764,10 +824,19 @@ function StoreMain() {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const compressed = await compressImageFileToDataUrl(file, 1280, 0.84);
-      setHeroAiImage(compressed);
+      setIsHeroAiLoading(true);
+      const uploadedUrl = await uploadBannerImageToServer(file, `hero-slide-${currentSlide + 1}`);
+      setHeroAiImage(uploadedUrl);
+      // Immediately persist the uploaded banner image to the current slide in Firestore + Server Mirror
+      const nextSlides = heroSlides.map((s, idx) =>
+        idx === currentSlide ? { ...s, image: uploadedUrl } : s
+      );
+      setHeroSlides(nextSlides);
+      await saveStoreContentPersisted({ heroSlides: nextSlides });
     } catch (err) {
       console.warn('Hero banner image upload note:', err);
+    } finally {
+      setIsHeroAiLoading(false);
     }
   };
 
@@ -776,34 +845,41 @@ function StoreMain() {
     setIsHeroAiLoading(true);
     try {
       const activeSlide = heroSlides[currentSlide] || heroSlides[0];
-      const res = await fetch('/api/gemini/ai-edit-section', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sectionType: 'hero_banner',
-          prompt:
-            heroAiPrompt.trim() ||
-            'এই ব্যানারের জন্য আকর্ষণীয় প্রিমিয়াম বাংলা শিরোনাম, সাবটাইটেল ও বাটন টেক্সট তৈরি করো।',
-          imageDataUrl: heroAiImage || activeSlide?.image,
-          currentData: activeSlide,
-        }),
-      });
-      const json = await res.json();
-      const d = json?.data || {};
-      const nextSlides = heroSlides.map((s, idx) =>
-        idx === currentSlide
-          ? {
-              ...s,
-              image: heroAiImage || s.image,
-              tag: d.tag || s.tag,
-              title: d.title || s.title,
-              subtitle: d.subtitle || s.subtitle,
-              ctaText: d.ctaText || s.ctaText,
-            }
-          : s
-      );
-      setHeroSlides(nextSlides);
-      await saveStoreContentPersisted({ heroSlides: nextSlides });
+      const effectiveImage = heroAiImage || activeSlide?.image || '';
+      if (heroAiPrompt.trim()) {
+        const res = await fetch('/api/gemini/ai-edit-section', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sectionType: 'hero_banner',
+            instruction: heroAiPrompt.trim(),
+            imageDataUrl: effectiveImage,
+            currentData: activeSlide,
+          }),
+        });
+        const json = await res.json();
+        const d = json?.data || {};
+        const nextSlides = heroSlides.map((s, idx) =>
+          idx === currentSlide
+            ? {
+                ...s,
+                image: effectiveImage,
+                tag: d.tag || s.tag,
+                title: d.title || s.title,
+                subtitle: d.subtitle || s.subtitle,
+                ctaText: d.ctaText || s.ctaText,
+              }
+            : s
+        );
+        setHeroSlides(nextSlides);
+        await saveStoreContentPersisted({ heroSlides: nextSlides });
+      } else {
+        const nextSlides = heroSlides.map((s, idx) =>
+          idx === currentSlide ? { ...s, image: effectiveImage } : s
+        );
+        setHeroSlides(nextSlides);
+        await saveStoreContentPersisted({ heroSlides: nextSlides });
+      }
       setHeroAiImage('');
       setHeroAiPrompt('');
       setIsHeroAiModalOpen(false);
@@ -833,8 +909,7 @@ function StoreMain() {
           setIsPolicyOpen(false);
           setIsTrackingOpen(false);
           setIsAdminOpen(false);
-          window.history.pushState(null, '', '/');
-          window.scrollTo({ top: 0, behavior: 'smooth' });
+          navigateToStoreRoute('/');
         }}
         onOpenAdmin={() => {
           setIsAdminAuthenticated(isAdminSessionValid());
@@ -845,8 +920,7 @@ function StoreMain() {
           setIsVideoGalleryOpen(false);
           setIsPolicyOpen(false);
           setIsTrackingOpen(false);
-          window.history.pushState(null, '', '/admin');
-          window.scrollTo({ top: 0, behavior: 'smooth' });
+          navigateToStoreRoute('/admin');
         }}
         onOpenTracking={() => {
           setIsTrackingOpen(true);
@@ -856,7 +930,7 @@ function StoreMain() {
           setIsVideoGalleryOpen(false);
           setIsPolicyOpen(false);
           setIsAdminOpen(false);
-          window.scrollTo({ top: 0, behavior: 'smooth' });
+          navigateToStoreRoute('/track');
         }}
         onOpenVideoGallery={() => {
           setIsVideoGalleryOpen(true);
@@ -866,8 +940,7 @@ function StoreMain() {
           setIsPolicyOpen(false);
           setIsTrackingOpen(false);
           setIsAdminOpen(false);
-          window.history.pushState(null, '', '/videos');
-          window.scrollTo({ top: 0, behavior: 'smooth' });
+          navigateToStoreRoute('/videos');
         }}
         onOpenAccount={() => setIsAccountOpen(true)}
         onOpenLogin={() => setIsCustomerAuthOpen(true)}
@@ -881,8 +954,7 @@ function StoreMain() {
           setIsPolicyOpen(false);
           setIsAdminOpen(false);
           setIsTrackingOpen(false);
-          window.history.pushState(null, '', '/about');
-          window.scrollTo({ top: 0, behavior: 'smooth' });
+          navigateToStoreRoute('/about');
         }}
         onOpenPrivacy={() => {
           setIsPolicyOpen(true);
@@ -892,8 +964,7 @@ function StoreMain() {
           setIsVideoGalleryOpen(false);
           setIsAdminOpen(false);
           setIsTrackingOpen(false);
-          window.history.pushState(null, '', '/privacy');
-          window.scrollTo({ top: 0, behavior: 'smooth' });
+          navigateToStoreRoute('/privacy');
         }}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
@@ -926,6 +997,7 @@ function StoreMain() {
             onBackToShopping={() => {
               setIsTrackingOpen(false);
               setTrackingOrderId(undefined);
+              navigateToStoreRoute('/');
             }}
           />
         ) : isAdminOpen ? (
@@ -934,7 +1006,7 @@ function StoreMain() {
               onBackToStore={() => {
                 setIsAdminOpen(false);
                 setIsAdminAuthenticated(isAdminSessionValid());
-                window.history.pushState(null, '', '/');
+                navigateToStoreRoute('/');
               }}
               products={products}
               onAddProduct={handleAddProduct}
@@ -955,7 +1027,7 @@ function StoreMain() {
               }}
               onCancel={() => {
                 setIsAdminOpen(false);
-                window.history.pushState(null, '', '/');
+                navigateToStoreRoute('/');
               }}
             />
           )
@@ -967,13 +1039,13 @@ function StoreMain() {
             totalProductsCount={publishedProducts.length}
             onBackToHome={() => {
               setIsAboutOpen(false);
-              window.history.pushState(null, '', '/');
+              navigateToStoreRoute('/');
             }}
             onOpenStoreProducts={() => {
               setIsAboutOpen(false);
               setActiveCategory('all');
               setActiveCategoryPage(null);
-              window.history.pushState(null, '', '/');
+              navigateToStoreRoute('/', { scrollTop: false });
               setTimeout(() => {
                 const elem = document.getElementById('products-section');
                 if (elem) elem.scrollIntoView({ behavior: 'smooth' });
@@ -993,13 +1065,12 @@ function StoreMain() {
             products={publishedProducts}
             onBackToHome={() => {
               setIsVideoGalleryOpen(false);
-              window.history.pushState(null, '', '/');
+              navigateToStoreRoute('/');
             }}
             onOpenProductDetail={(p) => {
               setIsVideoGalleryOpen(false);
               setDetailedProduct(p);
-              window.history.pushState(null, '', `/products/${encodeURIComponent(p.id)}`);
-              window.scrollTo({ top: 0, behavior: 'smooth' });
+              navigateToStoreRoute(`/products/${encodeURIComponent(p.id)}?brand=dokandari`);
             }}
             onInstantOrder={(p) => {
               setIsVideoGalleryOpen(false);
@@ -1012,7 +1083,7 @@ function StoreMain() {
             isAdmin={isAdminAuthenticated}
             onBackToShopping={() => {
               setIsPolicyOpen(false);
-              window.history.pushState(null, '', '/');
+              navigateToStoreRoute('/');
             }}
           />
         ) : detailedProduct ? (
@@ -1026,22 +1097,17 @@ function StoreMain() {
             categoryHeroes={categoryHeroes}
             onSaveCategoryHero={handleSaveCategoryHero}
             onSelectProduct={(p) => {
-              window.history.pushState(
-                null,
-                '',
-                `/products/${encodeURIComponent(p.id)}?brand=dokandari`
-              );
               setThankYouOrder(null);
               setDetailedProductStep('product');
               setDetailedProduct(p);
-              window.scrollTo({ top: 0, behavior: 'smooth' });
+              navigateToStoreRoute(`/products/${encodeURIComponent(p.id)}?brand=dokandari`);
             }}
             onInstantOrderProduct={handleInstantOrder}
             onBack={() => {
               setThankYouOrder(null);
               setDetailedProduct(null);
               setDetailedProductStep('product');
-              window.history.pushState(null, '', '/');
+              navigateToStoreRoute('/');
             }}
             onOpenEdit={(p) => setEditingProduct(p)}
             onOrderSuccess={(orderId) => {
@@ -1077,24 +1143,21 @@ function StoreMain() {
             onBackToHome={() => {
               setActiveCategoryPage(null);
               setActiveCategory('all');
-              window.history.pushState(null, '', '/');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
+              navigateToStoreRoute('/');
             }}
             onSelectCategory={(cat) => {
               setActiveCategory(cat);
               if (cat === 'all') {
                 setActiveCategoryPage(null);
-                window.history.pushState(null, '', '/');
+                navigateToStoreRoute('/');
               } else {
                 setActiveCategoryPage(cat);
-                window.history.pushState(null, '', `/catalog/${encodeURIComponent(cat)}`);
+                navigateToStoreRoute(`/catalog/${encodeURIComponent(cat)}?brand=dokandari`);
               }
-              window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
             onOpenProductDetail={(p) => {
               setDetailedProduct(p);
-              window.history.pushState(null, '', `/products/${encodeURIComponent(p.id)}`);
-              window.scrollTo({ top: 0, behavior: 'smooth' });
+              navigateToStoreRoute(`/products/${encodeURIComponent(p.id)}?brand=dokandari`);
             }}
             onInstantOrder={handleInstantOrder}
             onEditProduct={isAdminAuthenticated ? (p) => setEditingProduct(p) : undefined}
@@ -1136,9 +1199,9 @@ function StoreMain() {
           />
         ) : (
           <>
-            {/* Full-Width Hero Banner Carousel with Overlay Text (Original Design) */}
+            {/* Full-Width 100% Bright Daylight Hero Banner Carousel (Zero Dark/Black Placeholders) */}
             <section
-              className="relative w-full bg-stone-900 overflow-hidden aspect-16/9 sm:aspect-24/9 max-h-[380px] select-none"
+              className="relative w-full bg-gradient-to-r from-[#FFF5F7] via-[#FFFDF9] to-[#FFF0F3] border-b border-rose-200/80 overflow-hidden min-h-[250px] sm:min-h-[340px] md:min-h-[380px] select-none"
               onTouchStart={(e) => {
                 touchStartX.current = e.touches[0].clientX;
               }}
@@ -1162,82 +1225,113 @@ function StoreMain() {
                     currentSlide === idx ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'
                   }`}
                 >
-                  <img
-                    src={slide.image}
-                    alt={slide.title}
-                    className="w-full h-full object-cover object-center opacity-75"
-                    referrerPolicy="no-referrer"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-r from-stone-950/80 via-stone-950/45 to-transparent flex flex-col justify-center px-6 sm:px-14 max-w-2xl text-white space-y-2 sm:space-y-3">
-                    <span className="inline-block w-fit text-[10px] sm:text-xs font-extrabold bg-[#E11D48] text-white px-2.5 py-1 rounded-full uppercase tracking-wider shadow-xs">
-                      {slide.tag}
-                    </span>
-                    <h2 className="text-lg sm:text-3xl font-black leading-tight line-clamp-2 drop-shadow-xs">
-                      {slide.title}
-                    </h2>
-                    <p className="text-xs sm:text-sm text-stone-200 line-clamp-2 max-w-lg">
-                      {slide.subtitle}
-                    </p>
-                    <div className="pt-1">
-                      <button
-                        onClick={() => {
-                          const elem = document.getElementById('products-section');
-                          if (elem) elem.scrollIntoView({ behavior: 'smooth' });
-                        }}
-                        className="px-4 py-2 bg-[#E11D48] hover:bg-[#BE123C] text-white text-xs sm:text-sm font-bold rounded-xl shadow-md transition-all cursor-pointer"
-                      >
-                        {slide.ctaText || 'কালেকশন দেখুন'} &rarr;
-                      </button>
+                  <div className="w-full h-full max-w-7xl mx-auto grid grid-cols-12 items-center px-4 sm:px-10 md:px-14 py-4 sm:py-6 gap-3 sm:gap-6">
+                    {/* Left Copy Column: Crisp Bright Daylight Theme */}
+                    <div className="col-span-7 sm:col-span-7 flex flex-col justify-center space-y-2 sm:space-y-3.5 z-10 pr-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="inline-block w-fit text-[10px] sm:text-xs font-extrabold bg-[#E11D48] text-white px-3 py-1 rounded-full uppercase tracking-wider shadow-xs">
+                          {slide.tag || 'স্পেশাল কালেকশন'}
+                        </span>
+                        <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-bold text-[#BE123C] bg-white/90 border border-rose-200 px-2.5 py-0.5 rounded-full">
+                          ✓ ১০০% অরিজিনাল • ক্যাশ অন ডেলিভারি
+                        </span>
+                      </div>
+                      <h2 className="text-base sm:text-2xl md:text-3xl lg:text-4xl font-black text-stone-900 leading-tight line-clamp-2">
+                        {slide.title}
+                      </h2>
+                      <p className="text-[11px] sm:text-sm text-stone-700 font-medium line-clamp-2 max-w-xl">
+                        {slide.subtitle}
+                      </p>
+                      <div className="pt-1 flex items-center gap-2.5 flex-wrap">
+                        <button
+                          onClick={() => {
+                            const link = (slide.ctaLink || '').trim();
+                            if (link.startsWith('/catalog/')) {
+                              const catId = link.replace('/catalog/', '').split('?')[0];
+                              setActiveCategory(catId as ProductCategory);
+                              setActiveCategoryPage(catId);
+                              navigateToStoreRoute(`${link}?brand=dokandari`);
+                              return;
+                            }
+                            const elem = document.getElementById('products-section');
+                            if (elem) elem.scrollIntoView({ behavior: 'smooth' });
+                          }}
+                          className="px-4 sm:px-6 py-2 sm:py-2.5 bg-[#E11D48] hover:bg-[#BE123C] text-white text-xs sm:text-sm font-extrabold rounded-xl shadow-sm transition-all cursor-pointer"
+                        >
+                          {slide.ctaText || 'কালেকশন দেখুন'} &rarr;
+                        </button>
+                        <span className="text-[10px] sm:text-xs font-bold text-stone-500 bg-white/80 px-2.5 py-1 rounded-lg border border-rose-100">
+                          স্লাইড {idx + 1} / {heroSlides.length}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Right Product / Model Showcase Card: Pure Bright White Frame (Never Black/Dark) */}
+                    <div className="col-span-5 sm:col-span-5 h-[180px] sm:h-[260px] md:h-[310px] flex items-center justify-center">
+                      <div className="relative w-full h-full rounded-2xl bg-white border-2 border-white shadow-md overflow-hidden flex items-center justify-center">
+                        <img
+                          src={slide.image || '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg'}
+                          alt={slide.title}
+                          className="w-full h-full object-cover object-center bg-[#FFFDF9]"
+                          referrerPolicy="no-referrer"
+                          onError={(e) => {
+                            const target = e.currentTarget;
+                            if (!target.src.includes('Ha2ef56dd79ed496bafac7990404868f7u.jpg')) {
+                              target.src = '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg';
+                            }
+                          }}
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
               ))}
 
-              {/* Manual Previous / Next Controls */}
+              {/* Manual Previous / Next Controls (Bright White & Rose Buttons) */}
               <button
                 onClick={() => setCurrentSlide((prev) => (prev - 1 + heroSlides.length) % heroSlides.length)}
                 aria-label="Previous slide"
-                className="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 z-20 w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-stone-950/50 hover:bg-[#E11D48] text-white flex items-center justify-center backdrop-blur-xs transition-all cursor-pointer"
+                className="absolute left-1.5 sm:left-3 top-1/2 -translate-y-1/2 z-20 w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-white/95 hover:bg-[#E11D48] text-stone-800 hover:text-white border border-rose-200 shadow-sm flex items-center justify-center transition-all cursor-pointer"
               >
                 <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
               <button
                 onClick={() => setCurrentSlide((prev) => (prev + 1) % heroSlides.length)}
                 aria-label="Next slide"
-                className="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 z-20 w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-stone-950/50 hover:bg-[#E11D48] text-white flex items-center justify-center backdrop-blur-xs transition-all cursor-pointer"
+                className="absolute right-1.5 sm:right-3 top-1/2 -translate-y-1/2 z-20 w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-white/95 hover:bg-[#E11D48] text-stone-800 hover:text-white border border-rose-200 shadow-sm flex items-center justify-center transition-all cursor-pointer"
               >
                 <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
 
-              {/* Slider Dots */}
-              <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex gap-2">
+              {/* Slider Dots for all 8-10 Slides */}
+              <div className="absolute bottom-2.5 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 bg-white/90 px-3 py-1 rounded-full border border-rose-200/80 shadow-2xs">
                 {heroSlides.map((_, idx) => (
                   <button
                     key={idx}
                     onClick={() => setCurrentSlide(idx)}
-                    className={`h-1.5 rounded-full transition-all cursor-pointer ${
-                      currentSlide === idx ? 'w-6 bg-[#E11D48]' : 'w-2 bg-white/60'
+                    className={`h-2 rounded-full transition-all cursor-pointer ${
+                      currentSlide === idx ? 'w-6 bg-[#E11D48]' : 'w-2 bg-rose-300 hover:bg-rose-400'
                     }`}
                   />
                 ))}
               </div>
 
-              {/* Admin-Only Quick AI Hero Banner Edit Button */}
+              {/* Admin-Only Quick AI Hero Banner Edit Button (Bright Theme) */}
               {isAdminAuthenticated && (
                 <button
                   type="button"
                   onClick={() => setIsHeroAiModalOpen(true)}
-                  className="absolute top-3 right-3 z-20 px-3 py-1.5 rounded-xl bg-stone-950/75 hover:bg-[#E11D48] text-white text-[11px] font-bold border border-white/20 flex items-center gap-1.5 backdrop-blur-xs cursor-pointer transition-all"
+                  className="absolute top-2.5 right-2.5 z-20 px-3 py-1.5 rounded-xl bg-white/95 hover:bg-[#E11D48] text-[#E11D48] hover:text-white text-[11px] font-extrabold border border-rose-300 shadow-xs flex items-center gap-1.5 cursor-pointer transition-all"
                 >
-                  <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                  <span>✨ AI ব্যানার এডিট</span>
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>✨ ব্যানার ছবি/লেখা এডিট</span>
                 </button>
               )}
             </section>
 
-            {/* Admin-Only Hero Banner AI Edit Modal */}
+            {/* Admin-Only Hero Banner AI Edit Modal (Bright Backdrop) */}
             {isAdminAuthenticated && isHeroAiModalOpen && (
-              <div className="fixed inset-0 z-50 bg-stone-950/60 backdrop-blur-xs flex items-center justify-center p-4">
+              <div className="fixed inset-0 z-50 bg-rose-950/25 backdrop-blur-xs flex items-center justify-center p-4">
                 <div className="bg-white rounded-2xl max-w-lg w-full p-5 shadow-2xl border border-rose-200 text-xs space-y-4">
                   <div className="flex items-center justify-between pb-2.5 border-b border-rose-100">
                     <h3 className="text-sm font-extrabold text-stone-900 flex items-center gap-1.5">
@@ -1321,18 +1415,16 @@ function StoreMain() {
                 setActiveCategory(cat);
                 if (cat === 'all') {
                   setActiveCategoryPage(null);
-                  window.history.pushState(null, '', '/');
+                  navigateToStoreRoute('/');
                 } else {
                   setActiveCategoryPage(cat);
-                  window.history.pushState(null, '', `/catalog/${encodeURIComponent(cat)}`);
-                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                  navigateToStoreRoute(`/catalog/${encodeURIComponent(cat)}?brand=dokandari`);
                 }
               }}
               onOpenDedicatedPage={(cat) => {
                 setActiveCategory(cat);
                 setActiveCategoryPage(cat);
-                window.history.pushState(null, '', `/catalog/${encodeURIComponent(cat)}`);
-                window.scrollTo({ top: 0, behavior: 'smooth' });
+                navigateToStoreRoute(`/catalog/${encodeURIComponent(cat)}?brand=dokandari`);
               }}
               productCounts={productCounts}
             />
@@ -1431,8 +1523,7 @@ function StoreMain() {
                           onOpenDetail={(p) => {
                             setDetailedProductStep('product');
                             setDetailedProduct(p);
-                            window.history.pushState(null, '', `/products/${encodeURIComponent(p.id)}?brand=dokandari`);
-                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                            navigateToStoreRoute(`/products/${encodeURIComponent(p.id)}?brand=dokandari`);
                           }}
                           onInstantOrder={handleInstantOrder}
                           onEditProduct={
@@ -1507,8 +1598,7 @@ function StoreMain() {
                             onClick={() => {
                               setActiveCategory(cat.id);
                               setActiveCategoryPage(cat.id);
-                              window.history.pushState(null, '', `/catalog/${encodeURIComponent(cat.id)}`);
-                              window.scrollTo({ top: 0, behavior: 'smooth' });
+                              navigateToStoreRoute(`/catalog/${encodeURIComponent(cat.id)}?brand=dokandari`);
                             }}
                             className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl border text-xs font-bold transition-all cursor-pointer shrink-0 ${
                               isOrganicCat
@@ -1530,8 +1620,7 @@ function StoreMain() {
                               onOpenDetail={(p) => {
                                 setDetailedProductStep('product');
                                 setDetailedProduct(p);
-                                window.history.pushState(null, '', `/products/${encodeURIComponent(p.id)}?brand=dokandari`);
-                                window.scrollTo({ top: 0, behavior: 'smooth' });
+                                navigateToStoreRoute(`/products/${encodeURIComponent(p.id)}?brand=dokandari`);
                               }}
                               onInstantOrder={handleInstantOrder}
                               onEditProduct={
@@ -1579,7 +1668,7 @@ function StoreMain() {
                         onClick={() => {
                           setActiveCategory('all');
                           setActiveCategoryPage(null);
-                          window.history.pushState(null, '', '/');
+                          navigateToStoreRoute('/', { scrollTop: false });
                         }}
                         className="px-2.5 py-1 rounded-lg bg-[#E11D48] text-white text-[11px] font-bold cursor-pointer"
                       >
@@ -1614,8 +1703,7 @@ function StoreMain() {
                         onOpenDetail={(p) => {
                           setDetailedProductStep('product');
                           setDetailedProduct(p);
-                          window.history.pushState(null, '', `/products/${encodeURIComponent(p.id)}?brand=dokandari`);
-                          window.scrollTo({ top: 0, behavior: 'smooth' });
+                          navigateToStoreRoute(`/products/${encodeURIComponent(p.id)}?brand=dokandari`);
                         }}
                         onInstantOrder={handleInstantOrder}
                         onEditProduct={
@@ -1631,6 +1719,19 @@ function StoreMain() {
                 )}
               </div>
             </section>
+
+            {/* Customer Real-Life Experience (UGC) Section */}
+            <div id="customer-ugc-section">
+              <CustomerUgcSection
+                products={publishedProducts}
+                isAdmin={isAdminAuthenticated}
+                onSelectProduct={(p) => {
+                  setDetailedProductStep('product');
+                  setDetailedProduct(p);
+                  navigateToStoreRoute(`/products/${encodeURIComponent(p.id)}?brand=dokandari`);
+                }}
+              />
+            </div>
 
             {/* Founder & CEO Section with Trust Cards */}
             <div id="founder-section">
@@ -1661,8 +1762,7 @@ function StoreMain() {
             setIsAboutOpen(false);
             setIsVideoGalleryOpen(false);
             setIsTrackingOpen(false);
-            window.location.hash = '#/admin';
-            window.scrollTo({ top: 0, behavior: 'smooth' });
+            navigateToStoreRoute('/admin');
           }}
           onExitAdminMode={() => {
             localStorage.removeItem('dokandari_admin_session');
@@ -1693,8 +1793,7 @@ function StoreMain() {
           setIsVideoGalleryOpen(false);
           setIsPolicyOpen(false);
           setIsTrackingOpen(false);
-          window.location.hash = '#/admin';
-          window.scrollTo({ top: 0, behavior: 'smooth' });
+          navigateToStoreRoute('/admin');
         }}
         onSelectCategory={(cat) => {
           setActiveCategory(cat);
@@ -1705,12 +1804,11 @@ function StoreMain() {
           setIsAdminOpen(false);
           if (cat === 'all') {
             setActiveCategoryPage(null);
-            window.history.replaceState(null, '', window.location.pathname);
+            navigateToStoreRoute('/');
           } else {
             setActiveCategoryPage(cat);
-            window.location.hash = `#/category/${cat}`;
+            navigateToStoreRoute(`/catalog/${encodeURIComponent(cat)}?brand=dokandari`);
           }
-          window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
         onOpenTracking={() => {
           setIsTrackingOpen(true);
@@ -1719,7 +1817,7 @@ function StoreMain() {
           setIsAboutOpen(false);
           setIsVideoGalleryOpen(false);
           setIsAdminOpen(false);
-          window.scrollTo({ top: 0, behavior: 'smooth' });
+          navigateToStoreRoute('/track');
         }}
         onOpenAiAssistant={() => setIsAiOpen(true)}
         onOpenAbout={() => {
@@ -1729,8 +1827,7 @@ function StoreMain() {
           setIsVideoGalleryOpen(false);
           setIsAdminOpen(false);
           setIsTrackingOpen(false);
-          window.location.hash = '#/about';
-          window.scrollTo({ top: 0, behavior: 'smooth' });
+          navigateToStoreRoute('/about');
         }}
         onOpenPrivacy={() => {
           setIsPolicyOpen(true);
@@ -1740,8 +1837,7 @@ function StoreMain() {
           setIsVideoGalleryOpen(false);
           setIsAdminOpen(false);
           setIsTrackingOpen(false);
-          window.location.hash = '#/privacy';
-          window.scrollTo({ top: 0, behavior: 'smooth' });
+          navigateToStoreRoute('/privacy');
         }}
       />
 
@@ -1781,6 +1877,7 @@ function StoreMain() {
           setIsPolicyOpen(false);
           setIsTrackingOpen(false);
           setIsAdminOpen(false);
+          navigateToStoreRoute('/');
         }}
       />
 
@@ -1835,12 +1932,7 @@ function StoreMain() {
           setIsPolicyOpen(false);
           setIsTrackingOpen(false);
           setIsAdminOpen(false);
-          window.history.pushState(
-            null,
-            '',
-            `/products/${encodeURIComponent(p.id)}?brand=dokandari`
-          );
-          window.scrollTo({ top: 0, behavior: 'smooth' });
+          navigateToStoreRoute(`/products/${encodeURIComponent(p.id)}?brand=dokandari`);
         }}
         onGoHome={() => {
           setIsMenuOpen(false);
@@ -1852,8 +1944,7 @@ function StoreMain() {
           setDetailedProduct(null);
           setIsTrackingOpen(false);
           setIsAdminOpen(false);
-          window.history.replaceState(null, '', window.location.pathname);
-          window.scrollTo({ top: 0, behavior: 'smooth' });
+          navigateToStoreRoute('/');
         }}
         onOpenAccount={() => {
           setIsMenuOpen(false);
@@ -1872,7 +1963,7 @@ function StoreMain() {
           setIsPolicyOpen(false);
           setDetailedProduct(null);
           setIsAdminOpen(false);
-          window.scrollTo({ top: 0, behavior: 'smooth' });
+          navigateToStoreRoute('/track');
         }}
         onOpenVideoGallery={() => {
           setIsMenuOpen(false);
@@ -1883,8 +1974,7 @@ function StoreMain() {
           setDetailedProduct(null);
           setIsTrackingOpen(false);
           setIsAdminOpen(false);
-          window.location.hash = '#/videos';
-          window.scrollTo({ top: 0, behavior: 'smooth' });
+          navigateToStoreRoute('/videos');
         }}
         onOpenAbout={() => {
           setIsMenuOpen(false);
@@ -1894,8 +1984,7 @@ function StoreMain() {
           setIsPolicyOpen(false);
           setDetailedProduct(null);
           setIsAdminOpen(false);
-          window.location.hash = '#/about';
-          window.scrollTo({ top: 0, behavior: 'smooth' });
+          navigateToStoreRoute('/about');
         }}
         onOpenPrivacy={() => {
           setIsMenuOpen(false);
@@ -1905,8 +1994,7 @@ function StoreMain() {
           setIsVideoGalleryOpen(false);
           setDetailedProduct(null);
           setIsAdminOpen(false);
-          window.location.hash = '#/privacy';
-          window.scrollTo({ top: 0, behavior: 'smooth' });
+          navigateToStoreRoute('/privacy');
         }}
         onOpenAiAssistant={() => {
           setIsMenuOpen(false);
@@ -1921,8 +2009,7 @@ function StoreMain() {
           setIsVideoGalleryOpen(false);
           setIsPolicyOpen(false);
           setDetailedProduct(null);
-          window.location.hash = '#/admin';
-          window.scrollTo({ top: 0, behavior: 'smooth' });
+          navigateToStoreRoute('/admin');
         }}
         onSelectCategory={(cat) => {
           setActiveCategory(cat);
@@ -1933,12 +2020,11 @@ function StoreMain() {
           setDetailedProduct(null);
           if (cat === 'all') {
             setActiveCategoryPage(null);
-            window.history.replaceState(null, '', window.location.pathname);
+            navigateToStoreRoute('/');
           } else {
             setActiveCategoryPage(cat);
-            window.location.hash = `#/category/${cat}`;
+            navigateToStoreRoute(`/catalog/${encodeURIComponent(cat)}?brand=dokandari`);
           }
-          window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
       />
 
@@ -1949,8 +2035,7 @@ function StoreMain() {
         products={publishedProducts}
         onSelectProduct={(p) => {
           setDetailedProduct(p);
-          window.location.hash = `#/products/${p.id}`;
-          window.scrollTo({ top: 0, behavior: 'smooth' });
+          navigateToStoreRoute(`/products/${encodeURIComponent(p.id)}?brand=dokandari`);
         }}
       />
 
@@ -1969,8 +2054,7 @@ function StoreMain() {
               setIsVideoGalleryOpen(false);
               setIsPolicyOpen(false);
               setIsTrackingOpen(false);
-              window.history.pushState(null, '', '/');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
+              navigateToStoreRoute('/');
             }}
             className={`flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-xl text-[10px] font-bold transition-colors cursor-pointer ${
               !detailedProduct && !activeCategoryPage && !isAboutOpen && !isTrackingOpen && !isVideoGalleryOpen
@@ -1991,7 +2075,7 @@ function StoreMain() {
               setIsVideoGalleryOpen(false);
               setIsPolicyOpen(false);
               setIsTrackingOpen(false);
-              window.history.pushState(null, '', '/');
+              navigateToStoreRoute('/', { scrollTop: false });
               setTimeout(() => {
                 const elem = document.getElementById('products-section');
                 if (elem) elem.scrollIntoView({ behavior: 'smooth' });
@@ -2011,8 +2095,7 @@ function StoreMain() {
               setIsVideoGalleryOpen(false);
               setIsPolicyOpen(false);
               setIsTrackingOpen(false);
-              window.location.hash = '#/about';
-              window.scrollTo({ top: 0, behavior: 'smooth' });
+              navigateToStoreRoute('/about');
             }}
             className={`flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-xl text-[10px] font-bold transition-colors cursor-pointer ${
               isAboutOpen ? 'text-[#E11D48] bg-rose-50' : 'text-stone-600'
@@ -2030,7 +2113,7 @@ function StoreMain() {
               setIsAboutOpen(false);
               setIsVideoGalleryOpen(false);
               setIsPolicyOpen(false);
-              window.scrollTo({ top: 0, behavior: 'smooth' });
+              navigateToStoreRoute('/track');
             }}
             className={`flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-xl text-[10px] font-bold transition-colors cursor-pointer ${
               isTrackingOpen ? 'text-[#E11D48] bg-rose-50' : 'text-stone-600'

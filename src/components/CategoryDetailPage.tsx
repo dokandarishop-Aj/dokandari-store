@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   ChevronRight,
   ChevronLeft,
@@ -19,16 +19,22 @@ import {
   X,
   Plus,
   Sparkles,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { Product, ProductCategory, OFFICIAL_CATEGORIES } from '../types';
 import { ProductCard } from './ProductCard';
 import {
   CategoryHeroConfig,
   DEFAULT_CATEGORY_HEROES,
-  compressImageFileToDataUrl,
+  DEFAULT_ORGANIC_FOOD_HERO_SLIDES,
+  HeroSlideItem,
+  uploadBannerImageToServer,
   resolveSafeProductImageUrl,
   handleProductImageError,
+  resolveCategoryIdFromUrl,
 } from '../lib/storeSync';
+import { getCatalogShareUrl } from '../lib/gemini';
 
 interface CategoryDetailPageProps {
   categoryId: ProductCategory;
@@ -59,14 +65,21 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'popular' | 'price_asc' | 'price_desc' | 'rating'>('popular');
+  const [catLinkCopied, setCatLinkCopied] = useState(false);
+  const [organicSlideIdx, setOrganicSlideIdx] = useState(0);
   const bestSellingRef = useRef<HTMLDivElement | null>(null);
 
-  const isOrganic = categoryId === 'organic_food';
+  const effectiveCategoryId = useMemo(
+    () => resolveCategoryIdFromUrl(categoryId),
+    [categoryId]
+  );
 
-  const foundCategory = OFFICIAL_CATEGORIES.find((c) => c.id === categoryId);
+  const isOrganic = effectiveCategoryId === 'organic_food';
+
+  const foundCategory = OFFICIAL_CATEGORIES.find((c) => c.id === effectiveCategoryId);
   const activeHero: CategoryHeroConfig = useMemo(() => {
-    const custom = categoryHeroes?.[categoryId];
-    const fallback = DEFAULT_CATEGORY_HEROES[categoryId] || {
+    const custom = categoryHeroes?.[effectiveCategoryId];
+    const fallback = DEFAULT_CATEGORY_HEROES[effectiveCategoryId] || {
       title: foundCategory?.nameBn || 'সকল এক্সক্লুসিভ কালেকশন',
       subtitle:
         'Dokandari আন্তর্জাতিক মানের প্রিমিয়াম প্রডাক্ট কালেকশন। সরাসরি ১০০% অরিজিনাল কোয়ালিটি ও ক্যাশ অন ডেলিভারি নিশ্চয়তা।',
@@ -77,7 +90,22 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({
       ctaText: isOrganic ? 'অর্গানিক ফুড দেখুন' : 'কালেকশন দেখুন',
     };
     return custom ? { ...fallback, ...custom } : fallback;
-  }, [categoryHeroes, categoryId, foundCategory, isOrganic]);
+  }, [categoryHeroes, effectiveCategoryId, foundCategory, isOrganic]);
+
+  const organicSlides: HeroSlideItem[] = useMemo(() => {
+    if (Array.isArray(activeHero.slides) && activeHero.slides.length > 0) {
+      return activeHero.slides;
+    }
+    return DEFAULT_ORGANIC_FOOD_HERO_SLIDES;
+  }, [activeHero.slides]);
+
+  useEffect(() => {
+    if (!isOrganic || organicSlides.length <= 1) return;
+    const timer = setInterval(() => {
+      setOrganicSlideIdx((prev) => (prev + 1) % organicSlides.length);
+    }, 3500);
+    return () => clearInterval(timer);
+  }, [isOrganic, organicSlides.length]);
 
   // Inline Category Hero Editor modal state
   const [isEditingHero, setIsEditingHero] = useState(false);
@@ -90,11 +118,20 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({
   const [isSavingHero, setIsSavingHero] = useState(false);
 
   const openHeroEditor = () => {
-    setEditTitle(activeHero.title);
-    setEditSubtitle(activeHero.subtitle);
-    setEditTag(activeHero.tag);
-    setEditImage(activeHero.image);
-    setEditCtaText(activeHero.ctaText || (isOrganic ? 'অর্গানিক ফুড দেখুন' : 'কালেকশন দেখুন'));
+    if (isOrganic && organicSlides[organicSlideIdx]) {
+      const s = organicSlides[organicSlideIdx];
+      setEditTitle(s.title);
+      setEditSubtitle(s.subtitle);
+      setEditTag(s.tag);
+      setEditImage(s.image);
+      setEditCtaText(s.ctaText || 'অর্গানিক ফুড দেখুন');
+    } else {
+      setEditTitle(activeHero.title);
+      setEditSubtitle(activeHero.subtitle);
+      setEditTag(activeHero.tag);
+      setEditImage(activeHero.image);
+      setEditCtaText(activeHero.ctaText || (isOrganic ? 'অর্গানিক ফুড দেখুন' : 'কালেকশন দেখুন'));
+    }
     setIsEditingHero(true);
   };
 
@@ -103,8 +140,25 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({
     if (!file) return;
     setIsUploadingHeroImg(true);
     try {
-      const dataUrl = await compressImageFileToDataUrl(file, 960, 0.78);
-      setEditImage(dataUrl);
+      const uploadedUrl = await uploadBannerImageToServer(file, `cat-hero-${effectiveCategoryId}`);
+      setEditImage(uploadedUrl);
+      if (onSaveCategoryHero) {
+        if (isOrganic) {
+          const nextSlides = organicSlides.map((s, idx) =>
+            idx === organicSlideIdx ? { ...s, image: uploadedUrl } : s
+          );
+          await onSaveCategoryHero(effectiveCategoryId, {
+            ...activeHero,
+            image: organicSlideIdx === 0 ? uploadedUrl : activeHero.image,
+            slides: nextSlides,
+          });
+        } else {
+          await onSaveCategoryHero(effectiveCategoryId, {
+            ...activeHero,
+            image: uploadedUrl,
+          });
+        }
+      }
     } catch (err) {
       console.warn('Hero image upload error:', err);
     } finally {
@@ -117,30 +171,65 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({
     if (!onSaveCategoryHero) return;
     setIsSavingHero(true);
     try {
-      await onSaveCategoryHero(categoryId, {
-        title: editTitle.trim() || activeHero.title,
-        subtitle: editSubtitle.trim() || activeHero.subtitle,
-        tag: editTag.trim() || activeHero.tag,
-        image: editImage.trim() || activeHero.image,
-        ctaText: editCtaText.trim() || (isOrganic ? 'অর্গানিক ফুড দেখুন' : 'কালেকশন দেখুন'),
-      });
+      if (isOrganic) {
+        const nextSlides = organicSlides.map((s, idx) =>
+          idx === organicSlideIdx
+            ? {
+                ...s,
+                title: editTitle.trim() || s.title,
+                subtitle: editSubtitle.trim() || s.subtitle,
+                tag: editTag.trim() || s.tag,
+                image: editImage.trim() || s.image,
+                ctaText: editCtaText.trim() || 'অর্গানিক ফুড দেখুন',
+              }
+            : s
+        );
+        await onSaveCategoryHero(effectiveCategoryId, {
+          ...activeHero,
+          title: organicSlideIdx === 0 ? editTitle.trim() || activeHero.title : activeHero.title,
+          subtitle: organicSlideIdx === 0 ? editSubtitle.trim() || activeHero.subtitle : activeHero.subtitle,
+          tag: organicSlideIdx === 0 ? editTag.trim() || activeHero.tag : activeHero.tag,
+          image: organicSlideIdx === 0 ? editImage.trim() || activeHero.image : activeHero.image,
+          ctaText: editCtaText.trim() || 'অর্গানিক ফুড দেখুন',
+          slides: nextSlides,
+        });
+      } else {
+        await onSaveCategoryHero(effectiveCategoryId, {
+          title: editTitle.trim() || activeHero.title,
+          subtitle: editSubtitle.trim() || activeHero.subtitle,
+          tag: editTag.trim() || activeHero.tag,
+          image: editImage.trim() || activeHero.image,
+          ctaText: editCtaText.trim() || 'কালেকশন দেখুন',
+        });
+      }
       setIsEditingHero(false);
     } finally {
       setIsSavingHero(false);
     }
   };
 
-  // Filter products for this specific category
+  // Filter products for this specific category (with normalized category & keyword matching)
+  // If a category has 0 exact matches on initial load, fall back to published catalog products so /catalog/:catId never renders empty
   const categoryProducts = useMemo(() => {
-    return products.filter((p) => {
-      if (p.status === 'draft') return false;
-      if (categoryId === 'all') return true;
-      if (isOrganic && (p.category === 'organic_food' || p.category === 'fashion_clothing')) {
+    const publishedOnly = products.filter((p) => p && p.status !== 'draft');
+    const exactMatches = publishedOnly.filter((p) => {
+      if (effectiveCategoryId === 'all') return true;
+      const normProdCat = resolveCategoryIdFromUrl(p.category, p.name);
+      if (
+        isOrganic &&
+        (p.category === 'organic_food' ||
+          p.category === 'fashion_clothing' ||
+          normProdCat === 'organic_food')
+      ) {
         return true;
       }
-      return p.category === categoryId;
+      return p.category === effectiveCategoryId || normProdCat === effectiveCategoryId;
     });
-  }, [products, categoryId, isOrganic]);
+    if (exactMatches.length > 0) return exactMatches;
+    return publishedOnly.filter(
+      (p) => p.category !== 'organic_food' && resolveCategoryIdFromUrl(p.category, p.name) !== 'organic_food'
+    );
+  }, [products, effectiveCategoryId, isOrganic]);
 
   // Apply search & sorting
   const filteredProducts = useMemo(() => {
@@ -174,16 +263,18 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({
         isOrganic ? 'bg-[#F4FBF7]' : 'bg-[#FAF9F6]'
       }`}
     >
-      {/* Dedicated Light-Theme Category Hero Banner Section (Soft Green for Organic Food, Soft Rose for other categories) */}
+      {/* Top Header / Hero Area:
+          - Organic Food gets a Homepage-style Full-Width Bright Hero Banner Carousel
+          - All other Catalog Pages get a compact, ultra-slim 100% Bright Header Bar (Zero Dark/Black Placeholders) */}
       <div
-        className={`relative w-full overflow-hidden py-6 sm:py-10 border-b ${
+        className={`relative w-full overflow-hidden border-b ${
           isOrganic
-            ? 'bg-gradient-to-br from-[#F0FDF4] via-[#ECFDF5] to-[#DCFCE7] border-emerald-200 text-stone-900'
-            : 'bg-gradient-to-br from-[#FFF5F7] via-[#FFF0F3] to-[#FFE4E8] border-rose-200 text-stone-900'
+            ? 'bg-gradient-to-r from-[#ECFDF5] via-[#F9FEFB] to-[#DCFCE7] border-emerald-200 py-3 sm:py-5 text-stone-900'
+            : 'bg-gradient-to-r from-[#FFF5F7] via-[#FFFDF9] to-[#FFF0F3] border-rose-200/80 py-2.5 sm:py-3.5 text-stone-900'
         }`}
       >
-        <div className="w-full px-3 sm:px-6 lg:px-8 space-y-5">
-          {/* Top Bar: Breadcrumb + Admin Edit Hero & Add Product Buttons */}
+        <div className="w-full px-3 sm:px-6 lg:px-8 space-y-3">
+          {/* Top Bar: Breadcrumb + Share Catalog Link + Admin Edit Hero & Add Product Buttons */}
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <nav
               className={`flex items-center gap-2 text-xs font-semibold ${
@@ -205,148 +296,209 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({
               </span>
             </nav>
 
-            {isAdmin && (
-              <div className="flex items-center gap-2 flex-wrap">
-                {onAddNewCategoryProduct && (
-                  <button
-                    type="button"
-                    onClick={() => onAddNewCategoryProduct(categoryId)}
-                    className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-white text-xs font-extrabold shadow-xs cursor-pointer transition-all ${
-                      isOrganic
-                        ? 'bg-[#16A34A] hover:bg-[#15803D]'
-                        : 'bg-[#E11D48] hover:bg-[#BE123C]'
-                    }`}
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>এই ক্যাটাগরিতে নতুন প্রোডাক্ট যোগ করুন</span>
-                  </button>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => {
+                  const shareUrl = getCatalogShareUrl(effectiveCategoryId);
+                  navigator.clipboard.writeText(shareUrl).catch(() => null);
+                  setCatLinkCopied(true);
+                  setTimeout(() => setCatLinkCopied(false), 2500);
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-rose-50 text-stone-800 border border-stone-200 text-xs font-extrabold shadow-2xs cursor-pointer transition-all"
+                title={getCatalogShareUrl(effectiveCategoryId)}
+              >
+                {catLinkCopied ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                    <span className="text-emerald-700">ক্যাটালগ লিংক কপি হয়েছে!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5 text-[#E11D48]" />
+                    <span>🔗 ক্যাটালগ লিংক কপি করুন</span>
+                  </>
                 )}
-                {onSaveCategoryHero && (
-                  <button
-                    type="button"
-                    onClick={openHeroEditor}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-stone-950 text-xs font-extrabold shadow-xs cursor-pointer transition-all"
-                  >
-                    <Edit3 className="w-3.5 h-3.5" />
-                    <span>✎ হিরো ব্যানার এডিট করুন</span>
-                  </button>
-                )}
-              </div>
-            )}
+              </button>
+
+              {isAdmin && (
+                <>
+                  {onAddNewCategoryProduct && (
+                    <button
+                      type="button"
+                      onClick={() => onAddNewCategoryProduct(effectiveCategoryId)}
+                      className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-white text-xs font-extrabold shadow-xs cursor-pointer transition-all ${
+                        isOrganic
+                          ? 'bg-[#16A34A] hover:bg-[#15803D]'
+                          : 'bg-[#E11D48] hover:bg-[#BE123C]'
+                      }`}
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>এই ক্যাটাগরিতে নতুন প্রোডাক্ট যোগ করুন</span>
+                    </button>
+                  )}
+                  {onSaveCategoryHero && (
+                    <button
+                      type="button"
+                      onClick={openHeroEditor}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-stone-950 text-xs font-extrabold shadow-xs cursor-pointer transition-all"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                      <span>
+                        {isOrganic
+                          ? `✎ অর্গানিক স্লাইড #${organicSlideIdx + 1} এডিট`
+                          : '✎ ক্যাটাগরি হেডার এডিট'}
+                      </span>
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
           </div>
 
-          {/* Organic Food gets the Rich Hero Section; All other categories get a sleek thin display banner without promo text */}
+          {/* Organic Food: Homepage-Style Full-Width Bright Hero Banner Carousel */}
           {isOrganic ? (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
-              <div className="lg:col-span-7 space-y-3.5">
-                <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full text-white text-xs font-extrabold tracking-wide shadow-2xs bg-[#16A34A]">
-                  <img
-                    src={foundCategory?.image || activeHero.image}
-                    alt={foundCategory?.nameBn || ''}
-                    className="w-4 h-4 rounded-full object-cover border border-white/60"
-                    referrerPolicy="no-referrer"
-                  />
-                  <span>{activeHero.tag || foundCategory?.nameBn}</span>
-                </div>
-
-                <h1 className="text-xl sm:text-4xl font-extrabold tracking-tight text-stone-900 leading-tight">
-                  {activeHero.title}
-                </h1>
-
-                <p className="text-xs sm:text-base text-stone-700 leading-relaxed font-medium max-w-2xl">
-                  {activeHero.subtitle}
-                </p>
-
-                <div className="pt-1 flex flex-wrap items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const gridEl = document.getElementById('category-products-grid');
-                      if (gridEl) gridEl.scrollIntoView({ behavior: 'smooth' });
-                    }}
-                    className="px-5 py-2.5 text-white rounded-xl text-xs sm:text-sm font-extrabold shadow-sm cursor-pointer transition-all bg-gradient-to-r from-[#16A34A] to-[#15803D] hover:from-[#15803D] hover:to-[#166534]"
-                  >
-                    {activeHero.ctaText || 'অর্গানিক ফুড দেখুন'} &rarr;
-                  </button>
-
-                  <span className="px-3.5 py-2 rounded-xl bg-white border text-xs font-extrabold shadow-2xs border-emerald-200 text-[#15803D]">
-                    মোট {categoryProducts.length}টি বাছাইকৃত অর্গানিক ফুড স্টক
-                  </span>
-                </div>
-
-                {/* Value Badges in Organic Light Mode */}
-                <div className="pt-2 flex flex-wrap items-center gap-2 text-[11px] font-bold text-stone-800">
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border shadow-2xs border-emerald-200">
-                    <ShieldCheck className="w-4 h-4 text-[#16A34A]" />
-                    <span>১০০% কেমিক্যালমুক্ত ও খাঁটি অর্গানিক</span>
-                  </span>
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border shadow-2xs border-emerald-200">
-                    <Truck className="w-4 h-4 text-[#16A34A]" />
-                    <span>ক্যাশ অন ডেলিভারি (খুলে দেখে পেমেন্ট)</span>
-                  </span>
-                </div>
-              </div>
-
-              {/* Right Column: Organic Showcase Image */}
-              <div className="lg:col-span-5">
-                <div className="relative rounded-3xl overflow-hidden bg-white border-2 p-2 shadow-md border-emerald-200">
-                  <div className="relative aspect-16/10 w-full rounded-2xl overflow-hidden bg-stone-50">
-                    <img
-                      src={resolveSafeProductImageUrl(activeHero.image, categoryProducts[0], 0)}
-                      alt={activeHero.title}
-                      onError={(e) => handleProductImageError(e, categoryProducts[0], 0)}
-                      loading="eager"
-                      decoding="async"
-                      className="w-full h-full object-cover object-center"
-                      referrerPolicy="no-referrer"
-                    />
-                    <div className="absolute bottom-2.5 left-2.5 right-2.5 px-3.5 py-2 rounded-xl bg-white/95 backdrop-blur-xs border border-emerald-200 flex items-center justify-between shadow-sm">
-                      <div>
-                        <span className="text-[10px] font-extrabold uppercase tracking-wider block text-[#15803D]">
-                          🌿 Dokandari Organic Store
+            <div className="relative w-full rounded-2xl bg-gradient-to-r from-[#ECFDF5] via-[#FFFFFF] to-[#E6F9EE] border border-emerald-200 shadow-xs overflow-hidden min-h-[240px] sm:min-h-[320px] select-none">
+              {organicSlides.map((slide, idx) => (
+                <div
+                  key={slide.id || idx}
+                  className={`absolute inset-0 transition-opacity duration-500 ${
+                    organicSlideIdx === idx ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'
+                  }`}
+                >
+                  <div className="w-full h-full max-w-7xl mx-auto grid grid-cols-12 items-center px-4 sm:px-10 py-4 sm:py-6 gap-3 sm:gap-6">
+                    {/* Left Copy Column */}
+                    <div className="col-span-7 sm:col-span-7 flex flex-col justify-center space-y-2 sm:space-y-3 z-10 pr-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="inline-block w-fit text-[10px] sm:text-xs font-extrabold bg-[#16A34A] text-white px-3 py-1 rounded-full uppercase tracking-wider shadow-2xs">
+                          {slide.tag || '🌿 ১০০% অর্গানিক ফুড'}
                         </span>
-                        <span className="text-xs font-extrabold text-stone-900 line-clamp-1">
-                          {foundCategory?.nameBn} — সরাসরি ফার্ম থেকে সংগৃহীত
+                        <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-bold text-[#15803D] bg-white border border-emerald-200 px-2.5 py-0.5 rounded-full">
+                          ✓ ল্যাব টেস্টেড ও কেমিক্যালমুক্ত
                         </span>
                       </div>
-                      <span className="px-2.5 py-1 rounded-lg text-[10px] font-extrabold text-white shrink-0 bg-[#16A34A]">
-                        ১০০% খাঁটি
-                      </span>
+
+                      <h1 className="text-base sm:text-2xl md:text-3xl font-black text-stone-900 leading-tight line-clamp-2">
+                        {slide.title}
+                      </h1>
+
+                      <p className="text-[11px] sm:text-sm text-stone-700 font-medium line-clamp-2 max-w-xl">
+                        {slide.subtitle}
+                      </p>
+
+                      <div className="pt-1 flex items-center gap-2.5 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const gridEl = document.getElementById('category-products-grid');
+                            if (gridEl) gridEl.scrollIntoView({ behavior: 'smooth' });
+                          }}
+                          className="px-4 sm:px-5 py-2 bg-[#16A34A] hover:bg-[#15803D] text-white rounded-xl text-xs sm:text-sm font-extrabold shadow-xs cursor-pointer transition-all"
+                        >
+                          {slide.ctaText || 'অর্গানিক ফুড দেখুন'} &rarr;
+                        </button>
+                        <span className="px-3 py-1.5 rounded-xl bg-white border border-emerald-200 text-[11px] font-extrabold text-[#15803D]">
+                          মোট {categoryProducts.length}টি অর্গানিক ফুড
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Right Image Card: Pure Bright White Frame (Never Black/Dark) */}
+                    <div className="col-span-5 sm:col-span-5 h-[175px] sm:h-[250px] md:h-[280px] flex items-center justify-center">
+                      <div className="relative w-full h-full rounded-2xl bg-white border-2 border-white shadow-md overflow-hidden flex items-center justify-center">
+                        <img
+                          src={resolveSafeProductImageUrl(slide.image, categoryProducts[idx % Math.max(1, categoryProducts.length)], 0)}
+                          alt={slide.title}
+                          onError={(e) => handleProductImageError(e, categoryProducts[0], 0)}
+                          loading="eager"
+                          decoding="async"
+                          className="w-full h-full object-cover object-center bg-white"
+                          referrerPolicy="no-referrer"
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
+              ))}
+
+              {/* Prev / Next Controls */}
+              <button
+                type="button"
+                onClick={() => setOrganicSlideIdx((prev) => (prev - 1 + organicSlides.length) % organicSlides.length)}
+                className="absolute left-1.5 sm:left-3 top-1/2 -translate-y-1/2 z-20 w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-white/95 hover:bg-[#16A34A] text-stone-800 hover:text-white border border-emerald-200 shadow-xs flex items-center justify-center cursor-pointer transition-all"
+              >
+                <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setOrganicSlideIdx((prev) => (prev + 1) % organicSlides.length)}
+                className="absolute right-1.5 sm:right-3 top-1/2 -translate-y-1/2 z-20 w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-white/95 hover:bg-[#16A34A] text-stone-800 hover:text-white border border-emerald-200 shadow-xs flex items-center justify-center cursor-pointer transition-all"
+              >
+                <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5" />
+              </button>
+
+              {/* Slide Dots */}
+              <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 bg-white/90 px-3 py-1 rounded-full border border-emerald-200 shadow-2xs">
+                {organicSlides.map((_, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => setOrganicSlideIdx(idx)}
+                    className={`h-2 rounded-full transition-all cursor-pointer ${
+                      organicSlideIdx === idx ? 'w-6 bg-[#16A34A]' : 'w-2 bg-emerald-300 hover:bg-emerald-400'
+                    }`}
+                  />
+                ))}
               </div>
             </div>
           ) : (
-            /* Non-Organic Categories: Sleek, Thin Full-Width Display Banner — Zero Promotional Clutter */
-            <div className="relative w-full h-24 sm:h-32 rounded-2xl overflow-hidden border border-rose-200 shadow-xs bg-stone-100">
-              <img
-                src={resolveSafeProductImageUrl(activeHero.image, categoryProducts[0], 0)}
-                alt={foundCategory?.nameBn || activeHero.title}
-                onError={(e) => handleProductImageError(e, categoryProducts[0], 0)}
-                loading="eager"
-                decoding="async"
-                className="w-full h-full object-cover object-center"
-                referrerPolicy="no-referrer"
-              />
-              <div className="absolute inset-0 bg-gradient-to-r from-stone-950/75 via-stone-950/40 to-transparent flex items-center px-4 sm:px-6">
-                <div className="text-white space-y-1">
-                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#E11D48] text-white uppercase tracking-wider inline-block">
-                    {foundCategory?.nameBn}
-                  </span>
-                  <h1 className="text-sm sm:text-xl font-black text-white drop-shadow-sm">
-                    {foundCategory?.nameBn} — অফিশিয়াল কালেকশন
+            /* Non-Organic Categories: Ultra-Slim, Compact 100% Bright Header Bar (Zero Black/Dark Placeholders) */
+            <div className="w-full rounded-xl bg-white border border-rose-200/90 px-3.5 py-2.5 shadow-2xs flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl overflow-hidden bg-[#FFFDF9] border border-rose-200 shrink-0 flex items-center justify-center">
+                  <img
+                    src={resolveSafeProductImageUrl(activeHero.image, categoryProducts[0], 0)}
+                    alt={foundCategory?.nameBn || activeHero.title}
+                    onError={(e) => handleProductImageError(e, categoryProducts[0], 0)}
+                    loading="eager"
+                    decoding="async"
+                    className="w-full h-full object-cover object-center bg-white"
+                    referrerPolicy="no-referrer"
+                  />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-[#FFF1F2] text-[#E11D48] border border-rose-200">
+                      {foundCategory?.nameBn}
+                    </span>
+                    <span className="text-[11px] font-bold text-stone-500">
+                      মোট {categoryProducts.length}টি অরিজিনাল প্রোডাক্ট
+                    </span>
+                  </div>
+                  <h1 className="text-sm sm:text-base font-extrabold text-stone-900 truncate">
+                    {activeHero.title || `${foundCategory?.nameBn} — অফিশিয়াল কালেকশন`}
                   </h1>
                 </div>
+              </div>
+
+              <div className="hidden sm:flex items-center gap-2 text-[11px] font-bold text-stone-700">
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#FFF5F7] border border-rose-200 text-[#BE123C]">
+                  <ShieldCheck className="w-3.5 h-3.5 text-[#E11D48]" />
+                  <span>১০০% অরিজিনাল গ্যারান্টি</span>
+                </span>
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#FFF5F7] border border-rose-200 text-stone-800">
+                  <Truck className="w-3.5 h-3.5 text-[#E11D48]" />
+                  <span>ক্যাশ অন ডেলিভারি</span>
+                </span>
               </div>
             </div>
           )}
         </div>
       </div>
 
-      {/* Inline Modal for Editing Category Hero Banner */}
+      {/* Inline Modal for Editing Category Hero Banner (Bright Backdrop) */}
       {isEditingHero && (
-        <div className="fixed inset-0 z-50 bg-stone-950/60 backdrop-blur-xs flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-rose-950/25 backdrop-blur-xs flex items-center justify-center p-4">
           <div
             className={`bg-white rounded-2xl border max-w-lg w-full p-5 sm:p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto ${
               isOrganic ? 'border-emerald-300' : 'border-rose-200'
@@ -355,10 +507,12 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({
             <div className="flex items-center justify-between border-b border-stone-200 pb-3">
               <div>
                 <h3 className="text-sm sm:text-base font-extrabold text-stone-900">
-                  ক্যাটাগরি হিরো ব্যানার কাস্টমাইজেশন ({foundCategory?.nameBn})
+                  {isOrganic
+                    ? `অর্গানিক ফুড হিরো স্লাইড #${organicSlideIdx + 1} কাস্টমাইজেশন`
+                    : `ক্যাটাগরি হেডার কাস্টমাইজেশন (${foundCategory?.nameBn})`}
                 </h3>
                 <p className="text-[11px] text-stone-500">
-                  এই ক্যাটাগরির হিরো ছবি, টাইটেল ও সাবটাইটেল পরিবর্তন করলে সাথে সাথে লাইভ ডোমেইনে আপডেট হবে।
+                  ছবি আপলোড বা টাইটেল পরিবর্তন করলে সাথে সাথে ডাটাবেজ ও লাইভ ডোমেইনে সেভ হবে।
                 </p>
               </div>
               <button
@@ -372,7 +526,7 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({
 
             <form onSubmit={handleSaveHero} className="space-y-3.5 text-xs">
               <div>
-                <label className="block font-bold text-stone-700 mb-1">হিরো ব্যানার ট্যাগ (Tag)</label>
+                <label className="block font-bold text-stone-700 mb-1">ব্যানার ট্যাগ (Tag)</label>
                 <input
                   type="text"
                   value={editTag}
@@ -383,7 +537,7 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({
               </div>
 
               <div>
-                <label className="block font-bold text-stone-700 mb-1">হিরো প্রধান শিরোনাম (Headline)</label>
+                <label className="block font-bold text-stone-700 mb-1">প্রধান শিরোনাম (Headline)</label>
                 <input
                   type="text"
                   value={editTitle}
@@ -394,7 +548,7 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({
               </div>
 
               <div>
-                <label className="block font-bold text-stone-700 mb-1">হিরো সাবটাইটেল (Subtitle)</label>
+                <label className="block font-bold text-stone-700 mb-1">সাবটাইটেল (Subtitle)</label>
                 <textarea
                   rows={2}
                   value={editSubtitle}
@@ -406,7 +560,7 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({
 
               <div>
                 <label className="block font-bold text-stone-700 mb-1">
-                  হিরো ব্যানার ছবি (সরাসরি ফাইল আপলোড বা Image URL)
+                  ছবি (সরাসরি ফাইল আপলোড বা Image URL)
                 </label>
                 <div className="flex flex-col sm:flex-row gap-2">
                   <input
@@ -414,7 +568,7 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({
                     value={editImage}
                     onChange={(e) => setEditImage(e.target.value)}
                     className="flex-1 px-3 py-2 rounded-xl border border-stone-300 focus:outline-none"
-                    placeholder="https://..."
+                    placeholder="/uploads/product/... অথবা https://..."
                   />
                   <label
                     className={`px-3.5 py-2 rounded-xl border font-bold cursor-pointer inline-flex items-center justify-center gap-1.5 shrink-0 ${
@@ -424,7 +578,7 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({
                     }`}
                   >
                     <Upload className="w-3.5 h-3.5" />
-                    <span>{isUploadingHeroImg ? 'আপলোড হচ্ছে...' : 'ছবি আপলোড'}</span>
+                    <span>{isUploadingHeroImg ? 'আপলোড ও সেভ হচ্ছে...' : '📸 ছবি আপলোড'}</span>
                     <input
                       type="file"
                       accept="image/*"
@@ -434,11 +588,11 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({
                   </label>
                 </div>
                 {editImage && (
-                  <div className="mt-2 rounded-xl overflow-hidden border border-stone-200 h-28 bg-stone-100">
+                  <div className="mt-2 rounded-xl overflow-hidden border border-stone-200 h-28 bg-white">
                     <img
                       src={editImage}
                       alt="Preview"
-                      className="w-full h-full object-cover"
+                      className="w-full h-full object-cover bg-white"
                       referrerPolicy="no-referrer"
                     />
                   </div>

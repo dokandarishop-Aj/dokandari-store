@@ -65,12 +65,14 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     }
   };
 
-  // Track InitiateCheckout cleanly when modal opens
+  // Track InitiateCheckout cleanly when modal opens & reset completedOrder if new items are in cart
   useEffect(() => {
     if (isOpen && items.length > 0) {
+      setCompletedOrder(null);
+      setErrorMsg('');
       trackPixelInitiateCheckout(items, currentTotal);
     }
-  }, [isOpen, items, currentTotal]);
+  }, [isOpen, items.length]);
 
   // Real-time Lead Recovery mechanism: automatically captures phone & basic info
   useEffect(() => {

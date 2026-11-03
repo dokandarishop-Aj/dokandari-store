@@ -16,6 +16,7 @@ import {
   enforceBengaliAssistantOutput,
   enforceBengaliStoreManagementText,
 } from './src/lib/agenticVideoUtils';
+import { INITIAL_PRODUCTS } from './src/data/initialCatalog';
 
 dotenv.config();
 
@@ -25,13 +26,15 @@ const __dirname = path.dirname(__filename);
 const PORT = 3000;
 
 function getServerGeminiClient(overrideKey?: string): GoogleGenAI {
-  const apiKey =
-    (overrideKey && overrideKey.trim()) ||
-    process.env.Gemini_Api_KEY ||
-    process.env.API_KEY ||
-    process.env.GEMINI_API_KEY ||
-    process.env.GOOGLE_API_KEY ||
-    '';
+  const candidates = [
+    overrideKey?.trim(),
+    process.env.API_KEY?.trim(),
+    process.env.GEMINI_API_KEY?.trim(),
+    process.env.Gemini_Api_KEY?.trim(),
+    process.env.GOOGLE_API_KEY?.trim(),
+  ].filter((k): k is string => Boolean(k && k.length > 8 && k !== '0000'));
+
+  const apiKey = candidates[0] || '';
 
   return new GoogleGenAI({
     apiKey: apiKey || undefined,
@@ -41,6 +44,32 @@ function getServerGeminiClient(overrideKey?: string): GoogleGenAI {
       },
     },
   });
+}
+
+function getServerGeminiClients(overrideKey?: string): GoogleGenAI[] {
+  const rawKeys = [
+    overrideKey?.trim(),
+    process.env.API_KEY?.trim(),
+    process.env.GEMINI_API_KEY?.trim(),
+    process.env.Gemini_Api_KEY?.trim(),
+    process.env.GOOGLE_API_KEY?.trim(),
+  ].filter((k): k is string => Boolean(k && k.length > 8 && k !== '0000'));
+
+  const uniqueKeys = Array.from(new Set(rawKeys));
+  if (uniqueKeys.length === 0) {
+    return [getServerGeminiClient()];
+  }
+  return uniqueKeys.map(
+    (key) =>
+      new GoogleGenAI({
+        apiKey: key,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          },
+        },
+      })
+  );
 }
 
 /**
@@ -444,6 +473,23 @@ function deduplicateAndPickSingleVideo(rawVideos: string[]): string[] {
  * and render 100% identically on both AI Studio Preview and the live domain (dokandari.com)
  * without ever failing due to wsrv.nl double-wrapping, Referer hotlink blocks, or CDN errors.
  */
+/**
+ * Converts Bengali digits (০-৯) to standard ASCII digits (0-9) for accurate price parsing
+ */
+function normalizeBengaliDigits(str: string): string {
+  const bnDigits = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
+  let out = str || '';
+  for (let i = 0; i < 10; i++) {
+    out = out.replace(new RegExp(bnDigits[i], 'g'), String(i));
+  }
+  return out;
+}
+
+/**
+ * Permanently downloads and persists remote product image URLs onto `/public/uploads/product/scraped-<hash>.<ext>`
+ * on the server disk (or compact data URLs) so custom website images of ANY resolution (even 1MB+ photos)
+ * are never dropped and load in milliseconds across all browsers and live domains!
+ */
 async function convertRemoteImagesToDataUrls(
   rawUrls: string[],
   maxImages = 6
@@ -453,6 +499,15 @@ async function convertRemoteImagesToDataUrls(
     .map((u) => (typeof u === 'string' ? u.trim() : ''))
     .filter((u) => u.length > 0 && isValidScrapedProductImage(u))
     .slice(0, maxImages * 2);
+
+  const uploadDir = path.join(__dirname, 'public', 'uploads', 'product');
+  try {
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+  } catch {
+    // ignore mkdir warning
+  }
 
   const converted = await Promise.all(
     candidates.map(async (rawUrl) => {
@@ -480,39 +535,69 @@ async function convertRemoteImagesToDataUrls(
       if (cleanUrl.startsWith('//')) cleanUrl = `https:${cleanUrl}`;
       if (!isSafeExternalUrl(cleanUrl)) return '';
 
+      let targetOrigin = '';
+      try {
+        targetOrigin = new URL(cleanUrl).origin;
+      } catch {
+        // ignore
+      }
+
       // Extract Alibaba /kf/ base file if applicable
-      const kfMatch = cleanUrl.match(/\/kf\/([A-Za-z0-9_-]{18,}\.(?:jpg|jpeg|png))/i);
+      const kfMatch = cleanUrl.match(/\/kf\/([A-Za-z0-9_-]{18,}\.(?:jpg|jpeg|png|webp))/i);
       const tryUrls = kfMatch
         ? [
             `https://s.alicdn.com/@sc04/kf/${kfMatch[1]}_720x720q80.jpg`,
             `https://s.alicdn.com/@sc04/kf/${kfMatch[1]}_960x960q80.jpg`,
-            `https://wsrv.nl/?url=${encodeURIComponent(`https://sc04.alicdn.com/kf/${kfMatch[1]}`)}&w=560&q=74&output=jpg`,
+            `https://wsrv.nl/?url=${encodeURIComponent(`https://sc04.alicdn.com/kf/${kfMatch[1]}`)}&w=720&q=78&output=jpg`,
             `https://sc04.alicdn.com/kf/${kfMatch[1]}`,
           ]
         : [
-            `https://wsrv.nl/?url=${encodeURIComponent(cleanUrl)}&w=560&q=74&output=jpg`,
+            `https://wsrv.nl/?url=${encodeURIComponent(cleanUrl)}&w=720&q=78&output=jpg`,
             cleanUrl,
           ];
 
       for (const fetchTarget of tryUrls) {
         try {
           const ctrl = new AbortController();
-          const timer = setTimeout(() => ctrl.abort(), 3800);
+          const timer = setTimeout(() => ctrl.abort(), 4500);
+          const headers: Record<string, string> = {
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            Accept: 'image/jpeg,image/webp,image/png,image/avif,image/*,*/*;q=0.8',
+          };
+          if (targetOrigin && !fetchTarget.includes('wsrv.nl')) {
+            headers['Referer'] = `${targetOrigin}/`;
+          }
           const resp = await fetch(fetchTarget, {
             signal: ctrl.signal,
-            headers: {
-              'User-Agent':
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-              Accept: 'image/jpeg,image/webp,image/png,image/*,*/*;q=0.8',
-            },
+            headers,
           });
           clearTimeout(timer);
           if (resp.ok) {
-            const cType = (resp.headers.get('content-type') || 'image/jpeg').split(';')[0].trim();
-            if (cType.startsWith('image/')) {
+            const cType = (resp.headers.get('content-type') || 'image/jpeg').split(';')[0].trim().toLowerCase();
+            if (cType.startsWith('image/') && !cType.includes('svg')) {
               const buf = Buffer.from(await resp.arrayBuffer());
-              if (buf.length > 400 && buf.length <= 135000) {
-                return `data:${cType};base64,${buf.toString('base64')}`;
+              // Accept real product images from 500 bytes up to 6MB and save to /public/uploads/product/
+              if (buf.length > 500 && buf.length <= 6 * 1024 * 1024) {
+                const ext = cType.includes('webp')
+                  ? 'webp'
+                  : cType.includes('png')
+                  ? 'png'
+                  : 'jpg';
+                const urlHash = crypto
+                  .createHash('md5')
+                  .update(cleanUrl)
+                  .digest('hex')
+                  .slice(0, 14);
+                const filename = `scraped-${urlHash}.${ext}`;
+                try {
+                  fs.writeFileSync(path.join(uploadDir, filename), buf);
+                  return `/uploads/product/${filename}`;
+                } catch {
+                  if (buf.length <= 150000) {
+                    return `data:${cType};base64,${buf.toString('base64')}`;
+                  }
+                }
               }
             }
           }
@@ -521,32 +606,297 @@ async function convertRemoteImagesToDataUrls(
         }
       }
 
-      // Drop candidate if all endpoints returned 404 or failed
+      // If direct download timed out, keep a clean wsrv.nl proxied URL so the real custom website image still renders
+      if (cleanUrl.startsWith('http')) {
+        return `https://wsrv.nl/?url=${encodeURIComponent(cleanUrl)}&w=720&q=78&output=webp`;
+      }
       return '';
     })
   );
 
-  // Enforce total payload budget (<720KB) and maxImages limit so Firestore 1MB limit is never exceeded
+  // Deduplicate and enforce maxImages
   const finalImages: string[] = [];
-  let totalChars = 0;
+  const seen = new Set<string>();
   for (const img of converted) {
-    if (!img || finalImages.length >= maxImages) continue;
-    if (img.startsWith('data:')) {
-      if (totalChars + img.length <= 720000 || finalImages.length < 2) {
-        finalImages.push(img);
-        totalChars += img.length;
-      }
-    } else {
-      finalImages.push(img);
-    }
+    if (!img || seen.has(img) || finalImages.length >= maxImages) continue;
+    seen.add(img);
+    finalImages.push(img);
   }
 
   return finalImages;
 }
 
 /**
+ * Extracts real product images, title, price, and description from any custom website HTML
+ * (WooCommerce, Shopify, Laravel, Next.js, Daraz, Sajgoj, Aarong, Othoba, StarTech, Ryans, custom stores)
+ */
+function parseCustomWebsiteHtmlIntoResult(
+  html: string,
+  targetUrl: string,
+  slugTitle: string,
+  result: {
+    title: string;
+    description: string;
+    images: string[];
+    videos: string[];
+    priceHint: string;
+    colors?: string[];
+    sizes?: string[];
+  }
+) {
+  if (!html) return;
+  let baseUrl: URL | null = null;
+  try {
+    baseUrl = new URL(targetUrl);
+  } catch {
+    // ignore
+  }
+
+  const resolveUrl = (raw: string): string => {
+    if (!raw || typeof raw !== 'string') return '';
+    const cleaned = raw
+      .replace(/\\u002F/g, '/')
+      .replace(/&amp;/gi, '&')
+      .replace(/\\/g, '')
+      .trim();
+    if (!cleaned || cleaned.startsWith('data:') || cleaned.startsWith('javascript:')) return '';
+    if (cleaned.startsWith('//')) return `https:${cleaned}`;
+    if (/^https?:\/\//i.test(cleaned)) return cleaned;
+    if (baseUrl) {
+      try {
+        return new URL(cleaned, baseUrl.href).href;
+      } catch {
+        return '';
+      }
+    }
+    return '';
+  };
+
+  // 1. JSON-LD Product Schema (WooCommerce, Shopify, Custom Stores, Daraz, Magento, etc.)
+  const ldJsonMatches = Array.from(
+    html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)
+  );
+  for (const m of ldJsonMatches) {
+    try {
+      const parsedLd = JSON.parse(m[1].trim());
+      const flattenNodes = (node: any): any[] => {
+        if (!node) return [];
+        if (Array.isArray(node)) return node.flatMap(flattenNodes);
+        if (Array.isArray(node['@graph'])) return [node, ...node['@graph'].flatMap(flattenNodes)];
+        return [node];
+      };
+      const candidates = flattenNodes(parsedLd);
+      for (const node of candidates) {
+        const nodeType = String(node?.['@type'] || '').toLowerCase();
+        if (nodeType.includes('product') && (node?.name || node?.title)) {
+          const ldTitle = stripHtmlTags(String(node.name || node.title)).trim();
+          if (ldTitle && !isBotChallengeOrGenericTitle(ldTitle)) {
+            result.title = ldTitle;
+          }
+          if (node.description) {
+            const ldDesc = stripHtmlTags(String(node.description)).trim().slice(0, 900);
+            if (ldDesc && !isBotChallengeOrGenericTitle(ldDesc) && ldDesc.length > result.description.length) {
+              result.description = ldDesc;
+            }
+          }
+          const rawLdImages = Array.isArray(node.image)
+            ? node.image
+            : node.image
+            ? [node.image]
+            : [];
+          const ldImgs = rawLdImages
+            .map((im: any) => resolveUrl(typeof im === 'string' ? im : im?.url || im?.contentUrl || im?.src || ''))
+            .filter((u: string) => isValidScrapedProductImage(u));
+          if (ldImgs.length > 0) {
+            result.images.push(...ldImgs);
+          }
+          const offersRaw = node.offers;
+          const offersList = Array.isArray(offersRaw)
+            ? offersRaw
+            : offersRaw?.offers && Array.isArray(offersRaw.offers)
+            ? offersRaw.offers
+            : offersRaw
+            ? [offersRaw]
+            : [];
+          for (const off of offersList) {
+            const ldPrice = off?.price || off?.lowPrice || off?.highPrice || off?.priceSpecification?.price;
+            const ldCurrency = off?.priceCurrency || off?.priceSpecification?.priceCurrency || '';
+            if (ldPrice && !result.priceHint) {
+              result.priceHint = `${ldCurrency} ${ldPrice}`.trim();
+              break;
+            }
+          }
+        }
+      }
+    } catch {
+      // ignore malformed JSON-LD block
+    }
+  }
+
+  // 2. Next.js __NEXT_DATA__ or Nuxt/Remix SSR Product Payload (used by custom React/Next.js BD stores like Chaldal, Arogga, Pickaboo, Custom Shops)
+  const nextDataMatch = html.match(/<script[^>]+id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i);
+  if (nextDataMatch?.[1]) {
+    try {
+      const nextJsonStr = nextDataMatch[1];
+      const titleInNext =
+        nextJsonStr.match(/["'](?:productName|product_name|title|name)["']\s*:\s*["']([^"']{5,160})["']/i)?.[1] || '';
+      if (titleInNext && (!result.title || result.title === slugTitle) && !isBotChallengeOrGenericTitle(titleInNext)) {
+        result.title = stripHtmlTags(titleInNext);
+      }
+      const priceInNext =
+        nextJsonStr.match(/["'](?:salePrice|discountPrice|sellingPrice|special_price|price|mrp)["']\s*:\s*([0-9]{2,6}(?:\.[0-9]{1,2})?)/i)?.[1] || '';
+      if (priceInNext && !result.priceHint) {
+        result.priceHint = `BDT ${priceInNext}`;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // 3. Amazon specific gallery & title extraction
+  const amazonTitle = html.match(/id=["']productTitle["'][^>]*>([\s\S]*?)<\/span>/i)?.[1];
+  if (amazonTitle) {
+    const cleanAmz = stripHtmlTags(amazonTitle);
+    if (cleanAmz && !isBotChallengeOrGenericTitle(cleanAmz)) {
+      result.title = cleanAmz;
+    }
+  }
+  const amazonHiRes = Array.from(
+    html.matchAll(/["'](?:hiRes|large)["']\s*:\s*["'](https:\/\/m\.media-amazon\.com\/images\/I\/[^"']+)["']/gi)
+  ).map((m) => m[1]);
+  if (amazonHiRes.length > 0) {
+    result.images.push(...amazonHiRes);
+  }
+
+  // 4. Extract <h1 class="product_title...">, og:title, twitter:title, or <title>
+  if (!result.title || result.title === slugTitle) {
+    const productH1 =
+      html.match(/<h1[^>]+class=["'][^"']*(?:product_title|product-title|entry-title|pdp-mod-product-badge-title|product-name)[^"']*["'][^>]*>([\s\S]*?)<\/h1>/i)?.[1] ||
+      html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i)?.[1] ||
+      html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i)?.[1] ||
+      html.match(/<meta[^>]+name=["']twitter:title["'][^>]+content=["']([^"']+)["']/i)?.[1] ||
+      html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1] ||
+      html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] ||
+      '';
+    const cleanedTitle = stripHtmlTags(productH1)
+      .replace(/\s*-\s*Buy\s+.*?\s+on\s+Alibaba\.com.*$/i, '')
+      .replace(/\s*\|\s*Alibaba\.com.*$/i, '')
+      .replace(/^Amazon\.com\s*:\s*/i, '')
+      .replace(/\s*(?:\||–|-)\s*(?:Daraz|Sajgoj|Shajgoj|Othoba|Rokomari|Star Tech|Ryans|Aarong|Pickaboo).*$/i, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 180);
+
+    if (cleanedTitle && !isBotChallengeOrGenericTitle(cleanedTitle)) {
+      result.title = cleanedTitle;
+    }
+  }
+
+  // 5. Extract rich description from WooCommerce / Shopify / Custom Store product details & meta description
+  const customDescBlocks = [
+    html.match(/<div[^>]+class=["'][^"']*woocommerce-product-details__short-description[^"']*["'][^>]*>([\s\S]*?)<\/div>/i)?.[1] || '',
+    html.match(/<div[^>]+id=["']tab-description["'][^>]*>([\s\S]*?)<\/div>/i)?.[1] || '',
+    html.match(/<div[^>]+class=["'][^"']*(?:product-description|product_description|product-details|pdp-product-desc|description-content|short-description)[^"']*["'][^>]*>([\s\S]*?)<\/div>/i)?.[1] || '',
+    html.match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i)?.[1] || '',
+    html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:description["']/i)?.[1] || '',
+    html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i)?.[1] || '',
+  ]
+    .map((blk) => stripHtmlTags(blk).replace(/\s+/g, ' ').trim())
+    .filter((txt) => txt.length > 15 && !isBotChallengeOrGenericTitle(txt));
+
+  if (customDescBlocks.length > 0) {
+    const longestDesc = customDescBlocks.sort((a, b) => b.length - a.length)[0];
+    if (!result.description || longestDesc.length > result.description.length) {
+      result.description = longestDesc.slice(0, 900);
+    }
+  }
+
+  // 6. Extract prioritized product gallery images (OpenGraph, WooCommerce data-large_image, data-zoom-image, data-src, srcset, and <img src>)
+  const ogImages = [
+    ...Array.from(
+      html.matchAll(/<meta[^>]+(?:property|name)=["'](?:og:image|og:image:secure_url|twitter:image)["'][^>]+content=["']([^"']+)["']/gi)
+    ).map((m) => resolveUrl(m[1])),
+    ...Array.from(
+      html.matchAll(/<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["'](?:og:image|og:image:secure_url|twitter:image)["']/gi)
+    ).map((m) => resolveUrl(m[1])),
+  ];
+
+  // Extract high-priority gallery attributes used by WooCommerce, Shopify, Magento, Laravel & Custom Websites
+  const galleryAttrMatches = Array.from(
+    html.matchAll(
+      /(?:data-large_image|data-zoom-image|data-zoom|data-full-image|data-master|data-src|data-lazy-src|data-lazy|data-original|data-image)=["']([^"']+\.(?:jpg|jpeg|png|webp|avif)(?:\?[^"']*)?)["']/gi
+    )
+  ).map((m) => resolveUrl(m[1]));
+
+  // Extract standard <img src="..."> tags (including relative paths like /wp-content/uploads/... or /uploads/products/...)
+  const imgTagMatches = Array.from(
+    html.matchAll(/<img[^>]+src=["']([^"']+\.(?:jpg|jpeg|png|webp|avif)(?:\?[^"']*)?)["']/gi)
+  )
+    .map((m) => resolveUrl(m[1]))
+    // Deprioritize tiny WordPress thumbnails like -100x100.jpg or -150x150.jpg by also adding their uncropped full-res version
+    .flatMap((u) => {
+      const fullRes = u.replace(/-\d{2,3}x\d{2,3}(\.(?:jpg|jpeg|png|webp))$/i, '$1');
+      return fullRes !== u ? [fullRes, u] : [u];
+    });
+
+  // Extract any absolute image URLs in inline JSON/scripts
+  const rawAbsImgMatches = Array.from(
+    html.matchAll(/(?:https?:)?\/\/[^\s"'<>\\]+\.(?:jpg|jpeg|png|webp)(?:\?[^\s"'<>\\]*)?/gi)
+  ).map((m) => resolveUrl(m[0]));
+
+  const allCandidateImages = [
+    ...result.images,
+    ...ogImages,
+    ...galleryAttrMatches,
+    ...imgTagMatches,
+    ...rawAbsImgMatches,
+  ].filter((u) => isValidScrapedProductImage(u));
+
+  result.images = Array.from(new Set(allCandidateImages)).slice(0, 8);
+
+  // 7. Extract video URLs (.mp4, .webm, AND YouTube watch/shorts/embed/youtu.be links)
+  const videoMatches = Array.from(
+    html.matchAll(/https?:\/\/[^\s"'<>\\]+\.(?:mp4|webm|mov)(?:\?[^\s"'<>\\]*)?/gi)
+  ).map((m) => m[0].replace(/\\u002F/g, '/').replace(/\\/g, ''));
+
+  const youtubeMatches = Array.from(
+    html.matchAll(
+      /https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?v=|shorts\/|embed\/)|youtu\.be\/)[a-zA-Z0-9_-]{6,15}/gi
+    )
+  ).map((m) => m[0].replace(/\\u002F/g, '/').replace(/\\/g, ''));
+
+  result.videos = deduplicateAndPickSingleVideo([...result.videos, ...youtubeMatches, ...videoMatches]);
+
+  // 8. Extract real price (supporting OpenGraph product:price:amount, WooCommerce bdi, BDT/৳/Tk, and Bengali numerals)
+  if (!result.priceHint) {
+    const normalizedHtmlForPrice = normalizeBengaliDigits(html);
+    const metaPriceAmount =
+      normalizedHtmlForPrice.match(/<meta[^>]+property=["'](?:product:price:amount|og:price:amount)["'][^>]+content=["']([^"']+)["']/i)?.[1] ||
+      normalizedHtmlForPrice.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["'](?:product:price:amount|og:price:amount)["']/i)?.[1] ||
+      '';
+    const metaPriceCurrency =
+      normalizedHtmlForPrice.match(/<meta[^>]+property=["'](?:product:price:currency|og:price:currency)["'][^>]+content=["']([^"']+)["']/i)?.[1] ||
+      'BDT';
+
+    if (metaPriceAmount && /[0-9]/.test(metaPriceAmount)) {
+      result.priceHint = `${metaPriceCurrency} ${metaPriceAmount}`.trim();
+    } else {
+      const wcPrice =
+        normalizedHtmlForPrice.match(/woocommerce-Price-amount[^>]*>[\s\S]*?([0-9,]{2,7}(?:\.[0-9]{1,2})?)/i)?.[1] ||
+        normalizedHtmlForPrice.match(/(?:৳|BDT|Tk\.?|টাকা)\s*([0-9,]{2,7}(?:\.[0-9]{1,2})?)/i)?.[0] ||
+        normalizedHtmlForPrice.match(/["'](?:price|salePrice|special_price|selling_price)["']\s*:\s*["']?([0-9]{2,7}(?:\.[0-9]{1,2})?)["']?/i)?.[1] ||
+        normalizedHtmlForPrice.match(/(?:\$|USD)\s*([0-9,]+(?:\.[0-9]{1,2})?)/i)?.[0] ||
+        '';
+      if (wcPrice) {
+        result.priceHint = wcPrice;
+      }
+    }
+  }
+}
+
+/**
  * Server-side webpage metadata & media extractor for publicly accessible product URLs.
- * Supports Alibaba, AliExpress, Amazon, Daraz, Shopify, CJ Dropshipping, WooCommerce, and any e-commerce site.
+ * Supports Alibaba, AliExpress, Amazon, Daraz, Shopify, CJ Dropshipping, WooCommerce, and ANY custom e-commerce website.
  */
 async function scrapeWebpageMetadata(targetUrl: string): Promise<{
   title: string;
@@ -571,7 +921,6 @@ async function scrapeWebpageMetadata(targetUrl: string): Promise<{
   if (!isSafeExternalUrl(targetUrl)) return result;
 
   // 1. Dedicated High-Speed Alibaba Extractor:
-  // First tries www.alibaba.com with Googlebot SSR User-Agent (~1.5s). Only falls back to french.alibaba.com + Microlink if www did not return images.
   if (targetUrl.toLowerCase().includes('alibaba.com/')) {
     const parsedAlibaba = new URL(targetUrl);
     const wwwAlibabaUrl = `https://www.alibaba.com${parsedAlibaba.pathname}`;
@@ -669,7 +1018,7 @@ async function scrapeWebpageMetadata(targetUrl: string): Promise<{
     }
   }
 
-  // 2. Fast Path: Shopify Single-Product .json API (e.g., https://store.com/products/some-handle)
+  // 2. Fast Path: Shopify Single-Product .json API OR WooCommerce Store REST API by slug
   try {
     const parsedTarget = new URL(targetUrl);
     const prodMatch = parsedTarget.pathname.match(/\/products\/([^/?#]+)/i);
@@ -687,12 +1036,12 @@ async function scrapeWebpageMetadata(targetUrl: string): Promise<{
         },
       });
       clearTimeout(sTimer);
-      if (sRes.ok) {
+      if (sRes.ok && (sRes.headers.get('content-type') || '').includes('json')) {
         const sData: any = await sRes.json();
         const p = sData?.product;
         if (p && p.title) {
           result.title = String(p.title).trim();
-          result.description = stripHtmlTags(String(p.body_html || '')).slice(0, 600);
+          result.description = stripHtmlTags(String(p.body_html || '')).slice(0, 800);
           const imgs = Array.isArray(p.images)
             ? p.images
                 .map((im: any) => String(im?.src || '').replace(/\?.*$/, ''))
@@ -722,14 +1071,62 @@ async function scrapeWebpageMetadata(targetUrl: string): Promise<{
         }
       }
     }
+
+    // 2b. Custom WooCommerce single-product REST lookup (/wp-json/wc/store/products?slug=...)
+    const pathSegments = parsedTarget.pathname.split('/').filter(Boolean);
+    const lastSlug = pathSegments[pathSegments.length - 1]?.replace(/\.html?$/i, '') || '';
+    if (lastSlug && lastSlug.length > 2 && !targetUrl.includes('amazon.') && !targetUrl.includes('alibaba.')) {
+      try {
+        const wcCtrl = new AbortController();
+        const wcTimer = setTimeout(() => wcCtrl.abort(), 3800);
+        const wcUrl = `${parsedTarget.origin}/wp-json/wc/store/products?slug=${encodeURIComponent(lastSlug)}`;
+        const wcRes = await fetch(wcUrl, {
+          signal: wcCtrl.signal,
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            Accept: 'application/json',
+          },
+        });
+        clearTimeout(wcTimer);
+        if (wcRes.ok && (wcRes.headers.get('content-type') || '').includes('json')) {
+          const wcArr: any = await wcRes.json();
+          const wp = Array.isArray(wcArr) && wcArr[0] ? wcArr[0] : null;
+          if (wp && wp.name) {
+            result.title = stripHtmlTags(String(wp.name)).trim();
+            result.description = stripHtmlTags(String(wp.description || wp.short_description || '')).slice(0, 900);
+            const wcImgs = Array.isArray(wp.images)
+              ? wp.images
+                  .map((im: any) => String(im?.src || ''))
+                  .filter((u: string) => isValidScrapedProductImage(u))
+              : [];
+            if (wcImgs.length > 0) {
+              result.images = wcImgs.slice(0, 8);
+            }
+            if (wp.prices?.price) {
+              const minor = Number(wp.prices.currency_minor_unit || 0);
+              const val = Number(wp.prices.price) / Math.pow(10, minor);
+              if (val > 0) {
+                result.priceHint = `${wp.prices.currency_code || 'BDT'} ${val}`;
+              }
+            }
+            if (result.images.length > 0 && result.title) {
+              return result;
+            }
+          }
+        }
+      } catch {
+        // Not a WooCommerce Store API site or blocked
+      }
+    }
   } catch {
-    // Not a Shopify .json endpoint or blocked
+    // ignore fast-path error
   }
 
-  // 3. Direct HTML & Structured Data Scraper (Amazon, Daraz, AliExpress, CJ Dropshipping, WooCommerce, Custom Sites)
+  // 3. Direct HTML & Structured Data Scraper (Custom Websites, WooCommerce, Shopify, Daraz, Sajgoj, Amazon, etc.)
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 6800);
+    const timeout = setTimeout(() => controller.abort(), 7500);
     const isAlibabaOrAliExpress =
       targetUrl.toLowerCase().includes('alibaba.com') || targetUrl.toLowerCase().includes('aliexpress.com');
 
@@ -747,223 +1144,103 @@ async function scrapeWebpageMetadata(targetUrl: string): Promise<{
 
     if (response.ok) {
       const html = await response.text();
-
-      // 3a. Parse JSON-LD Product Schema if present (WooCommerce, Daraz, Shopify, Custom stores)
-      const ldJsonMatches = Array.from(
-        html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)
-      );
-      for (const m of ldJsonMatches) {
-        try {
-          const parsedLd = JSON.parse(m[1].trim());
-          const candidates = Array.isArray(parsedLd)
-            ? parsedLd
-            : Array.isArray(parsedLd?.['@graph'])
-            ? parsedLd['@graph']
-            : [parsedLd];
-          for (const node of candidates) {
-            const nodeType = String(node?.['@type'] || '').toLowerCase();
-            if (nodeType.includes('product') && node?.name) {
-              const ldTitle = String(node.name).trim();
-              if (ldTitle && !isBotChallengeOrGenericTitle(ldTitle)) {
-                result.title = ldTitle;
-              }
-              if (node.description) {
-                const ldDesc = stripHtmlTags(String(node.description)).trim().slice(0, 600);
-                if (ldDesc && !isBotChallengeOrGenericTitle(ldDesc)) {
-                  result.description = ldDesc;
-                }
-              }
-              const rawLdImages = Array.isArray(node.image)
-                ? node.image
-                : node.image
-                ? [node.image]
-                : [];
-              const ldImgs = rawLdImages
-                .map((im: any) => (typeof im === 'string' ? im : im?.url || im?.contentUrl || ''))
-                .filter((u: string) => isValidScrapedProductImage(u));
-              if (ldImgs.length > 0) {
-                result.images.push(...ldImgs);
-              }
-              const offers = Array.isArray(node.offers) ? node.offers[0] : node.offers;
-              const ldPrice = offers?.price || offers?.lowPrice || offers?.highPrice;
-              const ldCurrency = offers?.priceCurrency || '';
-              if (ldPrice) {
-                result.priceHint = `${ldCurrency} ${ldPrice}`.trim();
-              }
-            }
-          }
-        } catch {
-          // ignore malformed JSON-LD block
-        }
-      }
-
-      // 3b. Amazon specific gallery & title extraction
-      const amazonTitle = html.match(/id=["']productTitle["'][^>]*>([\s\S]*?)<\/span>/i)?.[1];
-      if (amazonTitle) {
-        const cleanAmz = stripHtmlTags(amazonTitle);
-        if (cleanAmz && !isBotChallengeOrGenericTitle(cleanAmz)) {
-          result.title = cleanAmz;
-        }
-      }
-      const amazonHiRes = Array.from(
-        html.matchAll(/["'](?:hiRes|large)["']\s*:\s*["'](https:\/\/m\.media-amazon\.com\/images\/I\/[^"']+)["']/gi)
-      ).map((m) => m[1]);
-      if (amazonHiRes.length > 0) {
-        result.images.push(...amazonHiRes);
-      }
-
-      // 3c. Extract <title>, <h1> and og:title if not already found
-      if (!result.title || result.title === slugInfo.slugTitle) {
-        const ogTitle =
-          html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i)?.[1] ||
-          html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i)?.[1] ||
-          html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1] ||
-          html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] ||
-          '';
-        const cleanedTitle = stripHtmlTags(ogTitle)
-          .replace(/\s*-\s*Buy\s+.*?\s+on\s+Alibaba\.com.*$/i, '')
-          .replace(/\s*\|\s*Alibaba\.com.*$/i, '')
-          .replace(/^Amazon\.com\s*:\s*/i, '')
-          .replace(/\s+/g, ' ')
-          .trim()
-          .slice(0, 180);
-
-        if (cleanedTitle && !isBotChallengeOrGenericTitle(cleanedTitle)) {
-          result.title = cleanedTitle;
-        }
-      }
-
-      // 3d. Extract og:description or meta description if not already found
-      if (!result.description) {
-        const ogDesc =
-          html.match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i)?.[1] ||
-          html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i)?.[1] ||
-          '';
-        const cleanedDesc = stripHtmlTags(ogDesc).replace(/\s+/g, ' ').trim().slice(0, 600);
-        if (cleanedDesc && !isBotChallengeOrGenericTitle(cleanedDesc)) {
-          result.description = cleanedDesc;
-        }
-      }
-
-      // 3e. Extract og:image and twitter:image
-      const ogImages = [
-        ...Array.from(
-          html.matchAll(/<meta[^>]+(?:property|name)=["'](?:og:image|twitter:image)["'][^>]+content=["']([^"']+)["']/gi)
-        ).map((m) => m[1]),
-        ...Array.from(
-          html.matchAll(/<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["'](?:og:image|twitter:image)["']/gi)
-        ).map((m) => m[1]),
-      ];
-
-      // Extract high-resolution product images from HTML/JSON
-      const imgMatches = Array.from(
-        html.matchAll(/(?:https?:)?\/\/[^\s"'<>\\]+\.(?:jpg|jpeg|png|webp)(?:\?[^\s"'<>\\]*)?/gi)
-      ).map((m) => (m[0].startsWith('//') ? `https:${m[0]}` : m[0]));
-
-      const allCandidateImages = [...result.images, ...ogImages, ...imgMatches]
-        .map((u) => {
-          const clean = u.replace(/\\u002F/g, '/').replace(/\\/g, '').trim();
-          return clean.startsWith('//') ? `https:${clean}` : clean;
-        })
-        .filter((u) => isValidScrapedProductImage(u));
-
-      result.images = Array.from(new Set(allCandidateImages)).slice(0, 8);
-
-      // Extract video URLs (.mp4, .webm, AND YouTube watch/shorts/embed/youtu.be links)
-      const videoMatches = Array.from(
-        html.matchAll(/https?:\/\/[^\s"'<>\\]+\.(?:mp4|webm|mov)(?:\?[^\s"'<>\\]*)?/gi)
-      ).map((m) => m[0].replace(/\\u002F/g, '/').replace(/\\/g, ''));
-
-      const youtubeMatches = Array.from(
-        html.matchAll(
-          /https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?v=|shorts\/|embed\/)|youtu\.be\/)[a-zA-Z0-9_-]{6,15}/gi
-        )
-      ).map((m) => m[0].replace(/\\u002F/g, '/').replace(/\\/g, ''));
-
-      result.videos = deduplicateAndPickSingleVideo([...youtubeMatches, ...videoMatches]);
-
-      // Extract price hints if not already extracted from JSON-LD
-      if (!result.priceHint) {
-        const priceMatch =
-          html.match(/["']price["']\s*:\s*["']?([0-9]+(?:\.[0-9]{1,2})?)["']?/i)?.[1] ||
-          html.match(/(?:৳|BDT|\$|USD)\s*([0-9,]+(?:\.[0-9]{1,2})?)/i)?.[0] ||
-          '';
-        result.priceHint = priceMatch;
-      }
+      parseCustomWebsiteHtmlIntoResult(html, targetUrl, slugInfo.slugTitle, result);
     }
   } catch {
     // Direct fetch timed out or blocked
   }
 
-  // Fallback 1: If direct fetch hit an anti-bot challenge (0 valid product images), try Microlink API
-  if (result.images.length === 0) {
-    try {
-      const mlCtrl = new AbortController();
-      const mlTimer = setTimeout(() => mlCtrl.abort(), 4500);
-      const mlRes = await fetch(`https://api.microlink.io/?url=${encodeURIComponent(targetUrl)}`, {
-        signal: mlCtrl.signal,
-        headers: { Accept: 'application/json' },
-      });
-      clearTimeout(mlTimer);
-      if (mlRes.ok) {
-        const mlJson: any = await mlRes.json();
-        const d = mlJson?.data;
-        if (d?.title && !isBotChallengeOrGenericTitle(d.title)) {
-          result.title = String(d.title)
-            .replace(/\s*-\s*Buy\s+.*?\s+on\s+Alibaba\.com.*$/i, '')
-            .slice(0, 180);
+  // Fallback 1: If direct fetch hit Cloudflare/anti-bot challenge or SPA rendering, run Microlink + Jina Reader in parallel
+  if (result.images.length === 0 || !result.title || result.title === slugInfo.slugTitle) {
+    await Promise.all([
+      (async () => {
+        try {
+          const mlCtrl = new AbortController();
+          const mlTimer = setTimeout(() => mlCtrl.abort(), 5000);
+          const mlRes = await fetch(`https://api.microlink.io/?url=${encodeURIComponent(targetUrl)}`, {
+            signal: mlCtrl.signal,
+            headers: { Accept: 'application/json' },
+          });
+          clearTimeout(mlTimer);
+          if (mlRes.ok) {
+            const mlJson: any = await mlRes.json();
+            const d = mlJson?.data;
+            if (d?.title && !isBotChallengeOrGenericTitle(d.title)) {
+              const cleanMl = String(d.title)
+                .replace(/\s*-\s*Buy\s+.*?\s+on\s+Alibaba\.com.*$/i, '')
+                .slice(0, 180);
+              if (!result.title || result.title === slugInfo.slugTitle || cleanMl.length > result.title.length) {
+                result.title = cleanMl;
+              }
+            }
+            if (d?.description && !isBotChallengeOrGenericTitle(d.description) && !result.description) {
+              result.description = String(d.description).slice(0, 600);
+            }
+            const imgUrl = d?.image?.url ? String(d.image.url).trim() : '';
+            if (imgUrl && isValidScrapedProductImage(imgUrl)) {
+              result.images.unshift(imgUrl);
+            }
+          }
+        } catch {
+          // ignore Microlink fallback timeout
         }
-        if (d?.description && !isBotChallengeOrGenericTitle(d.description)) {
-          result.description = String(d.description).slice(0, 400);
+      })(),
+      (async () => {
+        try {
+          const controller2 = new AbortController();
+          const timeout2 = setTimeout(() => controller2.abort(), 5500);
+          const jinaRes = await fetch(`https://r.jina.ai/${targetUrl}`, {
+            signal: controller2.signal,
+            headers: {
+              Accept: 'text/plain',
+              'X-Return-Format': 'markdown',
+            },
+          });
+          clearTimeout(timeout2);
+          if (jinaRes.ok) {
+            const md = await jinaRes.text();
+            const titleLine = md.match(/^Title:\s*(.+)$/m)?.[1]?.trim() || '';
+            if (titleLine && !isBotChallengeOrGenericTitle(titleLine)) {
+              result.title = titleLine
+                .replace(/\s*-\s*Buy\s+.*?\s+on\s+Alibaba\.com.*$/i, '')
+                .slice(0, 180);
+            }
+            if (!result.description) {
+              const cleanMdBody = md
+                .replace(/^Title:.*$/gm, '')
+                .replace(/^URL Source:.*$/gm, '')
+                .replace(/^Markdown Content:/gm, '')
+                .replace(/!\[.*?\]\([^)]+\)/g, ' ')
+                .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+                .replace(/\s+/g, ' ')
+                .trim();
+              if (cleanMdBody.length > 25) {
+                result.description = cleanMdBody.slice(0, 800);
+              }
+            }
+            const mdImgs = Array.from(
+              md.matchAll(/https?:\/\/[^\s)"'<>\\]+\.(?:jpg|jpeg|png|webp)(?:\?[^\s)"'<>\\]*)?/gi)
+            )
+              .map((m) => m[0])
+              .filter((u) => isValidScrapedProductImage(u));
+            if (mdImgs.length > 0) {
+              result.images.push(...mdImgs);
+            }
+            if (!result.priceHint) {
+              const normalizedMd = normalizeBengaliDigits(md);
+              const mdPrice =
+                normalizedMd.match(/(?:৳|BDT|Tk\.?|টাকা|\$|USD)\s*([0-9,]{2,7}(?:\.[0-9]{1,2})?)/i)?.[0] || '';
+              if (mdPrice) result.priceHint = mdPrice;
+            }
+          }
+        } catch {
+          // Ignore Jina fallback timeout
         }
-        const imgUrl = d?.image?.url ? String(d.image.url).trim() : '';
-        if (imgUrl && isValidScrapedProductImage(imgUrl)) {
-          result.images = [imgUrl];
-        }
-      }
-    } catch {
-      // ignore Microlink fallback timeout
-    }
+      })(),
+    ]);
   }
 
-  // Fallback 2: If still 0 valid product images, try Jina Reader extraction
-  if (result.images.length === 0) {
-    try {
-      const controller2 = new AbortController();
-      const timeout2 = setTimeout(() => controller2.abort(), 4500);
-      const jinaRes = await fetch(`https://r.jina.ai/${targetUrl}`, {
-        signal: controller2.signal,
-        headers: {
-          Accept: 'text/plain',
-          'X-Return-Format': 'markdown',
-        },
-      });
-      clearTimeout(timeout2);
-      if (jinaRes.ok) {
-        const md = await jinaRes.text();
-        const titleLine = md.match(/^Title:\s*(.+)$/m)?.[1]?.trim() || '';
-        if (titleLine && !isBotChallengeOrGenericTitle(titleLine)) {
-          result.title = titleLine
-            .replace(/\s*-\s*Buy\s+.*?\s+on\s+Alibaba\.com.*$/i, '')
-            .slice(0, 180);
-        }
-        const mdImgs = Array.from(
-          md.matchAll(/https?:\/\/[^\s)"'<>\\]+\.(?:jpg|jpeg|png|webp)(?:\?[^\s)"'<>\\]*)?/gi)
-        )
-          .map((m) => m[0])
-          .filter((u) => isValidScrapedProductImage(u));
-        if (mdImgs.length > 0) {
-          result.images = Array.from(new Set(mdImgs)).slice(0, 8);
-        }
-        if (!result.priceHint) {
-          const mdPrice = md.match(/(?:৳|BDT|\$|USD)\s*([0-9,]+(?:\.[0-9]{1,2})?)/i)?.[0] || '';
-          if (mdPrice) result.priceHint = mdPrice;
-        }
-      }
-    } catch {
-      // Ignore Jina fallback timeout
-    }
-  }
+  result.images = Array.from(new Set(result.images.filter((u) => isValidScrapedProductImage(u)))).slice(0, 8);
 
   // Fallback 3: If page still blocked direct image extraction, search real web product images for this exact title
   if (result.images.length === 0 && result.title) {
@@ -1461,18 +1738,20 @@ async function synthesizeProductFromScraped(
 }
 
 /**
- * Resolves an image URL or data-URL into a Gemini multimodal inlineData part
+ * Resolves an image URL, local /uploads/ path, or data-URL into a Gemini multimodal inlineData part
  */
 async function resolveImagePart(
   imageUrl?: string,
-  scrapedImages?: string[]
+  scrapedImages?: string[],
+  allowAnyImage = false
 ): Promise<{ inlineData: { data: string; mimeType: string } } | null> {
-  const candidate = imageUrl || (scrapedImages && scrapedImages[0]);
-  if (!candidate || !isValidScrapedProductImage(candidate)) return null;
+  const candidate = (imageUrl || (scrapedImages && scrapedImages[0]) || '').trim();
+  if (!candidate) return null;
 
   try {
+    // 1. Base64 data:image/... URL
     if (candidate.startsWith('data:')) {
-      const match = candidate.match(/^data:([a-zA-Z0-9/.-]+);base64,(.+)$/);
+      const match = candidate.match(/^data:([a-zA-Z0-9/+.-]+);base64,(.+)$/);
       if (match) {
         return {
           inlineData: {
@@ -1481,24 +1760,64 @@ async function resolveImagePart(
           },
         };
       }
+      return null;
     }
 
+    // 2. Local static product or founder image under /uploads/... or /public/uploads/...
+    if (candidate.startsWith('/uploads/') || candidate.startsWith('/public/uploads/')) {
+      const relClean = candidate
+        .replace(/^\/public\/uploads\//, 'uploads/')
+        .replace(/^\/uploads\//, 'uploads/')
+        .split('?')[0];
+      const fullLocalPath = path.join(__dirname, 'public', relClean);
+      let finalPath = fullLocalPath;
+      if (!fs.existsSync(finalPath)) {
+        const baseName = path.basename(relClean);
+        const fallbackDir = path.join(__dirname, 'public', 'uploads', 'product');
+        const altPath = path.join(fallbackDir, baseName);
+        if (fs.existsSync(altPath)) {
+          finalPath = altPath;
+        }
+      }
+      if (fs.existsSync(finalPath)) {
+        const buf = fs.readFileSync(finalPath);
+        if (buf.length > 0 && buf.length <= 8 * 1024 * 1024) {
+          const ext = path.extname(finalPath).toLowerCase();
+          const mimeType =
+            ext === '.png'
+              ? 'image/png'
+              : ext === '.webp'
+              ? 'image/webp'
+              : 'image/jpeg';
+          return {
+            inlineData: {
+              data: buf.toString('base64'),
+              mimeType,
+            },
+          };
+        }
+      }
+      return null;
+    }
+
+    // 3. Remote HTTP/HTTPS URL
+    if (!allowAnyImage && !isValidScrapedProductImage(candidate)) return null;
     if (/^https?:\/\//i.test(candidate) && isSafeExternalUrl(candidate)) {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 2200);
+      const timeout = setTimeout(() => controller.abort(), 5000);
       const resp = await fetch(candidate, {
         signal: controller.signal,
         headers: {
           'User-Agent':
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-          Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+          Accept: 'image/jpeg,image/webp,image/png,image/*,*/*;q=0.8',
         },
       });
       clearTimeout(timeout);
       if (resp.ok) {
         const arrayBuf = await resp.arrayBuffer();
         const buf = Buffer.from(arrayBuf);
-        if (buf.length > 0 && buf.length <= 4 * 1024 * 1024) {
+        if (buf.length > 0 && buf.length <= 6 * 1024 * 1024) {
           const rawMime = resp.headers.get('content-type') || 'image/jpeg';
           const mimeType = rawMime.split(';')[0].trim() || 'image/jpeg';
           return {
@@ -1511,7 +1830,7 @@ async function resolveImagePart(
       }
     }
   } catch {
-    // Proceed gracefully if remote image fetch fails
+    // Proceed gracefully if image read/fetch fails
   }
 
   return null;
@@ -1875,10 +2194,9 @@ titleBn, titleEn, category, price, originalPrice, description, fabric, colors, s
 
       const response = await withTimeout(
         ai.models.generateContent({
-          model: 'gemini-3.8-flash',
+          model: 'gemini-2.5-flash',
           contents: { parts: contentsParts },
           config: {
-            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
             responseMimeType: 'application/json',
             responseSchema: {
               type: Type.OBJECT,
@@ -2047,14 +2365,13 @@ titleBn, titleEn, category, price, originalPrice, description, fabric, colors, s
 
         const batchResp = await withTimeout(
           ai.models.generateContent({
-            model: 'gemini-3.8-flash',
+            model: 'gemini-2.5-flash',
             contents: `Convert these real scraped e-commerce products into accurate Bengali (বাংলা) titles and descriptions for Dokandari Bangladesh.
 Strictly preserve the real product identity (do NOT invent unrelated products!).
 Categories allowed: home_decor, gadgets_electronics, fashion_clothing, beauty_personal_care, home_kitchen, mobile_accessories, lifestyle, travel_outdoor, health_fitness, kids_baby, office_essentials.
 Products:
 ${summaryLines}`,
             config: {
-              thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
               responseMimeType: 'application/json',
               responseSchema: {
                 type: Type.ARRAY,
@@ -2200,7 +2517,7 @@ ${summaryLines}`,
 
       if (mode === 'campaign') {
         const response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
+          model: 'gemini-2.5-flash',
           contents: `Create Facebook & TikTok ad copy in Bengali for "${title || 'প্রোডাক্ট'}" (Category: ${category || 'home_decor'}, Price: ৳${price || 1500}). Include catchy headline, benefits, Cash on Delivery note.`,
           config: {
             responseMimeType: 'application/json',
@@ -2357,14 +2674,18 @@ ${summaryLines}`,
     );
 
     try {
+      const storedServerCreds = await getServerFirestoreApiCredentials().catch(() => ({} as Record<string, string>));
+
       if (provider === 'steadfast') {
         const apiKey = (
           credentials?.steadfastApiKey ||
+          storedServerCreds.steadfastApiKey ||
           process.env.STEADFAST_API_KEY ||
           ''
         ).trim();
         const secretKey = (
           credentials?.steadfastSecretKey ||
+          storedServerCreds.steadfastSecretKey ||
           process.env.STEADFAST_SECRET_KEY ||
           ''
         ).trim();
@@ -2424,59 +2745,132 @@ ${summaryLines}`,
       if (provider === 'pathao') {
         const clientId = (
           credentials?.pathaoClientId ||
+          storedServerCreds.pathaoClientId ||
           process.env.PATHAO_CLIENT_ID ||
           ''
         ).trim();
         const clientSecret = (
           credentials?.pathaoClientSecret ||
+          storedServerCreds.pathaoClientSecret ||
           process.env.PATHAO_CLIENT_SECRET ||
           ''
         ).trim();
         const username = (
           credentials?.pathaoUsername ||
+          storedServerCreds.pathaoUsername ||
           process.env.PATHAO_USERNAME ||
           ''
         ).trim();
         const password = (
           credentials?.pathaoPassword ||
+          storedServerCreds.pathaoPassword ||
           process.env.PATHAO_PASSWORD ||
           ''
         ).trim();
-        const storeId = Number(
-          credentials?.pathaoStoreId || process.env.PATHAO_STORE_ID || 0
+        let storeId = Number(
+          credentials?.pathaoStoreId ||
+            storedServerCreds.pathaoStoreId ||
+            process.env.PATHAO_STORE_ID ||
+            0
         );
 
         if (clientId && clientSecret && !clientId.startsWith('PLACEHOLDER')) {
-          const tokenRes = await fetch(
-            'https://api-hermes.pathao.com/aladdin/api/v1/issue-token',
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Accept: 'application/json',
-              },
-              body: JSON.stringify({
-                client_id: clientId,
-                client_secret: clientSecret,
-                username: username || clientId,
-                password: password || clientSecret,
-                grant_type: 'password',
-              }),
-            }
-          );
-
-          const tokenData: any = await tokenRes.json().catch(() => ({}));
-          if (!tokenRes.ok || !tokenData?.access_token) {
+          if (!username || !password) {
             res.status(400).json({
               ok: false,
               success: false,
               provider: 'Pathao Courier',
               error:
-                tokenData?.message ||
-                'Pathao API ক্রেডেনশিয়াল (Client ID / Secret / Username / Password) সঠিক নয়। এডমিন প্যানেলের "এপিআই ও কুরিয়ার ইন্টিগ্রেশন" ট্যাবে আপনার আসল Pathao Merchant API তথ্য দিন।',
-              raw: tokenData,
+                'Pathao বুকিংয়ের জন্য আপনার Pathao User Email এবং Pathao User Password আবশ্যক। এডমিন প্যানেলের "এপিআই ও কুরিয়ার ইন্টিগ্রেশন" ট্যাবে গিয়ে Pathao User Email ও Password বসিয়ে সেভ করুন।',
             });
             return;
+          }
+
+          let accessToken = '';
+          if (
+            cachedPathaoToken &&
+            cachedPathaoToken.clientId === clientId &&
+            cachedPathaoToken.username === username &&
+            Date.now() < cachedPathaoToken.expiresAt
+          ) {
+            accessToken = cachedPathaoToken.token;
+            if (!storeId && cachedPathaoToken.storeId) {
+              storeId = cachedPathaoToken.storeId;
+            }
+          }
+
+          if (!accessToken) {
+            const tokenRes = await fetch(
+              'https://api-hermes.pathao.com/aladdin/api/v1/issue-token',
+              {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  Accept: 'application/json',
+                },
+                body: JSON.stringify({
+                  client_id: clientId,
+                  client_secret: clientSecret,
+                  username,
+                  password,
+                  grant_type: 'password',
+                }),
+              }
+            );
+
+            const tokenData: any = await tokenRes.json().catch(() => ({}));
+            if (!tokenRes.ok || !tokenData?.access_token) {
+              res.status(400).json({
+                ok: false,
+                success: false,
+                provider: 'Pathao Courier',
+                error:
+                  tokenData?.message ||
+                  'Pathao API ক্রেডেনশিয়াল (Client ID / Secret / User Email / Password) সঠিক নয়। এডমিন প্যানেলের "এপিআই ও কুরিয়ার ইন্টিগ্রেশন" ট্যাবে আপনার আসল Pathao লগইন ইমেইল ও পাসওয়ার্ড দিন।',
+                raw: tokenData,
+              });
+              return;
+            }
+            accessToken = String(tokenData.access_token);
+
+            // Automatically discover the merchant's real Pathao Store ID if not manually specified
+            if (!storeId || Number.isNaN(storeId) || storeId <= 0) {
+              try {
+                const storesRes = await fetch(
+                  'https://api-hermes.pathao.com/aladdin/api/v1/stores',
+                  {
+                    method: 'GET',
+                    headers: {
+                      Authorization: `Bearer ${accessToken}`,
+                      Accept: 'application/json',
+                    },
+                  }
+                );
+                const storesData: any = await storesRes.json().catch(() => ({}));
+                const storeList =
+                  storesData?.data?.data ||
+                  storesData?.data ||
+                  [];
+                if (Array.isArray(storeList) && storeList.length > 0) {
+                  const defaultStore =
+                    storeList.find((s: any) => s.is_default_store || s.is_active) ||
+                    storeList[0];
+                  if (defaultStore?.store_id) {
+                    storeId = Number(defaultStore.store_id);
+                  }
+                }
+              } catch {
+                // fallback to 1 if store lookup fails
+              }
+            }
+
+            cachedPathaoToken = {
+              clientId,
+              username,
+              token: accessToken,
+              storeId: storeId || 0,
+              expiresAt: Date.now() + 3600 * 1000,
+            };
           }
 
           const orderRes = await fetch(
@@ -2484,7 +2878,7 @@ ${summaryLines}`,
             {
               method: 'POST',
               headers: {
-                Authorization: `Bearer ${tokenData.access_token}`,
+                Authorization: `Bearer ${accessToken}`,
                 'Content-Type': 'application/json',
                 Accept: 'application/json',
               },
@@ -2521,13 +2915,17 @@ ${summaryLines}`,
             return;
           }
 
+          const detailedErrors = orderData?.errors
+            ? Object.values(orderData.errors).flat().join(' ')
+            : '';
           res.status(400).json({
             ok: false,
             success: false,
             provider: 'Pathao Courier',
             error:
+              detailedErrors ||
               orderData?.message ||
-              'Pathao অর্ডার তৈরিতে ত্রুটি হয়েছে। ঠিকানা ও ফোন নম্বর (১১ ডিজিট) যাচাই করুন।',
+              'Pathao অর্ডার তৈরিতে ত্রুটি হয়েছে। ঠিকানা (কমপক্ষে ১০ অক্ষর) ও ফোন নম্বর (১১ ডিজিট) যাচাই করুন।',
             raw: orderData,
           });
           return;
@@ -2538,7 +2936,7 @@ ${summaryLines}`,
           success: false,
           provider: 'Pathao Courier',
           error:
-            'Pathao Client ID এবং Client Secret সেটআপ করা নেই। এডমিন প্যানেলের "এপিআই ও কুরিয়ার ইন্টিগ্রেশন" ট্যাবে গিয়ে আসল ক্রেডেনশিয়াল সেভ করুন।',
+            'Pathao Client ID, Client Secret, User Email এবং User Password সেটআপ করা নেই। এডমিন প্যানেলের "এপিআই ও কুরিয়ার ইন্টিগ্রেশন" ট্যাবে গিয়ে আসল ক্রেডেনশিয়াল সেভ করুন।',
         });
         return;
       }
@@ -2683,6 +3081,50 @@ Return strict JSON.
   // so customer browser events ALWAYS trigger Server CAPI even if token is not in customer's localStorage
   let cachedFirestoreCreds: Record<string, string> | null = null;
   let cachedFirestoreCredsAt = 0;
+  let cachedPathaoToken: {
+    clientId: string;
+    username: string;
+    token: string;
+    storeId: number;
+    expiresAt: number;
+  } | null = null;
+
+  const COURIER_CREDS_MIRROR_FILE = path.join(__dirname, 'data', 'courier_credentials_mirror.json');
+
+  function readLocalCourierCredsMirror(): Record<string, string> {
+    try {
+      if (fs.existsSync(COURIER_CREDS_MIRROR_FILE)) {
+        const parsed = JSON.parse(fs.readFileSync(COURIER_CREDS_MIRROR_FILE, 'utf-8'));
+        if (parsed && typeof parsed === 'object') {
+          return parsed;
+        }
+      }
+    } catch {
+      // ignore read error
+    }
+    return {};
+  }
+
+  function writeLocalCourierCredsMirror(creds: Record<string, any>) {
+    try {
+      const dir = path.dirname(COURIER_CREDS_MIRROR_FILE);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      const existing = readLocalCourierCredsMirror();
+      const merged: Record<string, string> = { ...existing };
+      for (const [k, v] of Object.entries(creds)) {
+        if (typeof v === 'string' || typeof v === 'number') {
+          merged[k] = String(v);
+        }
+      }
+      fs.writeFileSync(COURIER_CREDS_MIRROR_FILE, JSON.stringify(merged, null, 2), 'utf-8');
+      cachedFirestoreCreds = { ...(cachedFirestoreCreds || {}), ...merged };
+      cachedFirestoreCredsAt = Date.now();
+    } catch {
+      // ignore write error
+    }
+  }
 
   interface ServerPixelLogEntry {
     id: string;
@@ -2738,8 +3180,9 @@ Return strict JSON.
   };
 
   const getServerFirestoreApiCredentials = async (): Promise<Record<string, string>> => {
+    const localMirror = readLocalCourierCredsMirror();
     if (cachedFirestoreCreds && Date.now() - cachedFirestoreCredsAt < 10000) {
-      return cachedFirestoreCreds;
+      return { ...cachedFirestoreCreds, ...localMirror };
     }
     try {
       const credUrl =
@@ -2749,14 +3192,23 @@ Return strict JSON.
         const docJson: any = await resp.json();
         const f = docJson?.fields || {};
         const parsed: Record<string, string> = {
-          facebookPixelId: f.facebookPixelId?.stringValue || '1994859257776698',
-          facebookCapiToken: f.facebookCapiToken?.stringValue || '',
-          tiktokPixelId: f.tiktokPixelId?.stringValue || 'DBJGOSRC77U3VQV6KLB0',
+          facebookPixelId: localMirror.facebookPixelId || f.facebookPixelId?.stringValue || '1994859257776698',
+          facebookCapiToken: localMirror.facebookCapiToken || f.facebookCapiToken?.stringValue || '',
+          tiktokPixelId: localMirror.tiktokPixelId || f.tiktokPixelId?.stringValue || 'DBJGOSRC77U3VQV6KLB0',
           tiktokAccessToken:
-            f.tiktokAccessToken?.stringValue || '94ff51f47eb09ce7d34aefffeffd3400af49a742',
-          youtubeTagId: f.youtubeTagId?.stringValue || '',
-          metaTestEventCode: f.metaTestEventCode?.stringValue || '',
-          tiktokTestEventCode: f.tiktokTestEventCode?.stringValue || '',
+            localMirror.tiktokAccessToken ||
+            f.tiktokAccessToken?.stringValue ||
+            '94ff51f47eb09ce7d34aefffeffd3400af49a742',
+          youtubeTagId: localMirror.youtubeTagId || f.youtubeTagId?.stringValue || '',
+          metaTestEventCode: localMirror.metaTestEventCode || f.metaTestEventCode?.stringValue || '',
+          tiktokTestEventCode: localMirror.tiktokTestEventCode || f.tiktokTestEventCode?.stringValue || '',
+          steadfastApiKey: localMirror.steadfastApiKey || f.steadfastApiKey?.stringValue || '',
+          steadfastSecretKey: localMirror.steadfastSecretKey || f.steadfastSecretKey?.stringValue || '',
+          pathaoClientId: localMirror.pathaoClientId || f.pathaoClientId?.stringValue || '',
+          pathaoClientSecret: localMirror.pathaoClientSecret || f.pathaoClientSecret?.stringValue || '',
+          pathaoUsername: localMirror.pathaoUsername || f.pathaoUsername?.stringValue || '',
+          pathaoPassword: localMirror.pathaoPassword || f.pathaoPassword?.stringValue || '',
+          pathaoStoreId: localMirror.pathaoStoreId || f.pathaoStoreId?.stringValue || '',
         };
         cachedFirestoreCreds = parsed;
         cachedFirestoreCredsAt = Date.now();
@@ -2765,13 +3217,13 @@ Return strict JSON.
     } catch {
       // ignore network error
     }
-    return (
-      cachedFirestoreCreds || {
-        facebookPixelId: '1994859257776698',
-        tiktokPixelId: 'DBJGOSRC77U3VQV6KLB0',
-        tiktokAccessToken: '94ff51f47eb09ce7d34aefffeffd3400af49a742',
-      }
-    );
+    return {
+      facebookPixelId: '1994859257776698',
+      tiktokPixelId: 'DBJGOSRC77U3VQV6KLB0',
+      tiktokAccessToken: '94ff51f47eb09ce7d34aefffeffd3400af49a742',
+      ...(cachedFirestoreCreds || {}),
+      ...localMirror,
+    };
   };
 
   const parseServerPixelIdList = (raw?: string): string[] => {
@@ -2786,9 +3238,10 @@ Return strict JSON.
   const normalizeServerCatalogProductId = (rawId: any): string => {
     const str = String(rawId || '').trim();
     if (!str) return 'dkd-1';
-    const dkdMatch = str.match(/^(dkd-real-\d+|dkd-custom-\d+|dkd-ai-\d+|dkd-\d+|prod-\d+)/i);
-    if (dkdMatch && dkdMatch[1]) return dkdMatch[1];
-    return str;
+    const strippedVariant = str
+      .replace(/-(?:default|standard(?:\s+size)?|original(?:\s+color)?)(?:-(?:default|standard(?:\s+size)?|original(?:\s+color)?))*$/i, '')
+      .trim();
+    return strippedVariant || str;
   };
 
   // Helper to dispatch a single CAPI event to Meta Graph API & TikTok Events API
@@ -3375,47 +3828,126 @@ Return strict JSON.
   });
 
   // 6.1 Live Meta Commerce Manager, TikTok Catalog & Google Merchant Center Product Catalog Feed (XML & JSON)
-  // Syncs directly with live Firestore database so product IDs (content_ids) and URLs always match 100%
-  const fetchLiveFirestoreCatalogForFeed = async () => {
+  // Syncs directly with getCombinedCatalogProducts (Firestore + local mirror + initial catalog) so 100% of products are included
+  const fetchLiveFirestoreCatalogForFeed = async (originHost = 'https://dokandari.com') => {
     try {
-      const firestoreUrl =
-        'https://firestore.googleapis.com/v1/projects/mineral-goal-vc70r/databases/ai-studio-2b5c8a27-d4b7-4db4-9f08-095cd99a7c33/documents/products?pageSize=200';
-      const resp = await fetch(firestoreUrl);
-      if (!resp.ok) return [];
-      const data: any = await resp.json();
-      const docs = Array.isArray(data?.documents) ? data.documents : [];
-      return docs
-        .map((d: any) => {
-          const f = d.fields || {};
-          const id = f.id?.stringValue || d.name?.split('/').pop() || '';
-          const name = f.name?.stringValue || 'Dokandari Product';
-          const description =
-            f.description?.stringValue ||
-            `${name} — Dokandari অফিশিয়াল স্টোরের ১০০% অরিজিনাল কোয়ালিটি পণ্য।`;
-          const price = Number(f.price?.integerValue || f.price?.doubleValue || 990);
-          const category = f.category?.stringValue || 'home_decor';
-          const status = f.status?.stringValue || 'published';
-          const inStock = f.inStock?.booleanValue !== false;
-          const rawImgs = f.images?.arrayValue?.values || [];
-          const firstImg = rawImgs[0]?.stringValue || '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg';
+      const combined = await getCombinedCatalogProducts(false);
+      return combined
+        .filter((p: any) => p && p.id && p.status !== 'draft')
+        .map((p: any) => {
+          const id = String(p.id).trim();
+          const name = String(p.name || 'Dokandari Product').trim();
+          const description = String(
+            p.description || `${name} — Dokandari অফিশিয়াল স্টোরের ১০০% অরিজিনাল কোয়ালিটি পণ্য।`
+          ).trim();
+          const price = Math.max(1, Number(p.price) || 990);
+          const category = String(p.category || 'home_decor').trim();
+          const status = String(p.status || 'published');
+          const inStock = p.inStock !== false;
+          const rawImgs = Array.isArray(p.images) ? p.images : p.image ? [p.image] : [];
+          const firstImg = String(
+            rawImgs[0] || '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg'
+          ).trim();
           const imageLink = firstImg.startsWith('http')
             ? firstImg
             : firstImg.startsWith('data:')
-            ? 'https://dokandari.com/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg'
-            : `https://dokandari.com${firstImg.startsWith('/') ? '' : '/'}${firstImg}`;
+            ? `${originHost}/images/${encodeURIComponent(id)}/1`
+            : `${originHost}${firstImg.startsWith('/') ? '' : '/'}${firstImg}`;
           return { id, name, description, price, category, status, inStock, imageLink };
-        })
-        .filter((p: any) => p.id && p.status !== 'draft');
+        });
     } catch {
       return [];
     }
   };
 
-  const handleCatalogFeedJson = async (_req: any, res: any) => {
-    const items = await fetchLiveFirestoreCatalogForFeed();
+  // 6.1b 1-Click Automatic Pixel-Based Catalog Sync Endpoint (Zero Manual Link Needed)
+  app.post('/api/pixel/auto-catalog-sync', async (req, res) => {
+    try {
+      const reqOrigin =
+        req.body?.origin ||
+        (req.headers.host ? `https://${req.headers.host}` : 'https://dokandari.com');
+      const items = await fetchLiveFirestoreCatalogForFeed(reqOrigin);
+      const serverCreds = await getServerFirestoreApiCredentials();
+      const activeMetaIds = Array.from(
+        new Set([
+          ...(Array.isArray(req.body?.metaPixelIds) ? req.body.metaPixelIds : []),
+          ...parseServerPixelIdList(serverCreds.facebookPixelId),
+        ])
+      ).filter(Boolean);
+      const activeTiktokIds = Array.from(
+        new Set([
+          ...(Array.isArray(req.body?.tiktokPixelIds) ? req.body.tiktokPixelIds : []),
+          ...parseServerPixelIdList(serverCreds.tiktokPixelId),
+        ])
+      ).filter(Boolean);
+
+      const categoryMap = new Map<string, number>();
+      for (const item of items) {
+        categoryMap.set(item.category, (categoryMap.get(item.category) || 0) + 1);
+      }
+
+      if (req.body?.forceFullBroadcast && items.length > 0) {
+        const clientIp =
+          (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
+          req.ip ||
+          '127.0.0.1';
+        const clientUa = req.headers['user-agent'] || 'Mozilla/5.0';
+        const batchItems = items.slice(0, 35);
+        await executeServerCapiDispatch({
+          eventName: 'ViewContent',
+          eventId: `dkd_autocatalog_srv_${Date.now()}`,
+          eventData: {
+            content_ids: batchItems.map((i) => i.id),
+            contents: batchItems.map((i) => ({
+              id: i.id,
+              quantity: 1,
+              item_price: i.price,
+            })),
+            content_name: `Dokandari Auto-Catalog Sync (${items.length} Products)`,
+            num_items: batchItems.length,
+            value: batchItems.reduce((s, i) => s + i.price, 0),
+          },
+          url: reqOrigin,
+          clientIp,
+          clientUa,
+          activeMetaIds,
+          activeTiktokIds,
+          capiToken: (serverCreds.facebookCapiToken || process.env.FACEBOOK_CAPI_TOKEN || '').trim(),
+          ttToken: (serverCreds.tiktokAccessToken || process.env.TIKTOK_ACCESS_TOKEN || '').trim(),
+          activeMetaTestCode: (serverCreds.metaTestEventCode || '').trim(),
+          activeTiktokTestCode: (serverCreds.tiktokTestEventCode || '').trim(),
+          source: 'server_capi',
+        }).catch(() => null);
+      }
+
+      const categoriesSummary = Array.from(categoryMap.entries()).map(([category, count]) => ({
+        category,
+        count,
+      }));
+
+      res.json({
+        success: true,
+        scannedProductsCount: items.length,
+        scannedCategoriesCount: categoriesSummary.length,
+        categories: categoriesSummary,
+        metaPixels: activeMetaIds,
+        tiktokPixels: activeTiktokIds,
+        timestamp: Date.now(),
+      });
+    } catch (err: any) {
+      res.status(500).json({
+        success: false,
+        error: err?.message || 'Auto catalog sync error',
+      });
+    }
+  });
+
+  const handleCatalogFeedJson = async (req: any, res: any) => {
+    const reqOrigin = req.headers?.host ? `https://${req.headers.host}` : 'https://dokandari.com';
+    const items = await fetchLiveFirestoreCatalogForFeed(reqOrigin);
     res.json({
       store: 'Dokandari (দোকানদারি)',
-      domain: 'https://dokandari.com',
+      domain: reqOrigin,
       currency: 'BDT',
       count: items.length,
       products: items.map((p: any) => ({
@@ -3428,7 +3960,7 @@ Return strict JSON.
         price: `${p.price} BDT`,
         price_amount: p.price,
         currency: 'BDT',
-        link: `https://dokandari.com/products/${encodeURIComponent(p.id)}`,
+        link: `${reqOrigin}/products/${encodeURIComponent(p.id)}?brand=dokandari`,
         image_link: p.imageLink,
         brand: 'Dokandari',
         category: p.category,
@@ -3439,8 +3971,9 @@ Return strict JSON.
   app.get('/api/catalog/feed.json', handleCatalogFeedJson);
   app.get('/products.json', handleCatalogFeedJson);
 
-  app.get('/api/catalog/feed.xml', async (_req, res) => {
-    const items = await fetchLiveFirestoreCatalogForFeed();
+  app.get('/api/catalog/feed.xml', async (req, res) => {
+    const reqOrigin = req.headers?.host ? `https://${req.headers.host}` : 'https://dokandari.com';
+    const items = await fetchLiveFirestoreCatalogForFeed(reqOrigin);
     const escapeXml = (str: string) =>
       String(str || '')
         .replace(/&/g, '&amp;')
@@ -3455,7 +3988,7 @@ Return strict JSON.
       <g:id>${escapeXml(p.id)}</g:id>
       <g:title>${escapeXml(p.name)}</g:title>
       <g:description>${escapeXml(p.description)}</g:description>
-      <g:link>https://dokandari.com/products/${encodeURIComponent(p.id)}</g:link>
+      <g:link>${reqOrigin}/products/${encodeURIComponent(p.id)}?brand=dokandari</g:link>
       <g:image_link>${escapeXml(p.imageLink)}</g:image_link>
       <g:brand>Dokandari</g:brand>
       <g:condition>new</g:condition>
@@ -3470,7 +4003,7 @@ Return strict JSON.
 <rss xmlns:g="http://base.google.com/ns/1.0" version="2.0">
   <channel>
     <title>Dokandari Official Product Catalog</title>
-    <link>https://dokandari.com</link>
+    <link>${reqOrigin}</link>
     <description>Dokandari Bangladesh Official Live E-Commerce Product Feed</description>
 ${xmlItems}
   </channel>
@@ -3526,15 +4059,16 @@ Reply in polite, helpful Bengali. Match recommendedProductId if applicable.`,
   });
 
   // ============================================================================
-  // 7. GOOGLE FLOW + GEMINI OMNI 1.1 FLASH + NANO BANANA BRAND VIDEO STUDIO API
+  // ============================================================================
+  // 7. GOOGLE FLOW + GEMINI OMNI 1.1 FLASH + VEO 3.1 REAL HUMAN VIDEO STUDIO API
   // ============================================================================
 
-  // Helper: Convert data URL or remote URL into raw base64 + mimeType for Interactions API
+  // Helper: Convert data URL, /uploads/ path, or remote URL into raw base64 + mimeType for Interactions API
   async function resolveRawImageBase64(
     src: string
   ): Promise<{ data: string; mime_type: 'image/png' | 'image/jpeg' | 'image/webp' } | null> {
     if (!src) return null;
-    const part = await resolveImagePart(src);
+    const part = await resolveImagePart(src, undefined, true);
     if (!part?.inlineData?.data) return null;
     const mime = part.inlineData.mimeType;
     const validMime: 'image/png' | 'image/jpeg' | 'image/webp' =
@@ -3545,40 +4079,77 @@ Reply in polite, helpful Bengali. Match recommendedProductId if applicable.`,
     };
   }
 
-  // 7.1 Bengali Agent Multi-Image (1-4 images) Analyzer & Screenplay Planner
+  // Helper: Save generated base64 image or video to /public/uploads/product/ for permanent playback
+  function saveGeneratedStudioMediaToDisk(base64Data: string, mimeType: string, prefix: string): string {
+    try {
+      const uploadDir = path.join(__dirname, 'public', 'uploads', 'product');
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
+      const ext = mimeType.includes('mp4')
+        ? 'mp4'
+        : mimeType.includes('webm')
+        ? 'webm'
+        : mimeType.includes('webp')
+        ? 'webp'
+        : mimeType.includes('png')
+        ? 'png'
+        : 'jpg';
+      const filename = `${prefix}-${Date.now()}-${Math.floor(Math.random() * 900 + 100)}.${ext}`;
+      fs.writeFileSync(path.join(uploadDir, filename), Buffer.from(base64Data, 'base64'));
+      return `/uploads/product/${filename}`;
+    } catch {
+      return `data:${mimeType};base64,${base64Data}`;
+    }
+  }
+
+  // 7.1 Bengali Agent Multi-Image (1-4 images) Deep 3D Product Analyzer & Google Flow Prompt Planner
   app.post('/api/flow/agent-plan', async (req, res) => {
     const {
       images = [],
       brandName = 'দোকানদারি (Dokandari)',
       brandSlogan = '১০০% অরিজিনাল কোয়ালিটি — সারা দেশে ক্যাশ অন ডেলিভারি',
-      showroomStyle = 'লাক্সারি মডার্ন শোরুম',
-      avatarName = 'নুসরাত (ভার্চুয়াল ব্র্যান্ড প্রেজেন্টার)',
-      avatarDesc = 'বাংলাদেশি প্রফেশনাল ভার্চুয়াল ব্র্যান্ড অ্যাম্বাসেডর, মার্জিত পোশাক ও হাসিমুখে কথা বলছেন',
+      showroomStyle = 'ন্যাচারাল হোম ও লাইফস্টাইল রুম',
+      avatarName = 'নুসরাত জাহান (বাংলাদেশি মডেল)',
+      avatarDesc = 'বাংলাদেশি তরুণী মডেল, মার্জিত পোশাক ও স্বাভাবিক হাসিমুখে প্রোডাক্ট হাতে নিয়ে রিভিউ দিচ্ছেন',
       productTitle = '',
       productPrice = '',
       userCommand = '',
       aspectRatio = '9:16',
       duration = '10s',
       autoAgentMode = false,
+      videoFormat = 'ugc_review',
+      modelGender = 'female',
+      apiKey = '',
     } = req.body || {};
 
     const cleanBrand = String(brandName || 'দোকানদারি').trim();
     const cleanSlogan = String(brandSlogan || '১০০% অরিজিনাল কোয়ালিটি').trim();
     const inputImages: string[] = Array.isArray(images) ? images.slice(0, 4) : [];
+    const safeFormat = ['ugc_review', 'before_after', 'unboxing', 'brand_avatar'].includes(
+      String(videoFormat)
+    )
+      ? (String(videoFormat) as 'ugc_review' | 'before_after' | 'unboxing' | 'brand_avatar')
+      : 'ugc_review';
+    const safeGender: 'female' | 'male' = modelGender === 'male' ? 'male' : 'female';
+    const genderLabelBn = safeGender === 'male' ? 'বাংলাদেশি পুরুষ মডেল' : 'বাংলাদেশি নারী মডেল';
+    const genderLabelEn =
+      safeGender === 'male'
+        ? 'Bangladeshi South Asian male model'
+        : 'Bangladeshi South Asian female model';
 
     try {
-      const ai = getServerGeminiClient();
       const resolvedParts = (
-        await Promise.all(inputImages.map((imgUrl) => resolveImagePart(imgUrl)))
+        await Promise.all(inputImages.map((imgUrl) => resolveImagePart(imgUrl, undefined, true)))
       ).filter(Boolean) as { inlineData: { data: string; mimeType: string } }[];
 
       const systemInstructionBn = buildBengaliGeminiSystemInstruction({
         brandName: cleanBrand,
         brandSlogan: cleanSlogan,
-        showroomStyleBn: String(showroomStyle || 'লাক্সারি মডার্ন শোরুম'),
+        showroomStyleBn: String(showroomStyle || 'ন্যাচারাল হোম স্টুডিও'),
         avatarNameBn: String(avatarName || 'নুসরাত জাহান'),
         avatarDescBn: String(
-          avatarDesc || 'বাংলাদেশি প্রফেশনাল ভার্চুয়াল বিক্রয় প্রতিনিধি, মার্জিত পোশাকে হাসিমুখে উপস্থাপন করছেন'
+          avatarDesc || `${genderLabelBn}, হাতে আসল প্রোডাক্ট নিয়ে ক্যামেরার সামনে জীবন্ত রিভিউ দিচ্ছেন`
         ),
         productTitle: String(productTitle || ''),
         productPrice: String(productPrice || ''),
@@ -3587,15 +4158,17 @@ Reply in polite, helpful Bengali. Match recommendedProductId if applicable.`,
         duration: duration === '5s' ? '5s' : '10s',
         autoAgentMode: Boolean(autoAgentMode),
         userCommandBn: String(userCommand || ''),
+        videoFormat: safeFormat,
+        modelGender: safeGender,
       });
 
-      const promptBn = buildBengaliAgentUserPrompt({
+      const promptBn = `${buildBengaliAgentUserPrompt({
         brandName: cleanBrand,
         brandSlogan: cleanSlogan,
-        showroomStyleBn: String(showroomStyle || 'লাক্সারি মডার্ন শোরুম'),
+        showroomStyleBn: String(showroomStyle || 'ন্যাচারাল হোম স্টুডিও'),
         avatarNameBn: String(avatarName || 'নুসরাত জাহান'),
         avatarDescBn: String(
-          avatarDesc || 'বাংলাদেশি প্রফেশনাল ভার্চুয়াল বিক্রয় প্রতিনিধি, মার্জিত পোশাকে হাসিমুখে উপস্থাপন করছেন'
+          avatarDesc || `${genderLabelBn}, হাতে আসল প্রোডাক্ট নিয়ে ক্যামেরার সামনে জীবন্ত রিভিউ দিচ্ছেন`
         ),
         productTitle: String(productTitle || ''),
         productPrice: String(productPrice || ''),
@@ -3604,64 +4177,94 @@ Reply in polite, helpful Bengali. Match recommendedProductId if applicable.`,
         duration: duration === '5s' ? '5s' : '10s',
         autoAgentMode: Boolean(autoAgentMode),
         userCommandBn: String(userCommand || ''),
-      });
+        videoFormat: safeFormat,
+        modelGender: safeGender,
+      })}
+
+গুরুত্বপূর্ণ অতিরিক্ত নির্দেশনা (Google Flow 3D Product & Realistic Human Analysis):
+প্রদত্ত প্রোডাক্টের ছবিটি (বা ছবিগুলো) গভীরভাবে পর্যবেক্ষণ করুন। প্রোডাক্টটির প্রকৃত 3D আকার, প্যাকেজিং (বক্স, বোতল, সাবান, জার, মিরর বা পোশাক), রঙ, লেবেলের লেখা এবং টেক্সচার বিশ্লেষণ করুন।
+"omniVideoPrompt" ফিল্ডে Google Flow (Veo 3.1 / Gemini Omni 1.1 Flash)-এর জন্য এমন একটি বিস্তারিত ইংরেজি প্রম্পট লিখুন যাতে একজন ১০০% রক্ত-মাংসের রিয়েল বাংলাদেশি মানুষ (${genderLabelEn}) তার হাতের আঙুল দিয়ে এই হুবহু আসল 3D প্রোডাক্টটি (<IMAGE_REF_0>) বাস্তবসম্মতভাবে ধরে আছেন, আলো ও ছায়া প্রোডাক্ট এবং হাতের ওপর প্রাকৃতিকভাবে পড়ছে, এবং মডেল ক্যামেরার দিকে তাকিয়ে বাংলায় কথা বলছেন।`;
 
       const parts: any[] = [...resolvedParts, { text: promptBn }];
+      const clients = getServerGeminiClients(apiKey);
+      const plannerModels = ['gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-3.8-flash'];
+      let parsed: any = null;
 
-      const response = await withTimeout(
-        ai.models.generateContent({
-          model: 'gemini-3.8-flash',
-          contents: { parts },
-          config: {
-            systemInstruction: systemInstructionBn,
-            temperature: 0.25,
-            thinkingConfig: { thinkingBudget: 0 },
-            responseMimeType: 'application/json',
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                detectedProductBn: { type: Type.STRING },
-                productAnalysisBn: { type: Type.STRING },
-                agentMessageBn: { type: Type.STRING },
-                spokenScriptBn: { type: Type.STRING },
-                omniVideoPrompt: { type: Type.STRING },
-                scenes: {
-                  type: Type.ARRAY,
-                  items: {
+      outerPlanLoop: for (const client of clients) {
+        for (const modelName of plannerModels) {
+          try {
+            const response = await withTimeout(
+              client.models.generateContent({
+                model: modelName,
+                contents: { parts },
+                config: {
+                  systemInstruction: systemInstructionBn,
+                  temperature: 0.25,
+                  responseMimeType: 'application/json',
+                  responseSchema: {
                     type: Type.OBJECT,
                     properties: {
-                      sceneNumber: { type: Type.NUMBER },
-                      timeRange: { type: Type.STRING },
-                      visualBn: { type: Type.STRING },
-                      dialogueBn: { type: Type.STRING },
+                      detectedProductBn: { type: Type.STRING },
+                      productAnalysisBn: { type: Type.STRING },
+                      agentMessageBn: { type: Type.STRING },
+                      spokenScriptBn: { type: Type.STRING },
+                      omniVideoPrompt: { type: Type.STRING },
+                      scenes: {
+                        type: Type.ARRAY,
+                        items: {
+                          type: Type.OBJECT,
+                          properties: {
+                            sceneNumber: { type: Type.NUMBER },
+                            timeRange: { type: Type.STRING },
+                            visualBn: { type: Type.STRING },
+                            dialogueBn: { type: Type.STRING },
+                          },
+                          required: ['sceneNumber', 'timeRange', 'visualBn', 'dialogueBn'],
+                        },
+                      },
                     },
-                    required: ['sceneNumber', 'timeRange', 'visualBn', 'dialogueBn'],
+                    required: [
+                      'detectedProductBn',
+                      'productAnalysisBn',
+                      'agentMessageBn',
+                      'spokenScriptBn',
+                      'omniVideoPrompt',
+                      'scenes',
+                    ],
                   },
                 },
-              },
-              required: [
-                'detectedProductBn',
-                'productAnalysisBn',
-                'agentMessageBn',
-                'spokenScriptBn',
-                'omniVideoPrompt',
-                'scenes',
-              ],
-            },
-          },
-        }),
-        11000,
-        'Flow Bengali Agent Plan'
-      );
+              }),
+              10000,
+              `Flow Agent Plan (${modelName})`
+            );
+            if (response.text) {
+              parsed = JSON.parse(response.text);
+              if (parsed && parsed.omniVideoPrompt) {
+                break outerPlanLoop;
+              }
+            }
+          } catch {
+            // Try next model or key
+          }
+        }
+      }
 
-      const parsed = JSON.parse(response.text || '{}');
+      if (!parsed || !parsed.omniVideoPrompt) {
+        throw new Error('Fallback to structured template');
+      }
+
       res.json({
         success: true,
         brandName: cleanBrand,
         brandSlogan: cleanSlogan,
+        videoFormat: safeFormat,
+        modelGender: safeGender,
         imageCount: inputImages.length,
+        analyzedRealImagesCount: resolvedParts.length,
         systemInstructionBn,
-        detectedProductBn: enforceBengaliStoreManagementText(parsed.detectedProductBn || productTitle || 'প্রিমিয়াম ক্যাটালগ পণ্য'),
+        detectedProductBn: enforceBengaliStoreManagementText(
+          parsed.detectedProductBn || productTitle || 'দোকানদারি অরিজিনাল প্রোডাক্ট'
+        ),
         productAnalysisBn: enforceBengaliAssistantOutput(parsed.productAnalysisBn || '', {
           brandName: cleanBrand,
           productTitle: parsed.detectedProductBn || productTitle,
@@ -3673,13 +4276,13 @@ Reply in polite, helpful Bengali. Match recommendedProductId if applicable.`,
           aspectRatio: aspectRatio === '16:9' ? '16:9' : '9:16',
         }),
         spokenScriptBn: enforceBengaliStoreManagementText(parsed.spokenScriptBn || ''),
-        omniVideoPrompt: enforceBengaliStoreManagementText(parsed.omniVideoPrompt || '', {
-          preserveImageRefTags: true,
-        }),
+        omniVideoPrompt: parsed.omniVideoPrompt || '',
         scenes: Array.isArray(parsed.scenes)
           ? parsed.scenes.map((sc: any, idx: number) => ({
               sceneNumber: Number(sc.sceneNumber) || idx + 1,
-              timeRange: enforceBengaliStoreManagementText(String(sc.timeRange || `০০:০${idx * 3} - ০০:০${(idx + 1) * 3} সেকেন্ড`)),
+              timeRange: enforceBengaliStoreManagementText(
+                String(sc.timeRange || `০০:০${idx * 2} - ০০:০${(idx + 1) * 2 + 1} সেকেন্ড`)
+              ),
               visualBn: enforceBengaliStoreManagementText(String(sc.visualBn || '')),
               dialogueBn: enforceBengaliStoreManagementText(String(sc.dialogueBn || '')),
             }))
@@ -3687,53 +4290,143 @@ Reply in polite, helpful Bengali. Match recommendedProductId if applicable.`,
       });
     } catch (err: any) {
       console.warn('Flow Agent plan fallback note:', err?.message || err);
-      const fallbackProd = productTitle || 'প্রিমিয়াম অরিজিনাল ক্যাটালগ পণ্য';
-      const systemInstructionBn = buildBengaliGeminiSystemInstruction({
-        brandName: cleanBrand,
-        brandSlogan: cleanSlogan,
-        showroomStyleBn: String(showroomStyle || 'লাক্সারি মডার্ন শোরুম'),
-        avatarNameBn: String(avatarName || 'নুসরাত জাহান'),
-        avatarDescBn: String(avatarDesc || 'বাংলাদেশি প্রফেশনাল ভার্চুয়াল বিক্রয় প্রতিনিধি'),
-        productTitle: fallbackProd,
-        productPrice: String(productPrice || ''),
-        imageCount: inputImages.length || 1,
-        aspectRatio: aspectRatio === '16:9' ? '16:9' : '9:16',
-        duration: duration === '5s' ? '5s' : '10s',
-        autoAgentMode: Boolean(autoAgentMode),
-      });
+      const fallbackProd = productTitle || 'প্রিমিয়াম অরিজিনাল প্রোডাক্ট';
+      const priceStr = productPrice || '৬৯৯';
+
+      const formatScripts: Record<string, string> = {
+        ugc_review: `আসসালামু আলাইকুম সবাইকে! আমি গত কয়েকদিন ধরে ${cleanBrand} থেকে নেওয়া এই অরিজিনাল ${fallbackProd} ব্যবহার করছি। সত্যি বলতে এর কোয়ালিটি ও রেজাল্ট জাস্ট অসাধারণ! অফার মূল্য মাত্র ৳${priceStr}। আপনারাও ডেলিভারি ম্যানের সামনে চেক করে ক্যাশ অন ডেলিভারিতে আজই অর্ডার করুন!`,
+        before_after: `আসসালামু আলাইকুম! এই ${fallbackProd} ব্যবহারের আগে আমার অবস্থা কেমন ছিল দেখুন, আর মাত্র কয়েকদিন ${cleanBrand}-এর এই অরিজিনাল প্রোডাক্টটি ব্যবহারের পর পার্থক্যটা নিজেরাই দেখুন! ১০০% কার্যকরী ও আসল প্রোডাক্ট। মাত্র ৳${priceStr} টাকায় সারা দেশে ক্যাশ অন ডেলিভারিতে অর্ডার করুন!`,
+        unboxing: `আসসালামু আলাইকুম! আজকে ${cleanBrand} থেকে আমার পার্সেলটা ডেলিভারি পেলাম। চলুন আপনাদের সামনেই বক্সটা আনবক্সিং করে দেখি! মাশাআল্লাহ, দেখুন একদম সিলড ও ১০০% অরিজিনাল ${fallbackProd}! ডেলিভারি ম্যানের সামনেই পার্সেল খুলে দেখে নেওয়ার সুবিধা আছে। আজই অর্ডার করুন!`,
+        brand_avatar: `আসসালামু আলাইকুম! আমি ${avatarName.split('(')[0].trim()}, ${cleanBrand}-এর পক্ষ থেকে আজ আপনাদের হাতে-কলমে দেখাচ্ছি আমাদের বেস্টসেলিং ${fallbackProd}। এর ফিনিশিং ও ১০০% অরিজিনাল কোয়ালিটি আপনাকে মুগ্ধ করবে। মূল্য মাত্র ৳${priceStr}—সারা বাংলাদেশে ক্যাশ অন ডেলিভারিতে অর্ডার করুন!`,
+      };
+
+      const formatPrompts: Record<string, string> = {
+        ugc_review: `Google Flow / Veo 3.1 ultra-realistic handheld iPhone 15 Pro ${aspectRatio} vertical UGC product review video. Authentic ${genderLabelEn} (${avatarDesc}) in a natural well-lit Dhaka apartment room physically holding the exact 3D product "${fallbackProd}" (<IMAGE_REF_0>) with realistic human fingers wrapping naturally around the 3D packaging, natural contact shadows, speaking directly to the front camera with expressive lip-sync, natural skin pores, turning the 3D product in hand to show its real texture and label, and smiling warmly.`,
+        before_after: `Google Flow / Veo 3.1 photorealistic Before-and-After human transformation video (${aspectRatio}) featuring an authentic ${genderLabelEn} (${avatarDesc}). Scene 1 shows the relatable BEFORE state; Scene 2 transitions into a glowing, radiant AFTER transformation where the model physically holds and applies the exact 3D product "${fallbackProd}" (<IMAGE_REF_0>) in hand with realistic finger grip, confident smile, and natural lip-sync.`,
+        unboxing: `Google Flow / Veo 3.1 ultra-realistic human parcel unboxing video (${aspectRatio}). Authentic ${genderLabelEn} (${avatarDesc}) sits at a wooden table, opens a parcel box on camera, lifts out the exact 3D packaged product "${fallbackProd}" (<IMAGE_REF_0>) with both hands, rotates the 3D object to show its authentic seal and label close-up, and speaks happily to the camera.`,
+        brand_avatar: `Google Flow / Veo 3.1 photorealistic 4K commercial presenter video (${aspectRatio}) featuring ${cleanBrand} official ${genderLabelEn} (${avatarDesc}) physically holding the exact 3D product "${fallbackProd}" (<IMAGE_REF_0>) naturally in hand with realistic finger occlusion and lighting, speaking Bengali with synchronized lip-sync and realistic hand gestures.`,
+      };
+
+      const formatScenes: Record<string, any[]> = {
+        ugc_review: [
+          {
+            sceneNumber: 1,
+            timeRange: '০০:০০ - ০০:০৩ সেকেন্ড',
+            visualBn: `${genderLabelBn} (${avatarName}) ন্যাচারাল রুমে হাতে আসল 3D "${fallbackProd}" নিয়ে ফ্রন্ট ক্যামেরায় কথা শুরু করছেন (UGC হুক)।`,
+            dialogueBn: `আসসালামু আলাইকুম সবাইকে! আমি ${cleanBrand} থেকে নেওয়া এই ${fallbackProd}-এর একদম রিয়েল রিভিউ দিচ্ছি।`,
+          },
+          {
+            sceneNumber: 2,
+            timeRange: '০০:০৩ - ০০:০৬ সেকেন্ড',
+            visualBn: `মডেল নিজের হাতে 3D প্রোডাক্টটি ঘুরিয়ে ক্যামেরার খুব কাছে এনে এর অরিজিনাল টেক্সচার, লেবেল ও কোয়ালিটি দেখাচ্ছেন।`,
+            dialogueBn: `হাতে নিলেই বুঝবেন এটি ১০০% অরিজিনাল এবং এর গুণগত মান জাস্ট অসাধারণ!`,
+          },
+          {
+            sceneNumber: 3,
+            timeRange: '০০:০৬ - ০০:০৮ সেকেন্ড',
+            visualBn: `মডেল নিজে প্রোডাক্টটি ব্যবহার করে এর বাস্তব কার্যকারিতা ও চমৎকার ফিনিশিং প্রদর্শন করছেন।`,
+            dialogueBn: `মাত্র কয়েকদিন ব্যবহারেই আমি দারুণ ফলাফল পেয়েছি, তাই আপনাদেরও রিকমেন্ড করছি।`,
+          },
+          {
+            sceneNumber: 4,
+            timeRange: '০০:০৮ - ০০:১০ সেকেন্ড',
+            visualBn: `মডেল হাসিমুখে প্রোডাক্টটি হাতে ধরে ক্যাশ অন ডেলিভারিতে অর্ডারের আহ্বান জানাচ্ছেন।`,
+            dialogueBn: `মাত্র ৳${priceStr} টাকায় সারা দেশে ক্যাশ অন ডেলিভারিতে আজই অর্ডার করুন!`,
+          },
+        ],
+        before_after: [
+          {
+            sceneNumber: 1,
+            timeRange: '০০:০০ - ০০:০৩ সেকেন্ড',
+            visualBn: `[BEFORE / ব্যবহারের আগে]: ${genderLabelBn} প্রোডাক্ট ব্যবহারের আগের সাধারণ অবস্থাটি ক্যামেরায় দেখাচ্ছেন।`,
+            dialogueBn: `দেখুন, এই ${fallbackProd} ব্যবহারের আগে আমার অবস্থা ঠিক কেমন ছিল!`,
+          },
+          {
+            sceneNumber: 2,
+            timeRange: '০০:০৩ - ০০:০৬ সেকেন্ড',
+            visualBn: `[LIVE APPLICATION]: মডেল হাতে "${cleanBrand}"-এর আসল 3D "${fallbackProd}" নিয়ে ব্যবহার করছেন।`,
+            dialogueBn: `এরপর আমি ${cleanBrand} থেকে ১০০% অরিজিনাল এই প্রোডাক্টটি নেওয়া শুরু করি।`,
+          },
+          {
+            sceneNumber: 3,
+            timeRange: '০০:০৬ - ০০:০৮ সেকেন্ড',
+            visualBn: `[AFTER / ব্যবহারের পরে]: ব্যবহারের পর উজ্জ্বল ট্রান্সফরমেশন রেজাল্ট—মডেল হাতে প্রোডাক্ট ধরে সন্তুষ্টির হাসি দিচ্ছেন।`,
+            dialogueBn: `আর ব্যবহারের পরের পার্থক্যটা নিজেরাই দেখুন—কতটা উজ্জ্বল ও নিখুঁত ফলাফল!`,
+          },
+          {
+            sceneNumber: 4,
+            timeRange: '০০:০৮ - ০০:১০ সেকেন্ড',
+            visualBn: `মডেল প্রোডাক্টটি হাতে ধরে ১০০% অরিজিনাল গ্যারান্টি ও ক্যাশ অন ডেলিভারির কথা বলছেন।`,
+            dialogueBn: `${cleanSlogan}। মাত্র ৳${priceStr} টাকায় আজই অর্ডার করুন!`,
+          },
+        ],
+        unboxing: [
+          {
+            sceneNumber: 1,
+            timeRange: '০০:০০ - ০০:০৩ সেকেন্ড',
+            visualBn: `${genderLabelBn} টেবিলে বসে "${cleanBrand}"-এর সিলড ডেলিভারি পার্সেল বক্স ক্যামেরায় দেখিয়ে আনবক্সিং শুরু করছেন।`,
+            dialogueBn: `আসসালামু আলাইকুম! আজকে ${cleanBrand} থেকে আমার পার্সেলটা ডেলিভারি পেলাম, চলুন লাইভ আনবক্সিং করি!`,
+          },
+          {
+            sceneNumber: 2,
+            timeRange: '০০:০৩ - ০০:০৬ সেকেন্ড',
+            visualBn: `পার্সেল বক্স খুলে ভেতর থেকে আসল 3D "${fallbackProd}" দুই হাতে বের করে দেখাচ্ছেন।`,
+            dialogueBn: `মাশাআল্লাহ! দেখুন কত সুন্দর প্রিমিয়াম প্যাকেজিং এবং ভেতরে একদম ১০০% অরিজিনাল প্রোডাক্ট!`,
+          },
+          {
+            sceneNumber: 3,
+            timeRange: '০০:০৬ - ০০:০৮ সেকেন্ড',
+            visualBn: `মডেল প্রোডাক্টটি হাতে ঘুরিয়ে অরিজিনাল সিল ও কোয়ালিটি ক্যামেরার সামনে পরীক্ষা করে দেখাচ্ছেন।`,
+            dialogueBn: `ডেলিভারি ম্যানের সামনেই পার্সেল খুলে দেখে নেওয়ার সুবিধা থাকায় প্রতারণার কোনো ভয় নেই।`,
+          },
+          {
+            sceneNumber: 4,
+            timeRange: '০০:০৮ - ০০:১০ সেকেন্ড',
+            visualBn: `মডেল খুশি মনে প্রোডাক্টটি হাতে নিয়ে থাম্বস-আপ দিয়ে অর্ডার করার পরামর্শ দিচ্ছেন।`,
+            dialogueBn: `মাত্র ৳${priceStr} টাকায় ক্যাশ অন ডেলিভারিতে আপনারাও নিশ্চিন্তে অর্ডার করুন!`,
+          },
+        ],
+        brand_avatar: [
+          {
+            sceneNumber: 1,
+            timeRange: '০০:০০ - ০০:০৩ সেকেন্ড',
+            visualBn: `${cleanBrand}-এর অফিশিয়াল ব্র্যান্ড অবতার (${avatarName}) হাতে আসল 3D "${fallbackProd}" নিয়ে স্বাগত জানাচ্ছেন।`,
+            dialogueBn: `আসসালামু আলাইকুম! ${cleanBrand}-এর পক্ষ থেকে আজ আপনাদের দেখাচ্ছি আমাদের অরিজিনাল ${fallbackProd}।`,
+          },
+          {
+            sceneNumber: 2,
+            timeRange: '০০:০৩ - ০০:০৬ সেকেন্ড',
+            visualBn: `ব্র্যান্ড অবতার হাতে ধরা প্রোডাক্টটির ক্লোজ-আপ ডিটেইলস ও প্রিমিয়াম কোয়ালিটি তুলে ধরছেন।`,
+            dialogueBn: `ইমপোর্টেড ও ১০০% পরীক্ষিত মানের এই প্রোডাক্টটি আপনাকে দেবে দীর্ঘস্থায়ী ও সেরা পারফরম্যান্স।`,
+          },
+          {
+            sceneNumber: 3,
+            timeRange: '০০:০৬ - ০০:০৮ সেকেন্ড',
+            visualBn: `অবতার প্রোডাক্টটি ব্যবহারের নিয়ম ও ওপেন পার্সেল ক্যাশ অন ডেলিভারি সুবিধা ব্যাখ্যা করছেন।`,
+            dialogueBn: `সারা বাংলাদেশে ১ টাকাও অগ্রিম ছাড়া ডেলিভারি ম্যানের সামনে চেক করে রিসিভ করতে পারবেন।`,
+          },
+          {
+            sceneNumber: 4,
+            timeRange: '০০:০৮ - ০০:১০ সেকেন্ড',
+            visualBn: `ব্র্যান্ড অবতার হাসিমুখে প্রোডাক্টটি ক্যামেরার সামনে তুলে ধরে অর্ডার করার আমন্ত্রণ জানাচ্ছেন।`,
+            dialogueBn: `অফার মূল্য মাত্র ৳${priceStr}! স্টক শেষ হওয়ার আগেই নিচে অর্ডার বাটনে ক্লিক করুন।`,
+          },
+        ],
+      };
+
       res.json({
         success: true,
         brandName: cleanBrand,
         brandSlogan: cleanSlogan,
+        videoFormat: safeFormat,
+        modelGender: safeGender,
         imageCount: inputImages.length,
-        systemInstructionBn,
         detectedProductBn: fallbackProd,
-        productAnalysisBn: `আপনার প্রদত্ত ${inputImages.length || 1}টি ক্যাটালগ পণ্যের রেফারেন্স চিত্র বিশ্লেষণ সম্পন্ন হয়েছে। পণ্যের বাহ্যিক গঠন, প্রিমিয়াম মোড়ক এবং গুণগত মান অনুযায়ী "${cleanBrand}" প্রদর্শনী কেন্দ্রের (শোরুম) দৃশ্যপট সাজানো হয়েছে।`,
-        agentMessageBn: autoAgentMode
-          ? `মহোদয়, আপনার প্রদত্ত ক্যাটালগ চিত্র এবং "${cleanBrand}" ব্র্যান্ডের নামফলক সংযোজন করে শোরুমের দৃশ্যপট ও বাংলা ভয়েসওভার চিত্রনাট্য প্রস্তুত করা হয়েছে। স্বয়ংক্রিয় এজেন্ট মোড সক্রিয় থাকায় আমি এখনই বাণিজ্যিক ভিডিও রেন্ডারিং শুরু করছি!`
-          : `মহোদয়, আপনার প্রদত্ত ক্যাটালগ চিত্রগুলো বিশ্লেষণ করে "${cleanBrand}" শোরুম পটভূমি ও স্থায়ী ভার্চুয়াল বিক্রয় প্রতিনিধির জন্য বাংলা চিত্রনাট্য প্রস্তুত করা হয়েছে। আপনার প্রশাসনিক অনুমোদন পেলে আমি কি এখনই ভিডিও রেন্ডারিং প্রক্রিয়া শুরু করব?`,
-        spokenScriptBn: `আসসালামু আলাইকুম! ${cleanBrand}-এর অফিশিয়াল শোরুমে আপনাদের স্বাগতম। আজ আপনাদের জন্য নিয়ে এসেছি আমাদের স্টোরের অন্যতম সেরা ক্যাটালগ পণ্য ${fallbackProd}। ${cleanSlogan}। মজুদ শেষ হওয়ার আগেই নিচে অর্ডার বাটনে ক্লিক করে আজই আপনার ফরমায়েশ নিশ্চিত করুন!`,
-        omniVideoPrompt: `বাণিজ্যিক শোরুম বিজ্ঞাপন চিত্র (${aspectRatio === '16:9' ? '১৬:৯ ওয়াইডস্ক্রিন' : '৯:১৬ রিলস'}, ${duration === '5s' ? '৫ সেকেন্ড' : '১০ সেকেন্ড'}): আমাদের "${showroomStyle}"-এর অভ্যন্তরীণ দেয়ালে উজ্জ্বল ত্রিমাত্রিক নামফলকে স্পষ্টভাবে "${cleanBrand}" প্রদর্শিত রয়েছে। স্থায়ী ভার্চুয়াল বিক্রয় প্রতিনিধি (${avatarName}) হাতে <IMAGE_REF_0> থেকে প্রাপ্ত আসল পণ্যটি ধরে ক্রেতাদের উদ্দেশ্যে প্রাঞ্জল বাংলায় উপস্থাপন করছেন।`,
-        scenes: [
-          {
-            sceneNumber: 1,
-            timeRange: '০০:০০ - ০০:০৩ সেকেন্ড',
-            visualBn: `পটভূমিতে "${cleanBrand}"-এর উজ্জ্বল ত্রিমাত্রিক নামফলকসহ বিলাসবহুল শোরুমে ভার্চুয়াল বিক্রয় প্রতিনিধি হাতে ক্যাটালগ পণ্য নিয়ে ক্রেতাদের স্বাগত জানাচ্ছেন।`,
-            dialogueBn: `আসসালামু আলাইকুম! ${cleanBrand}-এর অফিশিয়াল শোরুমে আপনাদের স্বাগতম।`,
-          },
-          {
-            sceneNumber: 2,
-            timeRange: '০০:০৩ - ০০:০৭ সেকেন্ড',
-            visualBn: `সংযুক্ত ক্যাটালগ চিত্রের ক্লোজ-আপ প্রদর্শনী এবং ভার্চুয়াল বিক্রয় প্রতিনিধি পণ্যটির গুণগত মান ও ব্যবহারিক সুবিধা তুলে ধরছেন।`,
-            dialogueBn: `আজ আপনাদের জন্য নিয়ে এসেছি ১০০% আসল ও পরীক্ষিত মানের ${fallbackProd}, যা আপনার প্রাত্যহিক ব্যবহারে দেবে অনন্য অভিজ্ঞতা।`,
-          },
-          {
-            sceneNumber: 3,
-            timeRange: '০০:০৭ - ০০:১০ সেকেন্ড',
-            visualBn: `পটভূমিতে "${cleanBrand}" শোরুম নামফলক স্থির রেখে বিক্রয় প্রতিনিধি পণ্যটি ক্যামেরার সামনে তুলে ধরে ক্যাশ অন ডেলিভারিতে অর্ডার করার আহ্বান জানাচ্ছেন।`,
-            dialogueBn: `${cleanSlogan}। আজই অর্ডার করুন শুধুমাত্র ${cleanBrand} থেকে!`,
-          },
-        ],
+        productAnalysisBn: `"${fallbackProd}" প্রোডাক্টটির 3D প্যাকেজিং ও টেক্সচার বিশ্লেষণ করে ${genderLabelBn} (${avatarName})-এর মাধ্যমে অরিজিনাল Google Flow প্রম্পট ও বাংলা স্ক্রিপ্ট সাজানো হয়েছে।`,
+        agentMessageBn: `✅ "${fallbackProd}" প্রোডাক্টের ছবি বিশ্লেষণ করে বাস্তব ${genderLabelBn} (${avatarName}) হাতে আসল 3D প্রোডাক্ট নিয়ে কথা বলছেন এমন অরিজিনাল Google Flow প্রম্পট ও বাংলা স্ক্রিপ্ট প্রস্তুত করা হয়েছে!`,
+        spokenScriptBn: formatScripts[safeFormat] || formatScripts.ugc_review,
+        omniVideoPrompt: formatPrompts[safeFormat] || formatPrompts.ugc_review,
+        scenes: formatScenes[safeFormat] || formatScenes.ugc_review,
       });
     }
   });
@@ -3745,7 +4438,6 @@ Reply in polite, helpful Bengali. Match recommendedProductId if applicable.`,
   ): { data?: string; uri?: string; mime_type?: string } | null {
     if (!interaction) return null;
 
-    // 1. Check direct top-level convenience property (output_image, output_audio, output_video)
     const directProp =
       mediaType === 'image'
         ? interaction.output_image
@@ -3760,7 +4452,6 @@ Reply in polite, helpful Bengali. Match recommendedProductId if applicable.`,
       };
     }
 
-    // 2. Check interaction.steps[].content[]
     if (Array.isArray(interaction.steps)) {
       for (const step of interaction.steps) {
         if (Array.isArray(step?.content)) {
@@ -3777,7 +4468,6 @@ Reply in polite, helpful Bengali. Match recommendedProductId if applicable.`,
       }
     }
 
-    // 3. Check interaction.outputs[]
     if (Array.isArray(interaction.outputs)) {
       for (const output of interaction.outputs) {
         if (output?.type === mediaType && (output.data || output.uri)) {
@@ -3795,204 +4485,373 @@ Reply in polite, helpful Bengali. Match recommendedProductId if applicable.`,
 
   // 7.1b Check Google Flow & Gemini Omni Account / Credit Connection Status
   app.get('/api/flow/account-status', (_req, res) => {
+    const hasPaidSelectedKey = Boolean(process.env.API_KEY && process.env.API_KEY.trim().length > 8);
     const hasPlatformKey = Boolean(
-      process.env.API_KEY ||
-        process.env.Gemini_Api_KEY ||
+      hasPaidSelectedKey ||
         process.env.GEMINI_API_KEY ||
+        process.env.Gemini_Api_KEY ||
         process.env.GOOGLE_API_KEY
     );
-    const activeKeySource = process.env.API_KEY
-      ? 'Google AI Studio Subscription / Selected Key (API_KEY)'
+    const activeKeySource = hasPaidSelectedKey
+      ? 'Google AI Studio Paid Key (API_KEY)'
       : process.env.GEMINI_API_KEY || process.env.Gemini_Api_KEY
       ? 'Google Gemini Cloud Key (GEMINI_API_KEY)'
       : 'None';
 
     res.json({
       connected: hasPlatformKey,
+      paidKeySelected: hasPaidSelectedKey,
       keySource: activeKeySource,
       models: {
-        planner: 'gemini-3.8-flash',
+        planner: 'gemini-3.5-flash',
         video: 'gemini-omni-1.1-flash',
-        image: 'gemini-3.1-flash-lite-image',
+        image: 'gemini-nano-banana-2.1',
         tts: 'gemini-3.8-flash-lite-tts',
       },
     });
   });
 
-  // 7.2 Nano Banana (gemini-3.1-flash-lite-image) Branded Showroom + Virtual Avatar Keyframe Generator (100% Real)
+  // Helper: Generate a 100% real AI photograph of a Bangladeshi human model physically holding the exact 3D product from reference image(s)
+  async function generateRealisticBangladeshiHumanImage(params: {
+    promptText: string;
+    resolvedImgs: { data: string; mime_type: 'image/png' | 'image/jpeg' | 'image/webp' }[];
+    aspectRatio: string;
+    overrideKey?: string;
+  }): Promise<{ dataUrl: string; modelUsed: string; interactionId?: string; quotaExceeded?: boolean } | null> {
+    const clients = getServerGeminiClients(params.overrideKey);
+    let hitQuotaLimit = false;
+
+    for (const ai of clients) {
+      // Attempt 1: Nano Banana (`gemini-nano-banana-2.1` and `gemini-3.1-flash-lite-image`) via Interactions API
+      for (const interactionModel of ['gemini-nano-banana-2.1', 'gemini-3.1-flash-lite-image']) {
+        try {
+          const inputContents: any[] = params.resolvedImgs.map((rawImg) => ({
+            type: 'image',
+            data: rawImg.data,
+            mime_type: rawImg.mime_type,
+          }));
+          inputContents.push({
+            type: 'text',
+            text: params.promptText,
+          });
+
+          const interaction: any = await withTimeout(
+            (ai as any).interactions.create({
+              model: interactionModel,
+              input: inputContents,
+              response_modalities: ['image', 'text'],
+              generation_config: {
+                image_config: {
+                  aspect_ratio: params.aspectRatio === '16:9' ? '16:9' : '9:16',
+                  image_size: '1K',
+                },
+              },
+            }),
+            35000,
+            `Interactions ${interactionModel}`
+          );
+
+          const mediaPart = extractInteractionMedia(interaction, 'image');
+          if (mediaPart?.data) {
+            const mime = mediaPart.mime_type || 'image/png';
+            const savedUrl = saveGeneratedStudioMediaToDisk(mediaPart.data, mime, 'flow-human-frame');
+            return {
+              dataUrl: savedUrl,
+              modelUsed: interactionModel,
+              interactionId: interaction?.id || '',
+            };
+          }
+          if (mediaPart?.uri) {
+            return {
+              dataUrl: mediaPart.uri,
+              modelUsed: interactionModel,
+              interactionId: interaction?.id || '',
+            };
+          }
+        } catch (err: any) {
+          const msg = String(err?.message || '');
+          if (msg.includes('429') || msg.includes('quota') || msg.includes('Free Tier')) {
+            hitQuotaLimit = true;
+          }
+        }
+      }
+
+      // Attempt 2: `gemini-3.1-flash-image` / `gemini-2.5-flash-image` via generateContent
+      for (const genModel of ['gemini-3.1-flash-image', 'gemini-2.5-flash-image']) {
+        try {
+          const contentParts: any[] = params.resolvedImgs.map((im) => ({
+            inlineData: {
+              data: im.data,
+              mimeType: im.mime_type,
+            },
+          }));
+          contentParts.push({ text: params.promptText });
+
+          const genRes: any = await withTimeout(
+            ai.models.generateContent({
+              model: genModel,
+              contents: { parts: contentParts },
+              config: {
+                imageConfig: {
+                  aspectRatio: params.aspectRatio === '16:9' ? '16:9' : '9:16',
+                },
+              },
+            }),
+            30000,
+            `GenerateContent ${genModel}`
+          );
+
+          const candidateParts = genRes?.candidates?.[0]?.content?.parts || [];
+          for (const part of candidateParts) {
+            if (part?.inlineData?.data) {
+              const mime = part.inlineData.mimeType || 'image/png';
+              const savedUrl = saveGeneratedStudioMediaToDisk(part.inlineData.data, mime, 'flow-human-frame');
+              return {
+                dataUrl: savedUrl,
+                modelUsed: genModel,
+              };
+            }
+          }
+        } catch (err: any) {
+          const msg = String(err?.message || '');
+          if (msg.includes('429') || msg.includes('quota') || msg.includes('Free Tier')) {
+            hitQuotaLimit = true;
+          }
+        }
+      }
+    }
+
+    if (hitQuotaLimit) {
+      return { dataUrl: '', modelUsed: '', quotaExceeded: true };
+    }
+    return null;
+  }
+
+  // 7.2 Photorealistic Bangladeshi Brand Avatar + Human Model Holding 3D Product Frame Generator
   app.post('/api/flow/generate-showroom-frame', async (req, res) => {
     const {
       productImages = [],
       brandName = 'Dokandari',
       brandSlogan = '',
-      showroomStyle = 'Luxury Modern Brand Showroom',
-      avatarDesc = 'Polite Bangladeshi presenter in elegant attire',
+      showroomStyle = 'Cozy modern Dhaka home living room with warm natural light',
+      avatarDesc = 'Authentic Bangladeshi South Asian brand presenter in modest attire',
       customPrompt = '',
       aspectRatio = '9:16',
+      modelGender = 'female',
+      videoFormat = 'ugc_review',
+      apiKey = '',
     } = req.body || {};
 
     const cleanBrand = String(brandName || 'Dokandari').trim();
     const cleanSlogan = String(brandSlogan || '').trim();
+    const safeGender: 'female' | 'male' =
+      modelGender === 'male' || /\b(male|man|boy|পুরুষ|ছেলে)\b/i.test(String(avatarDesc))
+        ? 'male'
+        : 'female';
+    const genderPhrase =
+      safeGender === 'male'
+        ? 'authentic Bangladeshi South Asian male model in his late 20s with natural skin pores and well-groomed look'
+        : 'authentic Bangladeshi South Asian female model in her mid 20s with natural skin pores and graceful modest Bangladeshi attire';
+
     const validImages: string[] = Array.isArray(productImages)
       ? productImages.filter(Boolean).slice(0, 4)
       : [];
 
     try {
-      const ai = getServerGeminiClient();
       const resolvedImgs = (
         await Promise.all(validImages.map((img) => resolveRawImageBase64(img)))
       ).filter(Boolean) as { data: string; mime_type: 'image/png' | 'image/jpeg' | 'image/webp' }[];
 
-      const inputContents: any[] = [];
-      resolvedImgs.forEach((rawImg) => {
-        inputContents.push({
-          type: 'image',
-          data: rawImg.data,
-          mime_type: rawImg.mime_type,
-        });
-      });
-
       const framePromptText =
         customPrompt && String(customPrompt).trim()
-          ? `${String(customPrompt).trim()}\nEnsure the showroom background wall clearly displays the 3D illuminated brand signage "${cleanBrand}"${
-              cleanSlogan ? ` and sub-banner "${cleanSlogan}"` : ''
-            }.`
-          : `Photorealistic commercial studio keyframe (${aspectRatio}). ${avatarDesc} standing inside a ${showroomStyle}. Prominently mounted on the luxury backdrop wall behind the presenter is a sleek 3D illuminated sign clearly spelling the exact brand name "${cleanBrand}"${
-              cleanSlogan ? ` with a sub-banner reading "${cleanSlogan}"` : ''
-            }. ${
+          ? `Ultra-realistic smartphone UGC / commercial photography (${aspectRatio}) of an ${genderPhrase} (${avatarDesc}). ${String(
+              customPrompt
+            ).trim()}. ${
               resolvedImgs.length > 0
-                ? 'The presenter is holding and showcasing the exact authentic product shown in the reference image(s) towards the camera.'
-                : 'The presenter is smiling warmly towards the camera with professional studio lighting.'
-            } Ultra-detailed 8k commercial photography.`;
+                ? 'CRITICAL 3D PRODUCT INTEGRATION: The Bangladeshi human model is physically holding the exact 3D product shown in the reference image in their real hands, with realistic human fingers naturally wrapping around the product packaging, accurate 3D perspective, natural contact shadows, and preserved label typography. Do NOT paste a flat 2D box.'
+                : 'The Bangladeshi human model is looking directly at the camera with a warm, trustworthy smile and natural speaking gesture.'
+            } Natural skin pores, realistic lighting, shot on iPhone 15 Pro.`
+          : `Ultra-realistic vertical (${aspectRatio}) human presenter keyframe. An ${genderPhrase} (${avatarDesc}) inside a ${showroomStyle} (${videoFormat}). ${
+              resolvedImgs.length > 0
+                ? 'CRITICAL 3D PRODUCT INTEGRATION: The Bangladeshi model is physically holding the exact authentic 3D product from the reference image in their hands, with realistic fingers gripping the 3D object naturally, showing it clearly to the camera while speaking.'
+                : 'The Bangladeshi model is smiling warmly and speaking naturally to the camera as the official brand ambassador for ' +
+                  cleanBrand +
+                  (cleanSlogan ? ' (' + cleanSlogan + ')' : '') +
+                  '.'
+            } Photorealistic 8k human photography, natural South Asian facial features.`;
 
-      inputContents.push({
-        type: 'text',
-        text: framePromptText,
+      const generated = await generateRealisticBangladeshiHumanImage({
+        promptText: framePromptText,
+        resolvedImgs,
+        aspectRatio,
+        overrideKey: apiKey,
       });
 
-      const interaction: any = await withTimeout(
-        (ai as any).interactions.create({
-          model: 'gemini-3.1-flash-lite-image',
-          input: inputContents,
-          response_modalities: ['image', 'text'],
-          generation_config: {
-            image_config: {
-              aspect_ratio: aspectRatio === '16:9' ? '16:9' : '9:16',
-              image_size: '1K',
-            },
-          },
-        }),
-        45000,
-        'Nano Banana Showroom Frame'
-      );
-
-      const mediaPart = extractInteractionMedia(interaction, 'image');
-      if (mediaPart?.data) {
-        const generatedDataUrl = `data:${mediaPart.mime_type || 'image/png'};base64,${mediaPart.data}`;
+      if (generated?.dataUrl) {
         res.json({
           success: true,
-          model: 'gemini-3.1-flash-lite-image',
-          interactionId: interaction?.id || '',
-          frameDataUrl: generatedDataUrl,
-        });
-        return;
-      }
-      if (mediaPart?.uri) {
-        res.json({
-          success: true,
-          model: 'gemini-3.1-flash-lite-image',
-          interactionId: interaction?.id || '',
-          frameDataUrl: mediaPart.uri,
+          model: generated.modelUsed,
+          interactionId: generated.interactionId || '',
+          frameDataUrl: generated.dataUrl,
         });
         return;
       }
 
-      res.status(422).json({
-        success: false,
-        error:
-          'Nano Banana (gemini-3.1-flash-lite-image) কোনো ইমেজ আউটপুট দেয়নি। অনুগ্রহ করে প্রম্পট একটু পরিবর্তন করে অথবা আপনার Google AI সাবস্ক্রিপশন/ক্রেডিট অ্যাকাউন্ট সংযুক্ত করে পুনরায় চেষ্টা করুন।',
-      });
-    } catch (err: any) {
-      console.warn('Nano Banana showroom frame error:', err?.message || err);
+      if (generated?.quotaExceeded) {
+        res.status(402).json({
+          success: false,
+          requiresPaidKey: true,
+          error:
+            'অরিজিনাল Google Flow / Nano Banana ইমেজ ও 3D প্রোডাক্ট হিউম্যান ফ্রেম তৈরির জন্য আপনার Google AI Studio পেইড API Key সিলেক্ট করুন।',
+        });
+        return;
+      }
+
       res.status(500).json({
         success: false,
-        error:
-          err?.message ||
-          'Nano Banana ইমেজ জেনারেশনে ত্রুটি হয়েছে। আপনার জিমেইল সাবস্ক্রিপশন / Google AI ক্রেডিট কি (Key) সংযুক্ত আছে কিনা যাচাই করুন।',
+        error: 'রিয়েলিস্টিক হিউম্যান ফ্রেম জেনারেট করা যায়নি। অনুগ্রহ করে পেইড API Key যাচাই করে আবার চেষ্টা করুন।',
+      });
+    } catch (err: any) {
+      res.status(500).json({
+        success: false,
+        error: err?.message || 'হিউম্যান ফ্রেম জেনারেশনে সমস্যা হয়েছে।',
+      });
+    }
+  });
+
+  // 7.2b Generate Multi-Scene Realistic Bangladeshi Human Keyframes (Holding 3D Product, Unboxing, Before/After)
+  app.post('/api/flow/generate-human-scenes', async (req, res) => {
+    const {
+      productImages = [],
+      productTitle = 'Dokandari Original Product',
+      avatarDesc = 'Authentic Bangladeshi model',
+      modelGender = 'female',
+      videoFormat = 'ugc_review',
+      aspectRatio = '9:16',
+      apiKey = '',
+    } = req.body || {};
+
+    const safeGender: 'female' | 'male' =
+      modelGender === 'male' || /\b(male|man|boy|পুরুষ|ছেলে)\b/i.test(String(avatarDesc))
+        ? 'male'
+        : 'female';
+    const genderPhrase =
+      safeGender === 'male'
+        ? 'authentic Bangladeshi South Asian man in his late 20s'
+        : 'authentic Bangladeshi South Asian woman in her mid 20s';
+
+    const validImages: string[] = Array.isArray(productImages)
+      ? productImages.filter(Boolean).slice(0, 2)
+      : [];
+
+    try {
+      const resolvedImgs = (
+        await Promise.all(validImages.map((img) => resolveRawImageBase64(img)))
+      ).filter(Boolean) as { data: string; mime_type: 'image/png' | 'image/jpeg' | 'image/webp' }[];
+
+      const formatScenePrompt =
+        videoFormat === 'before_after'
+          ? `Ultra-realistic vertical (${aspectRatio}) Before and After transformation photograph of an ${genderPhrase} (${avatarDesc}) physically holding the exact 3D product "${productTitle}" shown in the reference image in their hands with realistic finger grip and contact shadows. Glowing radiant skin and happy expression after using the product in a natural Dhaka home room. Shot on iPhone 15 Pro.`
+          : videoFormat === 'unboxing'
+          ? `Ultra-realistic vertical (${aspectRatio}) unboxing photograph of an ${genderPhrase} (${avatarDesc}) sitting at a wooden table opening a parcel box and physically holding up the exact 3D authentic product "${productTitle}" shown in the reference image with realistic hands and an excited, genuine smile. Shot on iPhone 15 Pro.`
+          : `Ultra-realistic vertical (${aspectRatio}) UGC product review photograph of an ${genderPhrase} (${avatarDesc}) in a cozy Dhaka apartment room physically holding the exact 3D product "${productTitle}" from the reference image in hand close to the camera with realistic fingers wrapping naturally around the product while speaking with a warm smile. Shot on iPhone 15 Pro.`;
+
+      const primaryHumanFrame = await generateRealisticBangladeshiHumanImage({
+        promptText: formatScenePrompt,
+        resolvedImgs,
+        aspectRatio,
+        overrideKey: apiKey,
+      });
+
+      res.json({
+        success: Boolean(primaryHumanFrame?.dataUrl),
+        modelGender: safeGender,
+        videoFormat,
+        humanHoldingProductUrl: primaryHumanFrame?.dataUrl || null,
+        requiresPaidKey: Boolean(primaryHumanFrame?.quotaExceeded),
+        engine: primaryHumanFrame?.modelUsed || 'gemini-nano-banana-2.1',
+      });
+    } catch {
+      res.json({
+        success: false,
+        modelGender: safeGender,
+        videoFormat,
+        humanHoldingProductUrl: null,
+        engine: 'gemini-nano-banana-2.1',
       });
     }
   });
 
   // 7.3 Real Bengali Voiceover Generator (gemini-3.8-flash-lite-tts via Interactions API)
   app.post('/api/flow/generate-voiceover', async (req, res) => {
-    const { scriptBn, voice = 'Kore' } = req.body || {};
+    const { scriptBn, voice = 'Kore', apiKey = '' } = req.body || {};
     if (!scriptBn || !String(scriptBn).trim()) {
       res.status(400).json({ error: 'বাংলা স্ক্রিপ্ট প্রদান করা আবশ্যক।' });
       return;
     }
 
-    // Normalize voice name ('Puck', 'Charon', 'Kore', 'Fenrir', 'Zephyr')
     const rawVoice = String(voice || 'Kore').trim();
     const validVoices = ['Puck', 'Charon', 'Kore', 'Fenrir', 'Zephyr'];
     const matchedVoice =
       validVoices.find((v) => v.toLowerCase() === rawVoice.toLowerCase()) || 'Kore';
 
-    try {
-      const ai = getServerGeminiClient();
-      const interaction: any = await withTimeout(
-        (ai as any).interactions.create({
-          model: 'gemini-3.8-flash-lite-tts',
-          input: [
-            {
-              type: 'text',
-              text: String(scriptBn).trim(),
-              annotations: [
+    const clients = getServerGeminiClients(apiKey);
+    for (const ai of clients) {
+      try {
+        const interaction: any = await withTimeout(
+          (ai as any).interactions.create({
+            model: 'gemini-3.8-flash-lite-tts',
+            input: [
+              {
+                type: 'text',
+                text: String(scriptBn).trim(),
+                annotations: [
+                  {
+                    type: 'speech_metadata',
+                    style: 'Warm, clear, authentic Bangladeshi human product reviewer and presenter',
+                  },
+                ],
+              },
+            ],
+            response_format: { type: 'audio' },
+            generation_config: {
+              speech_config: [
                 {
-                  type: 'speech_metadata',
-                  style: 'Warm, clear, enthusiastic Bangladeshi commercial brand presenter',
+                  language: 'bn-BD',
+                  voice: matchedVoice,
                 },
               ],
             },
-          ],
-          response_format: { type: 'audio' },
-          generation_config: {
-            speech_config: [
-              {
-                language: 'bn-BD',
-                voice: matchedVoice,
-              },
-            ],
-          },
-        }),
-        30000,
-        'Gemini Bengali TTS'
-      );
+          }),
+          30000,
+          'Gemini Bengali TTS'
+        );
 
-      const audioPart = extractInteractionMedia(interaction, 'audio');
-      if (audioPart?.data) {
-        const mimeType = audioPart.mime_type || 'audio/wav';
-        res.json({
-          success: true,
-          model: 'gemini-3.8-flash-lite-tts',
-          audioDataUrl: `data:${mimeType};base64,${audioPart.data}`,
-        });
-        return;
+        const audioPart = extractInteractionMedia(interaction, 'audio');
+        if (audioPart?.data) {
+          const mimeType = audioPart.mime_type || 'audio/wav';
+          res.json({
+            success: true,
+            model: 'gemini-3.8-flash-lite-tts',
+            audioDataUrl: `data:${mimeType};base64,${audioPart.data}`,
+          });
+          return;
+        }
+      } catch (err: any) {
+        console.warn('Gemini Bengali TTS try note:', err?.message || err);
       }
-
-      res.status(422).json({
-        success: false,
-        error: 'ভয়েসওভার অডিও জেনারেট হয়নি। অনুগ্রহ করে স্ক্রিপ্ট যাচাই করে আবার চেষ্টা করুন।',
-      });
-    } catch (err: any) {
-      console.warn('Gemini Bengali TTS error:', err?.message || err);
-      res.status(500).json({
-        success: false,
-        error: err?.message || 'ভয়েসওভার জেনারেশনে সমস্যা হয়েছে।',
-      });
     }
+
+    res.status(422).json({
+      success: false,
+      error: 'ভয়েসওভার অডিও জেনারেট হয়নি। অনুগ্রহ করে স্ক্রিপ্ট যাচাই করে আবার চেষ্টা করুন।',
+    });
   });
 
-  // 7.4 Real Gemini Omni 1.1 Flash Video Generator (gemini-omni-1.1-flash via Interactions API — 100% Real, Zero Fake Canvas)
+  // In-memory map to track Veo operations if Veo 3.1 engine is used
+  const activeVeoOperations = new Map<string, { operation: any; client: GoogleGenAI }>();
+
+  // 7.4 Real Google Flow / Gemini Omni 1.1 Flash & Veo 3.1 Video Generator (100% Real AI Video — Zero Fake Canvas Fallback)
   app.post('/api/flow/generate-video', async (req, res) => {
     const {
       images = [],
@@ -4006,143 +4865,288 @@ Reply in polite, helpful Bengali. Match recommendedProductId if applicable.`,
       resolution = '720p',
       previousInteractionId = '',
       background = false,
+      videoFormat = 'ugc_review',
+      modelGender = 'female',
+      avatarDesc = 'Authentic Bangladeshi South Asian human model',
+      apiKey = '',
     } = req.body || {};
 
     const cleanBrand = String(brandName || 'Dokandari').trim();
     const cleanSlogan = String(brandSlogan || '').trim();
+    const safeGender =
+      modelGender === 'male'
+        ? 'Bangladeshi South Asian male model'
+        : 'Bangladeshi South Asian female model';
+
+    // Gather actual product reference images + synthesized human-holding-product keyframe (NEVER pass static unrelated Unsplash stock portraits!)
     const candidateSources: string[] = [];
-    if (showroomFrame) candidateSources.push(showroomFrame);
+    if (showroomFrame && !showroomFrame.includes('images.unsplash.com')) {
+      candidateSources.push(showroomFrame);
+    }
     if (Array.isArray(images)) {
       for (const img of images.slice(0, 4)) {
-        if (img && !candidateSources.includes(img)) candidateSources.push(img);
+        if (img && !candidateSources.includes(img)) {
+          candidateSources.push(img);
+        }
       }
     }
 
     try {
-      const ai = getServerGeminiClient();
       const resolvedImgs = (
         await Promise.all(candidateSources.slice(0, 4).map((src) => resolveRawImageBase64(src)))
       ).filter(Boolean) as { data: string; mime_type: 'image/png' | 'image/jpeg' | 'image/webp' }[];
 
-      const inputParts: any[] = [];
-      resolvedImgs.forEach((im) => {
-        inputParts.push({
-          type: 'image',
-          data: im.data,
-          mime_type: im.mime_type,
-        });
-      });
-
       const refTags = resolvedImgs.map((_, i) => `<IMAGE_REF_${i}>`).join(', ');
-      const fullVideoPrompt = `${prompt || 'Commercial product showcase video.'}
-Brand Showroom Signage on background wall: "${cleanBrand}"${cleanSlogan ? ` — "${cleanSlogan}"` : ''}.
-${refTags ? `Use authentic product & presenter visual references from ${refTags}.` : ''}
-${spokenScriptBn ? `The presenter speaks naturally in Bengali: "${spokenScriptBn}"` : ''}`;
+      const fullVideoPrompt = `Google Flow / Veo 3.1 / Gemini Omni 1.1 ultra-realistic handheld human video (${videoFormat}).
+Featured presenter: Authentic ${safeGender} (${avatarDesc}) physically holding and demonstrating the exact 3D physical product for "${cleanBrand}"${cleanSlogan ? ` (${cleanSlogan})` : ''}.
+${prompt || 'The Bangladeshi human model physically holds the exact 3D product from the reference image in their hands, rotates it to show its real 3D packaging, texture, and label close-up, and speaks warmly to the camera with natural facial expressions, realistic fingers, and synchronized lip-sync.'}
+${refTags ? `Strictly preserve the exact 3D product geometry, packaging color, and label design from ${refTags} held naturally in the model's hands.` : ''}
+${spokenScriptBn ? `The presenter speaks naturally in Bengali with realistic lip-sync: "${spokenScriptBn}"` : ''}
+STRICT GOOGLE FLOW REALISM RULE: Render a 100% photorealistic living human model physically holding and interacting with the 3D product in real-time motion. Zero static images, zero 2D cutouts, zero text overlays.`;
 
-      inputParts.push({
-        type: 'text',
-        text: fullVideoPrompt,
-      });
+      const clients = getServerGeminiClients(apiKey);
+      let lastErrorMsg = '';
+      let hitFreeTierQuota = false;
 
-      const createParams: any = {
-        model: 'gemini-omni-1.1-flash',
-        input: inputParts,
-        background: Boolean(background),
-        store: true,
-        stream: false,
-        response_format: {
-          type: 'video',
-          aspect_ratio: aspectRatio === '16:9' ? '16:9' : '9:16',
-          duration: duration === '5s' ? '5s' : '10s',
-          resolution: resolution === '1080p' ? '1080p' : '720p',
-        },
-      };
+      // 1. Try Gemini Omni 1.1 Flash (`gemini-omni-1.1-flash`) via Interactions API across all configured keys
+      for (const ai of clients) {
+        try {
+          const inputParts: any[] = [];
+          resolvedImgs.forEach((im) => {
+            inputParts.push({
+              type: 'image',
+              data: im.data,
+              mime_type: im.mime_type,
+            });
+          });
+          inputParts.push({
+            type: 'text',
+            text: fullVideoPrompt,
+          });
 
-      if (previousInteractionId && String(previousInteractionId).trim()) {
-        createParams.previous_interaction_id = String(previousInteractionId).trim();
+          const createParams: any = {
+            model: 'gemini-omni-1.1-flash',
+            input: inputParts,
+            background: Boolean(background),
+            store: true,
+            stream: false,
+            response_format: {
+              type: 'video',
+              aspect_ratio: aspectRatio === '16:9' ? '16:9' : '9:16',
+              duration: duration === '5s' ? '5s' : '10s',
+              resolution: resolution === '1080p' ? '1080p' : '720p',
+            },
+          };
+
+          if (previousInteractionId && String(previousInteractionId).trim()) {
+            createParams.previous_interaction_id = String(previousInteractionId).trim();
+          }
+
+          const interaction: any = await (ai as any).interactions.create(createParams, {
+            timeout: 300000,
+          });
+
+          const videoPart = extractInteractionMedia(interaction, 'video');
+          if (videoPart?.data) {
+            const mime = videoPart.mime_type || 'video/mp4';
+            const savedVideoUrl = saveGeneratedStudioMediaToDisk(videoPart.data, mime, 'flow-video');
+            res.json({
+              success: true,
+              status: 'completed',
+              engine: 'gemini-omni-1.1-flash',
+              videoUrl: savedVideoUrl,
+              videoDataUrl: savedVideoUrl,
+              interactionId: interaction?.id || '',
+            });
+            return;
+          }
+
+          if (videoPart?.uri) {
+            res.json({
+              success: true,
+              status: 'completed',
+              engine: 'gemini-omni-1.1-flash',
+              videoUrl: videoPart.uri,
+              interactionId: interaction?.id || '',
+            });
+            return;
+          }
+
+          if (
+            interaction?.id &&
+            (interaction?.status === 'in_progress' ||
+              interaction?.status === 'queued' ||
+              interaction?.status === 'processing' ||
+              Boolean(background))
+          ) {
+            res.json({
+              success: true,
+              status: interaction.status || 'in_progress',
+              interactionId: interaction.id,
+              engine: 'gemini-omni-1.1-flash',
+            });
+            return;
+          }
+        } catch (omniErr: any) {
+          lastErrorMsg = String(omniErr?.message || omniErr || '');
+          if (
+            lastErrorMsg.includes('429') ||
+            lastErrorMsg.includes('Free Tier') ||
+            lastErrorMsg.includes('quota')
+          ) {
+            hitFreeTierQuota = true;
+          }
+        }
+
+        // 2. Also try Google Flow's Veo 3.1 Engine (`veo-3.1-fast-generate-preview`) via generateVideos
+        try {
+          const veoConfig: any = {
+            numberOfVideos: 1,
+            resolution: resolution === '1080p' ? '1080p' : '720p',
+            aspectRatio: aspectRatio === '16:9' ? '16:9' : '9:16',
+          };
+          const veoReq: any = {
+            model: 'veo-3.1-fast-generate-preview',
+            prompt: fullVideoPrompt,
+            config: veoConfig,
+          };
+          if (resolvedImgs[0]) {
+            veoReq.image = {
+              imageBytes: resolvedImgs[0].data,
+              mimeType: resolvedImgs[0].mime_type,
+            };
+          }
+
+          const operation: any = await ai.models.generateVideos(veoReq);
+          if (operation?.done) {
+            const dlLink = operation?.response?.generatedVideos?.[0]?.video?.uri;
+            if (dlLink) {
+              res.json({
+                success: true,
+                status: 'completed',
+                engine: 'veo-3.1-fast-generate-preview',
+                videoUrl: dlLink,
+                interactionId: `veo-${Date.now()}`,
+              });
+              return;
+            }
+          } else if (operation?.name) {
+            const opId = `veo_op_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+            activeVeoOperations.set(opId, { operation, client: ai });
+            res.json({
+              success: true,
+              status: 'in_progress',
+              interactionId: opId,
+              engine: 'veo-3.1-fast-generate-preview',
+            });
+            return;
+          }
+        } catch (veoErr: any) {
+          const vMsg = String(veoErr?.message || '');
+          if (vMsg.includes('429') || vMsg.includes('Free Tier') || vMsg.includes('quota')) {
+            hitFreeTierQuota = true;
+          }
+        }
       }
 
-      const interaction: any = await (ai as any).interactions.create(createParams, {
-        timeout: 300000,
-      });
-
-      const videoPart = extractInteractionMedia(interaction, 'video');
-      if (videoPart?.data) {
-        const mime = videoPart.mime_type || 'video/mp4';
-        res.json({
-          success: true,
-          status: 'completed',
+      if (hitFreeTierQuota) {
+        res.status(402).json({
+          success: false,
+          status: 'requires_paid_api_key',
+          requiresPaidKey: true,
           engine: 'gemini-omni-1.1-flash',
-          videoDataUrl: `data:${mime};base64,${videoPart.data}`,
-          interactionId: interaction?.id || '',
+          error:
+            'অরিজিনাল Google Flow (Veo 3.1 / Gemini Omni 1.1 Flash) দিয়ে ১০০% রিয়েল হিউম্যান ভিডিও তৈরির জন্য ফ্রি-টিয়ার কী-তে লিমিট ০ (Free Tier Limit: 0)। অনুগ্রহ করে পপআপে আপনার Google AI Studio পেইড API Key সিলেক্ট করুন।',
         });
         return;
       }
 
-      if (videoPart?.uri) {
-        res.json({
-          success: true,
-          status: 'completed',
-          engine: 'gemini-omni-1.1-flash',
-          videoUrl: videoPart.uri,
-          interactionId: interaction?.id || '',
-        });
-        return;
-      }
-
-      if (
-        interaction?.id &&
-        (interaction?.status === 'in_progress' ||
-          interaction?.status === 'queued' ||
-          interaction?.status === 'processing' ||
-          Boolean(background))
-      ) {
-        res.json({
-          success: true,
-          status: interaction.status || 'in_progress',
-          interactionId: interaction.id,
-          engine: 'gemini-omni-1.1-flash',
-        });
-        return;
-      }
-
-      res.json({
-        success: true,
-        status: 'client_render_fallback',
+      res.status(500).json({
+        success: false,
+        status: 'failed',
         engine: 'gemini-omni-1.1-flash',
-        fallbackReason:
-          'Gemini Omni 1.1 Flash (gemini-omni-1.1-flash) সরাসরি ভিডিও বাইট রিটার্ন করেনি; প্রোডাক্টের আসল ছবি ও বাংলা ভয়েসওভার দিয়ে এইচডি কমার্শিয়াল ভিডিও রেন্ডার হচ্ছে।',
+        error:
+          lastErrorMsg ||
+          'Google Flow / Gemini Omni 1.1 ইঞ্জিনে ভিডিও জেনারেশন সম্পন্ন হয়নি। অনুগ্রহ করে পেইড API Key কানেক্ট করে আবার চেষ্টা করুন।',
       });
     } catch (err: any) {
-      console.warn('Gemini Omni 1.1 Flash fallback to HD Studio Video Synthesizer:', err?.message || err);
-      res.json({
-        success: true,
-        status: 'client_render_fallback',
+      res.status(500).json({
+        success: false,
+        status: 'failed',
         engine: 'gemini-omni-1.1-flash',
-        fallbackReason: err?.message || 'Omni 1.1 Flash fallback active',
+        error: err?.message || 'Google Flow ভিডিও জেনারেশনে ত্রুটি হয়েছে।',
       });
     }
   });
 
-  // 7.5 Poll Background Omni 1.1 Flash Video Job Status
+  // 7.5 Poll Background Omni 1.1 Flash or Veo 3.1 Video Job Status
   app.get('/api/flow/video-status/:interactionId', async (req, res) => {
     const { interactionId } = req.params;
     if (!interactionId) {
       res.status(400).json({ error: 'Interaction ID required' });
       return;
     }
+
+    // Check if it's a tracked Veo 3.1 operation
+    if (activeVeoOperations.has(interactionId)) {
+      try {
+        const entry = activeVeoOperations.get(interactionId)!;
+        const updatedOp: any = await entry.client.operations.getVideosOperation({
+          operation: entry.operation,
+        });
+        entry.operation = updatedOp;
+        if (updatedOp?.done) {
+          activeVeoOperations.delete(interactionId);
+          const dlLink = updatedOp?.response?.generatedVideos?.[0]?.video?.uri;
+          if (dlLink) {
+            res.json({
+              status: 'completed',
+              interactionId,
+              videoUrl: dlLink,
+            });
+            return;
+          }
+          res.json({
+            status: 'failed',
+            interactionId,
+            error: 'Veo video operation completed without URI',
+          });
+          return;
+        }
+        res.json({
+          status: 'in_progress',
+          interactionId,
+        });
+        return;
+      } catch (err: any) {
+        res.status(500).json({
+          status: 'failed',
+          error: err?.message || 'Veo স্ট্যাটাস যাচাই করতে সমস্যা হয়েছে।',
+        });
+        return;
+      }
+    }
+
     try {
       const ai = getServerGeminiClient();
       const current: any = await (ai as any).interactions.get(interactionId);
       const videoPart = extractInteractionMedia(current, 'video');
       if (current?.status === 'completed' || videoPart) {
-        if (videoPart?.data || videoPart?.uri) {
+        if (videoPart?.data) {
+          const mime = videoPart.mime_type || 'video/mp4';
+          const savedVideoUrl = saveGeneratedStudioMediaToDisk(videoPart.data, mime, 'flow-video');
           res.json({
             status: 'completed',
             interactionId,
-            videoDataUrl: videoPart.data
-              ? `data:${videoPart.mime_type || 'video/mp4'};base64,${videoPart.data}`
-              : undefined,
+            videoUrl: savedVideoUrl,
+            videoDataUrl: savedVideoUrl,
+          });
+          return;
+        }
+        if (videoPart?.uri) {
+          res.json({
+            status: 'completed',
+            interactionId,
             videoUrl: videoPart.uri,
           });
           return;
@@ -4440,6 +5444,635 @@ Return strict JSON with 100% complete, rich Bengali product details:
     }
   });
 
+  // ============================================================================
+  // LIVE CATALOG MIRROR & EXTERNAL BROWSER PRODUCT/CATALOG RESOLUTION API
+  // Ensures shared product links (/products/:id) & catalog links (/catalog/:catId)
+  // always load 100% reliably in mobile & external browsers even if Firestore
+  // WebChannel is blocked or slow.
+  // ============================================================================
+  const CATALOG_MIRROR_FILE = path.join(__dirname, 'data', 'live_catalog_mirror.json');
+  const FIRESTORE_PRODUCTS_REST_URL =
+    'https://firestore.googleapis.com/v1/projects/mineral-goal-vc70r/databases/ai-studio-2b5c8a27-d4b7-4db4-9f08-095cd99a7c33/documents/products?pageSize=300';
+
+  function readLocalCatalogMirror(): { products: Record<string, any>; deletedIds: string[] } {
+    try {
+      if (fs.existsSync(CATALOG_MIRROR_FILE)) {
+        const raw = JSON.parse(fs.readFileSync(CATALOG_MIRROR_FILE, 'utf-8'));
+        return {
+          products: raw && typeof raw.products === 'object' ? raw.products : {},
+          deletedIds: Array.isArray(raw?.deletedIds) ? raw.deletedIds : [],
+        };
+      }
+    } catch (e) {
+      console.warn('readLocalCatalogMirror warning:', e);
+    }
+    return { products: {}, deletedIds: [] };
+  }
+
+  function writeLocalCatalogMirror(data: { products: Record<string, any>; deletedIds: string[] }) {
+    try {
+      const dir = path.dirname(CATALOG_MIRROR_FILE);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(CATALOG_MIRROR_FILE, JSON.stringify(data, null, 2), 'utf-8');
+    } catch (e) {
+      console.warn('writeLocalCatalogMirror warning:', e);
+    }
+  }
+
+  function parseFirestoreRestValue(valObj: any): any {
+    if (!valObj || typeof valObj !== 'object') return undefined;
+    if ('stringValue' in valObj) return valObj.stringValue;
+    if ('integerValue' in valObj) return Number(valObj.integerValue);
+    if ('doubleValue' in valObj) return Number(valObj.doubleValue);
+    if ('booleanValue' in valObj) return Boolean(valObj.booleanValue);
+    if ('nullValue' in valObj) return null;
+    if ('arrayValue' in valObj) {
+      const values = valObj.arrayValue?.values;
+      return Array.isArray(values) ? values.map(parseFirestoreRestValue) : [];
+    }
+    if ('mapValue' in valObj) {
+      const fields = valObj.mapValue?.fields || {};
+      const out: Record<string, any> = {};
+      for (const [k, v] of Object.entries(fields)) {
+        out[k] = parseFirestoreRestValue(v);
+      }
+      return out;
+    }
+    return undefined;
+  }
+
+  function parseFirestoreRestDoc(docObj: any): any | null {
+    if (!docObj || !docObj.fields) return null;
+    const out: Record<string, any> = {};
+    for (const [k, v] of Object.entries(docObj.fields)) {
+      out[k] = parseFirestoreRestValue(v);
+    }
+    if (!out.id && typeof docObj.name === 'string') {
+      const parts = docObj.name.split('/');
+      out.id = parts[parts.length - 1];
+    }
+    return out;
+  }
+
+  let cachedFirestoreProducts: any[] = [];
+  let lastFirestoreFetchMs = 0;
+
+  async function getCombinedCatalogProducts(forceFresh = false): Promise<any[]> {
+    const mirror = readLocalCatalogMirror();
+    const deletedSet = new Set(mirror.deletedIds);
+    const now = Date.now();
+
+    if (forceFresh || now - lastFirestoreFetchMs > 12000 || cachedFirestoreProducts.length === 0) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 4500);
+        const resp = await fetch(FIRESTORE_PRODUCTS_REST_URL, { signal: controller.signal });
+        clearTimeout(timer);
+        if (resp.ok) {
+          const json: any = await resp.json();
+          if (Array.isArray(json?.documents)) {
+            const parsed = json.documents
+              .map(parseFirestoreRestDoc)
+              .filter((p: any) => p && p.id);
+            if (parsed.length > 0) {
+              cachedFirestoreProducts = parsed;
+              lastFirestoreFetchMs = now;
+            }
+          }
+        }
+      } catch (_err) {
+        // Fallback silently to cached + mirror + initial products
+      }
+    }
+
+    const mergedMap = new Map<string, any>();
+    for (const p of INITIAL_PRODUCTS) {
+      if (p && p.id && !deletedSet.has(p.id)) {
+        mergedMap.set(p.id, { ...p, published: true });
+      }
+    }
+    for (const p of cachedFirestoreProducts) {
+      if (p && p.id && !deletedSet.has(p.id)) {
+        mergedMap.set(p.id, { ...(mergedMap.get(p.id) || {}), ...p });
+      }
+    }
+    for (const [id, p] of Object.entries(mirror.products)) {
+      if (p && id && !deletedSet.has(id)) {
+        mergedMap.set(id, { ...(mergedMap.get(id) || {}), ...p });
+      }
+    }
+
+    return Array.from(mergedMap.values());
+  }
+
+  app.post('/api/catalog/sync-mirror', (req, res) => {
+    try {
+      const mirror = readLocalCatalogMirror();
+      const deletedSet = new Set(mirror.deletedIds);
+      const incoming: any[] = [];
+      if (req.body?.product && req.body.product.id) {
+        incoming.push(req.body.product);
+      }
+      if (Array.isArray(req.body?.products)) {
+        incoming.push(...req.body.products.filter((p: any) => p && p.id));
+      }
+      for (const prod of incoming) {
+        mirror.products[prod.id] = prod;
+        deletedSet.delete(prod.id);
+      }
+      mirror.deletedIds = Array.from(deletedSet);
+      writeLocalCatalogMirror(mirror);
+      res.json({ success: true, count: Object.keys(mirror.products).length });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Sync error' });
+    }
+  });
+
+  app.post('/api/catalog/delete-mirror', (req, res) => {
+    try {
+      const productId = String(req.body?.productId || '').trim();
+      if (productId) {
+        const mirror = readLocalCatalogMirror();
+        delete mirror.products[productId];
+        if (!mirror.deletedIds.includes(productId)) {
+          mirror.deletedIds.push(productId);
+        }
+        writeLocalCatalogMirror(mirror);
+        cachedFirestoreProducts = cachedFirestoreProducts.filter((p) => p?.id !== productId);
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Delete mirror error' });
+    }
+  });
+
+  // ============================================================================
+  // PERSISTENT HERO BANNER IMAGE UPLOAD & STORE CONTENT MIRROR API
+  // Ensures Hero Banners, Category Heroes, and Courier API Credentials save in
+  // real-time to disk + Firestore and immediately show on dokandari.com / dukandari.com
+  // ============================================================================
+  const STORE_CONTENT_MIRROR_FILE = path.join(__dirname, 'data', 'store_content_mirror.json');
+  const FIRESTORE_STORE_CONTENT_REST_URL =
+    'https://firestore.googleapis.com/v1/projects/mineral-goal-vc70r/databases/ai-studio-2b5c8a27-d4b7-4db4-9f08-095cd99a7c33/documents/settings/store_content';
+
+  function readLocalStoreContentMirror(): Record<string, any> | null {
+    try {
+      if (fs.existsSync(STORE_CONTENT_MIRROR_FILE)) {
+        const parsed = JSON.parse(fs.readFileSync(STORE_CONTENT_MIRROR_FILE, 'utf-8'));
+        if (parsed && typeof parsed === 'object') {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.warn('readLocalStoreContentMirror warning:', e);
+    }
+    return null;
+  }
+
+  function writeLocalStoreContentMirror(content: Record<string, any>) {
+    try {
+      const dir = path.dirname(STORE_CONTENT_MIRROR_FILE);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      const existing = readLocalStoreContentMirror() || {};
+      const merged = {
+        ...existing,
+        ...content,
+        updatedAt: Date.now(),
+      };
+      fs.writeFileSync(STORE_CONTENT_MIRROR_FILE, JSON.stringify(merged, null, 2), 'utf-8');
+      return merged;
+    } catch (e) {
+      console.warn('writeLocalStoreContentMirror warning:', e);
+      return content;
+    }
+  }
+
+  // Upload Hero / Category Banner image to /public/uploads/product/ (and /dist/uploads/product/ if built)
+  // so images are served as fast static URLs and never exceed Firestore's 1MB document limit!
+  app.post('/api/upload-banner-image', (req, res) => {
+    try {
+      const { imageDataUrl, prefix = 'hero-banner' } = req.body || {};
+      if (!imageDataUrl || typeof imageDataUrl !== 'string') {
+        return res.status(400).json({ success: false, error: 'Missing imageDataUrl' });
+      }
+      if (!imageDataUrl.startsWith('data:image/')) {
+        return res.json({ success: true, url: imageDataUrl });
+      }
+      const match = imageDataUrl.match(/^data:image\/([a-zA-Z0-9+.-]+);base64,(.+)$/);
+      if (!match) {
+        return res.status(400).json({ success: false, error: 'Invalid base64 image data' });
+      }
+      const rawSubtype = match[1].toLowerCase();
+      const ext = rawSubtype.includes('png')
+        ? 'png'
+        : rawSubtype.includes('webp')
+        ? 'webp'
+        : 'jpg';
+      const safePrefix = String(prefix || 'hero-banner')
+        .replace(/[^a-zA-Z0-9_-]/g, '-')
+        .slice(0, 32);
+      const fileName = `${safePrefix}-${Date.now()}-${Math.floor(Math.random() * 9000 + 1000)}.${ext}`;
+      const buffer = Buffer.from(match[2], 'base64');
+
+      const publicUploadDir = path.join(__dirname, 'public', 'uploads', 'product');
+      if (!fs.existsSync(publicUploadDir)) {
+        fs.mkdirSync(publicUploadDir, { recursive: true });
+      }
+      fs.writeFileSync(path.join(publicUploadDir, fileName), buffer);
+
+      const distUploadDir = path.join(__dirname, 'dist', 'uploads', 'product');
+      if (fs.existsSync(path.join(__dirname, 'dist'))) {
+        try {
+          if (!fs.existsSync(distUploadDir)) {
+            fs.mkdirSync(distUploadDir, { recursive: true });
+          }
+          fs.writeFileSync(path.join(distUploadDir, fileName), buffer);
+        } catch {
+          // ignore dist copy warning
+        }
+      }
+
+      const publicUrl = `/uploads/product/${fileName}`;
+      return res.json({ success: true, url: publicUrl });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'Upload error' });
+    }
+  });
+
+  app.get('/api/store/content', async (_req, res) => {
+    try {
+      const localMirror = readLocalStoreContentMirror();
+      let firestoreContent: Record<string, any> | null = null;
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 3500);
+        const resp = await fetch(FIRESTORE_STORE_CONTENT_REST_URL, { signal: controller.signal });
+        clearTimeout(timer);
+        if (resp.ok) {
+          const json: any = await resp.json();
+          firestoreContent = parseFirestoreRestDoc(json);
+        }
+      } catch {
+        // fallback to local mirror
+      }
+
+      if (localMirror && firestoreContent) {
+        const localTime = Number(localMirror.updatedAt || 0);
+        const fsTime = Number(firestoreContent.updatedAt || 0);
+        const merged =
+          localTime >= fsTime
+            ? { ...firestoreContent, ...localMirror }
+            : { ...localMirror, ...firestoreContent };
+        return res.json({ success: true, content: merged });
+      }
+      return res.json({
+        success: true,
+        content: localMirror || firestoreContent || null,
+      });
+    } catch (err: any) {
+      return res.json({ success: true, content: readLocalStoreContentMirror() });
+    }
+  });
+
+  app.post('/api/store/content', (req, res) => {
+    try {
+      const incoming = req.body?.content || req.body;
+      if (!incoming || typeof incoming !== 'object') {
+        return res.status(400).json({ success: false, error: 'Invalid content payload' });
+      }
+      // Convert any base64 hero slide images to static files automatically so Firestore & JSON stay small and fast!
+      const publicUploadDir = path.join(__dirname, 'public', 'uploads', 'product');
+      if (!fs.existsSync(publicUploadDir)) {
+        fs.mkdirSync(publicUploadDir, { recursive: true });
+      }
+      const convertBase64ToStaticFile = (rawImg: string, prefix: string): string => {
+        if (!rawImg || typeof rawImg !== 'string' || !rawImg.startsWith('data:image/')) {
+          return rawImg;
+        }
+        const m = rawImg.match(/^data:image\/([a-zA-Z0-9+.-]+);base64,(.+)$/);
+        if (!m) return rawImg;
+        const ext = m[1].toLowerCase().includes('png')
+          ? 'png'
+          : m[1].toLowerCase().includes('webp')
+          ? 'webp'
+          : 'jpg';
+        const fname = `${prefix}-${Date.now()}-${Math.floor(Math.random() * 9000 + 1000)}.${ext}`;
+        try {
+          const buf = Buffer.from(m[2], 'base64');
+          fs.writeFileSync(path.join(publicUploadDir, fname), buf);
+          const distUploadDir = path.join(__dirname, 'dist', 'uploads', 'product');
+          if (fs.existsSync(path.join(__dirname, 'dist'))) {
+            if (!fs.existsSync(distUploadDir)) fs.mkdirSync(distUploadDir, { recursive: true });
+            fs.writeFileSync(path.join(distUploadDir, fname), buf);
+          }
+          return `/uploads/product/${fname}`;
+        } catch {
+          return rawImg;
+        }
+      };
+
+      const sanitized = { ...incoming };
+      if (Array.isArray(sanitized.heroSlides)) {
+        sanitized.heroSlides = sanitized.heroSlides.map((slide: any, idx: number) => ({
+          ...slide,
+          image: convertBase64ToStaticFile(slide?.image || '', `hero-slide-${idx + 1}`),
+        }));
+      }
+      if (sanitized.heroImage && typeof sanitized.heroImage === 'string') {
+        sanitized.heroImage = convertBase64ToStaticFile(sanitized.heroImage, 'hero-main');
+      }
+      if (sanitized.categoryHeroes && typeof sanitized.categoryHeroes === 'object') {
+        const nextCatHeroes: Record<string, any> = {};
+        for (const [catKey, catHero] of Object.entries(sanitized.categoryHeroes)) {
+          if (catHero && typeof catHero === 'object') {
+            const ch: any = { ...catHero };
+            if (typeof ch.image === 'string') {
+              ch.image = convertBase64ToStaticFile(ch.image, `cat-hero-${catKey}`);
+            }
+            if (Array.isArray(ch.slides)) {
+              ch.slides = ch.slides.map((s: any, i: number) => ({
+                ...s,
+                image: convertBase64ToStaticFile(s?.image || '', `cat-slide-${catKey}-${i + 1}`),
+              }));
+            }
+            nextCatHeroes[catKey] = ch;
+          }
+        }
+        sanitized.categoryHeroes = nextCatHeroes;
+      }
+
+      const saved = writeLocalStoreContentMirror(sanitized);
+      return res.json({ success: true, content: saved });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'Save store content error' });
+    }
+  });
+
+  app.get('/api/courier/credentials', async (_req, res) => {
+    try {
+      const creds = await getServerFirestoreApiCredentials();
+      return res.json({ success: true, credentials: creds });
+    } catch (err: any) {
+      return res.json({ success: true, credentials: readLocalCourierCredsMirror() });
+    }
+  });
+
+  app.post('/api/courier/credentials', async (req, res) => {
+    try {
+      const incoming = req.body?.credentials || req.body || {};
+      writeLocalCourierCredsMirror(incoming);
+
+      // Pre-warm Pathao OAuth token in background if Pathao credentials are provided
+      const cid = String(incoming.pathaoClientId || '').trim();
+      const csecret = String(incoming.pathaoClientSecret || '').trim();
+      const cuser = String(incoming.pathaoUsername || '').trim();
+      const cpass = String(incoming.pathaoPassword || '').trim();
+      if (cid && csecret && cuser && cpass) {
+        fetch('https://api-hermes.pathao.com/aladdin/api/v1/issue-token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({
+            client_id: cid,
+            client_secret: csecret,
+            username: cuser,
+            password: cpass,
+            grant_type: 'password',
+          }),
+        })
+          .then((r) => r.json())
+          .then((tokenData: any) => {
+            if (tokenData?.access_token) {
+              cachedPathaoToken = {
+                clientId: cid,
+                username: cuser,
+                token: String(tokenData.access_token),
+                storeId: Number(incoming.pathaoStoreId || 0),
+                expiresAt: Date.now() + 3600 * 1000,
+              };
+            }
+          })
+          .catch(() => {});
+      }
+
+      return res.json({ success: true, credentials: readLocalCourierCredsMirror() });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'Save credentials error' });
+    }
+  });
+
+  app.get('/api/catalog/products', async (_req, res) => {
+    try {
+      const products = await getCombinedCatalogProducts(false);
+      res.json({ success: true, products });
+    } catch (err: any) {
+      res.json({ success: true, products: INITIAL_PRODUCTS });
+    }
+  });
+
+  app.get('/api/catalog/product/:id', async (req, res) => {
+    try {
+      const rawId = decodeURIComponent(req.params.id || '').trim();
+      if (!rawId) {
+        return res.status(400).json({ success: false, error: 'Missing product ID' });
+      }
+      const list = await getCombinedCatalogProducts(false);
+      const lower = rawId.toLowerCase();
+      let found =
+        list.find((p) => p.id === rawId) ||
+        list.find((p) => String(p.id || '').toLowerCase() === lower) ||
+        list.find((p) => String(p.sku || '').toLowerCase() === lower);
+
+      if (!found) {
+        // Try a fresh Firestore fetch for newly created products
+        const freshList = await getCombinedCatalogProducts(true);
+        found =
+          freshList.find((p) => p.id === rawId) ||
+          freshList.find((p) => String(p.id || '').toLowerCase() === lower) ||
+          freshList.find((p) => String(p.sku || '').toLowerCase() === lower);
+      }
+
+      // Match by timestamp prefix (e.g. dkd-1776101501645 -> dkd-1776101501645-01) if exact match was not found
+      if (!found) {
+        const tsPrefix = lower.match(/^(dkd-\d{9,14})/)?.[1];
+        if (tsPrefix) {
+          found = list.find((p) => String(p.id || '').toLowerCase().startsWith(tsPrefix));
+        }
+      }
+
+      if (found) {
+        return res.json({ success: true, product: found });
+      }
+      return res.status(404).json({ success: false, error: 'Product not found' });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'Error resolving product' });
+    }
+  });
+
+  app.get('/images/:productId/:index', async (req, res) => {
+    try {
+      const productId = decodeURIComponent(req.params.productId || '').trim();
+      const idx = Math.max(0, (parseInt(req.params.index || '1', 10) || 1) - 1);
+      const list = await getCombinedCatalogProducts(false);
+      const prod =
+        list.find((p) => p.id === productId) ||
+        list.find((p) => String(p.id || '').toLowerCase() === productId.toLowerCase());
+
+      const images: string[] = Array.isArray(prod?.images) && prod.images.length > 0
+        ? prod.images
+        : prod?.image
+        ? [prod.image]
+        : [];
+      const targetImg = images[idx] || images[0] || prod?.image || '';
+
+      if (targetImg.startsWith('data:image/')) {
+        const match = targetImg.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+        if (match) {
+          const mimeType = match[1];
+          const buf = Buffer.from(match[2], 'base64');
+          res.setHeader('Content-Type', mimeType);
+          res.setHeader('Cache-Control', 'public, max-age=86400');
+          return res.send(buf);
+        }
+      } else if (targetImg.startsWith('http://') || targetImg.startsWith('https://')) {
+        return res.redirect(302, targetImg);
+      } else if (targetImg.startsWith('/uploads/')) {
+        return res.redirect(302, targetImg);
+      }
+      return res.status(404).send('Image not found');
+    } catch (_err) {
+      return res.status(404).send('Image error');
+    }
+  });
+
+  // Helper to inject SSR Product/Catalog Microdata, OpenGraph tags, Schema.org JSON-LD, and window.__DOKANDARI_SSR_PRODUCT__
+  // into index.html when any browser or Meta/TikTok crawler opens /products/:id or /catalog/:catId on dokandari.com / dukandari.com
+  const injectSsrMetaIntoHtml = async (rawHtml: string, req: express.Request): Promise<string> => {
+    try {
+      const reqOrigin = req.headers.host ? `https://${req.headers.host}` : 'https://dokandari.com';
+      const cleanPath = (req.path || '').split('?')[0].replace(/\/+$/, '');
+      const prodMatch = cleanPath.match(/^\/(?:products?|p|item|shop|product-detail)\/([^/]+)/i);
+      const queryProdId = (req.query?.product || req.query?.id || req.query?.p) as string | undefined;
+      const targetRawProdId = prodMatch?.[1]
+        ? decodeURIComponent(prodMatch[1]).trim()
+        : queryProdId
+        ? String(queryProdId).trim()
+        : '';
+
+      const catMatch = cleanPath.match(/^\/(?:catalog|category|categories|cat|collections?)\/([^/]+)/i);
+      const queryCatId = (req.query?.catalog || req.query?.category || req.query?.cat) as string | undefined;
+      const targetRawCatId = catMatch?.[1]
+        ? decodeURIComponent(catMatch[1]).trim()
+        : queryCatId
+        ? String(queryCatId).trim()
+        : '';
+
+      const escapeHtml = (s: string) =>
+        String(s || '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+
+      if (!targetRawProdId && targetRawCatId) {
+        const catUrl = `${reqOrigin}/catalog/${encodeURIComponent(targetRawCatId)}?brand=dokandari`;
+        const catTitle = `Dokandari Catalog — ${targetRawCatId.replace(/_/g, ' ').toUpperCase()} | দোকানদারি প্রিমিয়াম কালেকশন`;
+        const catDesc = `দোকানদারি (Dokandari) — ${targetRawCatId.replace(/_/g, ' ')} অরিজিনাল কালেকশন ও সারা বাংলাদেশে ক্যাশ অন ডেলিভারি।`;
+        const ssrCatBlock = `
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="${escapeHtml(catTitle)}" />
+    <meta property="og:description" content="${escapeHtml(catDesc)}" />
+    <meta property="og:url" content="${escapeHtml(catUrl)}" />
+    <script>window.__DOKANDARI_SSR_CATALOG__ = ${JSON.stringify(targetRawCatId).replace(/</g, '\\u003c')};</script>`;
+        return rawHtml
+          .replace(/<title>[\s\S]*?<\/title>/i, `<title>${escapeHtml(catTitle)}</title>`)
+          .replace('<!-- DOKANDARI_SSR_META_INJECTION -->', ssrCatBlock);
+      }
+
+      if (!targetRawProdId) {
+        return rawHtml;
+      }
+
+      const list = await getCombinedCatalogProducts(false);
+      const lower = targetRawProdId.toLowerCase();
+      const tsPrefix = lower.match(/^(dkd-\d{9,14})/)?.[1];
+
+      const prod =
+        list.find((p) => p.id === targetRawProdId) ||
+        list.find((p) => String(p.id || '').toLowerCase() === lower) ||
+        list.find((p) => String(p.sku || '').toLowerCase() === lower) ||
+        (tsPrefix ? list.find((p) => String(p.id || '').toLowerCase().startsWith(tsPrefix)) : null) ||
+        list[0];
+
+      if (!prod) return rawHtml;
+
+      const canonicalId = String(prod.id).trim();
+      const title = `${prod.name} — ৳${Number(prod.price || 990).toLocaleString()} | Dokandari`;
+      const desc =
+        prod.description ||
+        `${prod.name} — ১০০% অরিজিনাল কোয়ালিটি ও সারা বাংলাদেশে ক্যাশ অন ডেলিভারি সুবিধা।`;
+      const rawImgs = Array.isArray(prod.images) ? prod.images : prod.image ? [prod.image] : [];
+      const firstImg = String(rawImgs[0] || '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg');
+      const absImg = firstImg.startsWith('http')
+        ? firstImg
+        : firstImg.startsWith('data:')
+        ? `${reqOrigin}/images/${encodeURIComponent(canonicalId)}/1`
+        : `${reqOrigin}${firstImg.startsWith('/') ? '' : '/'}${firstImg}`;
+      const prodUrl = `${reqOrigin}/products/${encodeURIComponent(canonicalId)}?brand=dokandari`;
+      const avail = prod.inStock !== false ? 'in stock' : 'out of stock';
+
+      const productSchema = {
+        '@context': 'https://schema.org',
+        '@type': 'Product',
+        '@id': prodUrl,
+        productID: canonicalId,
+        sku: canonicalId,
+        mpn: prod.sku || canonicalId,
+        name: prod.name,
+        description: desc,
+        category: prod.category || 'home_decor',
+        image: [absImg],
+        brand: { '@type': 'Brand', name: 'Dokandari' },
+        offers: {
+          '@type': 'Offer',
+          url: prodUrl,
+          priceCurrency: 'BDT',
+          price: String(prod.price || 990),
+          availability:
+            prod.inStock !== false
+              ? 'https://schema.org/InStock'
+              : 'https://schema.org/OutOfStock',
+          itemCondition: 'https://schema.org/NewCondition',
+        },
+      };
+
+      const ssrHeadBlock = `
+    <meta property="og:type" content="product" />
+    <meta property="og:title" content="${escapeHtml(title)}" />
+    <meta property="og:description" content="${escapeHtml(desc)}" />
+    <meta property="og:image" content="${escapeHtml(absImg)}" />
+    <meta property="og:url" content="${escapeHtml(prodUrl)}" />
+    <meta property="product:brand" content="Dokandari" />
+    <meta property="product:availability" content="${avail}" />
+    <meta property="product:condition" content="new" />
+    <meta property="product:price:amount" content="${Number(prod.price || 990)}" />
+    <meta property="product:price:currency" content="BDT" />
+    <meta property="product:retailer_item_id" content="${escapeHtml(canonicalId)}" />
+    <meta property="product:item_group_id" content="${escapeHtml(canonicalId)}" />
+    <meta property="product:category" content="${escapeHtml(prod.category || 'home_decor')}" />
+    <script id="dokandari-ssr-product-jsonld" type="application/ld+json">${JSON.stringify(productSchema)}</script>
+    <script>window.__DOKANDARI_SSR_PRODUCT__ = ${JSON.stringify(prod).replace(/</g, '\\u003c')};</script>`;
+
+      return rawHtml
+        .replace(/<title>[\s\S]*?<\/title>/i, `<title>${escapeHtml(title)}</title>`)
+        .replace('<!-- DOKANDARI_SSR_META_INJECTION -->', ssrHeadBlock);
+    } catch {
+      return rawHtml;
+    }
+  };
 
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
@@ -4447,12 +6080,47 @@ Return strict JSON with 100% complete, rich Bengali product details:
       server: { middlewareMode: true },
       appType: 'spa',
     });
+
+    app.get(
+      [
+        '/products/:id',
+        '/product/:id',
+        '/p/:id',
+        '/item/:id',
+        '/shop/:id',
+        '/catalog/:catId',
+        '/category/:catId',
+        '/categories/:catId',
+        '/cat/:catId',
+        '/collection/:catId',
+        '/collections/:catId',
+      ],
+      async (req, res, next) => {
+        try {
+          const indexPath = path.join(__dirname, 'index.html');
+          const template = fs.readFileSync(indexPath, 'utf-8');
+          const transformed = await vite.transformIndexHtml(req.originalUrl, template);
+          const enriched = await injectSsrMetaIntoHtml(transformed, req);
+          res.status(200).set({ 'Content-Type': 'text/html; charset=utf-8' }).end(enriched);
+        } catch (e) {
+          next(e);
+        }
+      }
+    );
+
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(__dirname, 'dist');
     app.use(express.static(distPath));
-    app.get('*', (_req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+    app.get('*', async (req, res) => {
+      try {
+        const indexPath = path.join(distPath, 'index.html');
+        const rawHtml = fs.readFileSync(indexPath, 'utf-8');
+        const enriched = await injectSsrMetaIntoHtml(rawHtml, req);
+        res.status(200).set({ 'Content-Type': 'text/html; charset=utf-8' }).send(enriched);
+      } catch {
+        res.sendFile(path.join(distPath, 'index.html'));
+      }
     });
   }
 

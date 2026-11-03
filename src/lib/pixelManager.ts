@@ -220,17 +220,16 @@ export function parsePixelIds(raw?: string | null): string[] {
 
 /**
  * Normalizes any cart/order item ID to match the exact product ID in the Meta & TikTok Catalog Feed.
+ * Preserves full hyphenated product IDs (e.g. "dkd-1776101501645-01", "dkd-arch-unbreakable-wall-mirror")
+ * and only strips cart line-item variant suffixes appended by CartContext (e.g. "-default-default", "-Standard Size").
  */
 export function normalizeCatalogProductId(rawId?: string | null): string {
   const cleaned = String(rawId || '').trim();
   if (!cleaned) return 'dkd-product';
-  // If an item ID was constructed like "dkd-1-Silver-Standard" or "dkd-real-1-Default-Standard",
-  // extract the canonical product ID prefix so it matches the catalog feed 100%.
-  const realMatch = cleaned.match(/^(dkd-real-\d+|dkd-custom-\d+|dkd-ai-\d+|dkd-\d+|prod-\d+)/i);
-  if (realMatch && realMatch[1]) {
-    return realMatch[1];
-  }
-  return cleaned;
+  const strippedVariant = cleaned
+    .replace(/-(?:default|standard(?:\s+size)?|original(?:\s+color)?)(?:-(?:default|standard(?:\s+size)?|original(?:\s+color)?))*$/i, '')
+    .trim();
+  return strippedVariant || cleaned;
 }
 
 /**
@@ -1362,8 +1361,24 @@ export function initializeGoogleSeoAndTags(config?: {
 }
 
 /**
- * Dynamically updates Schema.org Product JSON-LD and document title/canonical URL
- * when viewing a product detail page so Google Search & Meta Microdata index every product on dokandari.com.
+ * Helper to upsert a <meta property="..." content="..."> tag in document.head
+ * so Meta Pixel Microdata & TikTok Pixel automatically index products for zero-link catalog building.
+ */
+function upsertHeadMetaProperty(property: string, content: string): void {
+  if (typeof document === 'undefined') return;
+  let el = document.querySelector(`meta[property="${property}"]`) as HTMLMetaElement | null;
+  if (!el) {
+    el = document.createElement('meta');
+    el.setAttribute('property', property);
+    document.head.appendChild(el);
+  }
+  el.setAttribute('content', content);
+}
+
+/**
+ * Dynamically updates Schema.org Product JSON-LD, OpenGraph Product Microdata tags,
+ * and document title/canonical URL when viewing a product detail page so Meta Pixel,
+ * TikTok Pixel & Google Search automatically index every product on dokandari.com / dukandari.com.
  */
 export function updateProductStructuredData(product: {
   id: string;
@@ -1385,32 +1400,69 @@ export function updateProductStructuredData(product: {
     if (!product) {
       if (existingScript) existingScript.remove();
       document.title = 'Dokandari (দোকানদারি) — প্রিমিয়াম হোম ডেকোর, স্মার্ট গ্যাজেট, মডেস্ট ফ্যাশন ও স্কিনকেয়ার | বাংলাদেশ';
+      upsertHeadMetaProperty('og:type', 'website');
       return;
     }
 
     const canonicalId = normalizeCatalogProductId(product.id);
+    const productUrl = `${window.location.origin}/products/${encodeURIComponent(canonicalId)}?brand=dokandari`;
+    const rawImg = product.images && product.images.length > 0 ? product.images[0] : '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg';
+    const absoluteImg = rawImg.startsWith('http')
+      ? rawImg
+      : rawImg.startsWith('data:')
+      ? `${window.location.origin}/images/${encodeURIComponent(canonicalId)}/1`
+      : `${window.location.origin}${rawImg.startsWith('/') ? '' : '/'}${rawImg}`;
+    const descText =
+      product.description ||
+      `${product.name} — ১০০% অরিজিনাল কোয়ালিটি ও সারা বাংলাদেশে ক্যাশ অন ডেলিভারি সুবিধা।`;
+    const availText = product.inStock !== false ? 'in stock' : 'out of stock';
+
     document.title = `${product.name} — ৳${product.price.toLocaleString()} | Dokandari (দোকানদারি)`;
+
+    // Update canonical link
+    let canonicalLink = document.querySelector('link[rel="canonical"]') as HTMLLinkElement | null;
+    if (!canonicalLink) {
+      canonicalLink = document.createElement('link');
+      canonicalLink.rel = 'canonical';
+      document.head.appendChild(canonicalLink);
+    }
+    canonicalLink.href = productUrl;
+
+    // Inject Meta & TikTok OpenGraph Product Microdata tags for automatic Pixel Catalog creation
+    upsertHeadMetaProperty('og:type', 'product');
+    upsertHeadMetaProperty('og:title', product.name);
+    upsertHeadMetaProperty('og:description', descText);
+    upsertHeadMetaProperty('og:url', productUrl);
+    upsertHeadMetaProperty('og:image', absoluteImg);
+    upsertHeadMetaProperty('product:brand', 'Dokandari');
+    upsertHeadMetaProperty('product:availability', availText);
+    upsertHeadMetaProperty('product:condition', 'new');
+    upsertHeadMetaProperty('product:price:amount', String(product.price));
+    upsertHeadMetaProperty('product:price:currency', 'BDT');
+    upsertHeadMetaProperty('product:retailer_item_id', canonicalId);
+    upsertHeadMetaProperty('product:item_group_id', canonicalId);
+    upsertHeadMetaProperty('product:category', product.category || 'home_decor');
 
     const schemaObj = {
       '@context': 'https://schema.org',
       '@type': 'Product',
+      '@id': productUrl,
       productID: canonicalId,
       sku: canonicalId,
       mpn: product.sku || canonicalId,
       name: product.name,
-      description:
-        product.description ||
-        `${product.name} — ১০০% অরিজিনাল কোয়ালিটি ও সারা বাংলাদেশে ক্যাশ অন ডেলিভারি সুবিধা।`,
-      image: product.images && product.images.length > 0 ? product.images : [],
+      description: descText,
+      category: product.category || 'home_decor',
+      image: [absoluteImg],
       brand: {
         '@type': 'Brand',
         name: 'Dokandari',
       },
       offers: {
         '@type': 'Offer',
-        url: `${window.location.origin}/products/${encodeURIComponent(canonicalId)}`,
+        url: productUrl,
         priceCurrency: 'BDT',
-        price: product.price,
+        price: String(product.price),
         availability:
           product.inStock !== false
             ? 'https://schema.org/InStock'
@@ -1440,3 +1492,213 @@ export function updateProductStructuredData(product: {
     // ignore
   }
 }
+
+export interface AutoCatalogPixelSyncResult {
+  success: boolean;
+  scannedProductsCount: number;
+  scannedCategoriesCount: number;
+  categories: Array<{ category: string; count: number }>;
+  metaPixels: string[];
+  tiktokPixels: string[];
+  timestamp: number;
+}
+
+/**
+ * 1-Click & Automatic Pixel-Based Catalog Builder (Zero Manual Link Needed):
+ * 1. Injects a full Schema.org ItemList + Product Graph into document.head so Meta & TikTok Pixel Microdata
+ *    crawlers automatically discover and index every product and category on dokandari.com / dukandari.com.
+ * 2. Broadcasts catalog microdata signals to connected Meta Pixels (fbq) and TikTok Pixels (ttq)
+ *    and syncs with `/api/pixel/auto-catalog-sync` on the server.
+ */
+export async function syncAutoCatalogWithPixels(
+  products: any[],
+  options?: { forceFullBroadcast?: boolean }
+): Promise<AutoCatalogPixelSyncResult> {
+  if (typeof window === 'undefined') {
+    return {
+      success: false,
+      scannedProductsCount: 0,
+      scannedCategoriesCount: 0,
+      categories: [],
+      metaPixels: [],
+      tiktokPixels: [],
+      timestamp: Date.now(),
+    };
+  }
+
+  ensurePixelsInitializedFromStorage();
+
+  const validProducts = (Array.isArray(products) ? products : []).filter(
+    (p) => p && p.id && p.status !== 'draft'
+  );
+
+  const origin = window.location.origin || 'https://dokandari.com';
+  const categoryMap = new Map<string, number>();
+
+  const itemListElements = validProducts.slice(0, 120).map((p, idx) => {
+    const prodId = normalizeCatalogProductId(p.id);
+    const cat = String(p.category || 'home_decor');
+    categoryMap.set(cat, (categoryMap.get(cat) || 0) + 1);
+    const rawImg = Array.isArray(p.images) && p.images[0] ? p.images[0] : '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg';
+    const absImg = rawImg.startsWith('http')
+      ? rawImg
+      : rawImg.startsWith('data:')
+      ? `${origin}/images/${encodeURIComponent(prodId)}/1`
+      : `${origin}${rawImg.startsWith('/') ? '' : '/'}${rawImg}`;
+    const prodUrl = `${origin}/products/${encodeURIComponent(prodId)}?brand=dokandari`;
+    const priceNum = Math.max(1, Number(p.price) || 990);
+
+    return {
+      '@type': 'ListItem',
+      position: idx + 1,
+      item: {
+        '@context': 'https://schema.org',
+        '@type': 'Product',
+        '@id': prodUrl,
+        productID: prodId,
+        sku: prodId,
+        mpn: p.sku || prodId,
+        name: p.name || 'Dokandari Product',
+        description:
+          p.description ||
+          `${p.name || 'Dokandari Product'} — ১০০% অরিজিনাল কোয়ালিটি ও সারা বাংলাদেশে ক্যাশ অন ডেলিভারি।`,
+        image: [absImg],
+        category: cat,
+        brand: {
+          '@type': 'Brand',
+          name: 'Dokandari',
+        },
+        offers: {
+          '@type': 'Offer',
+          url: prodUrl,
+          priceCurrency: 'BDT',
+          price: String(priceNum),
+          availability: p.inStock !== false ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
+          itemCondition: 'https://schema.org/NewCondition',
+        },
+      },
+    };
+  });
+
+  // 1. Inject full catalog JSON-LD graph into <head> for automatic Pixel Microdata discovery
+  try {
+    let catalogScript = document.getElementById('dokandari-auto-catalog-jsonld') as HTMLScriptElement | null;
+    if (!catalogScript) {
+      catalogScript = document.createElement('script');
+      catalogScript.id = 'dokandari-auto-catalog-jsonld';
+      catalogScript.type = 'application/ld+json';
+      document.head.appendChild(catalogScript);
+    }
+    catalogScript.textContent = JSON.stringify({
+      '@context': 'https://schema.org',
+      '@type': 'ItemList',
+      name: 'Dokandari Official Live Product Catalog',
+      url: origin,
+      numberOfItems: itemListElements.length,
+      itemListElement: itemListElements,
+    });
+  } catch {
+    // ignore DOM error
+  }
+
+  const activeMetaIds = Array.from(window.__dokandari_meta_initialized_ids || [DEFAULT_DOKANDARI_META_PIXEL_ID]);
+  const activeTiktokIds = Array.from(window.__dokandari_tiktok_initialized_ids || [DEFAULT_DOKANDARI_TIKTOK_PIXEL_ID]);
+
+  // 2. When triggered via 1-Click button (or first auto-scan), broadcast catalog microdata to Meta & TikTok Pixels
+  if (options?.forceFullBroadcast && validProducts.length > 0) {
+    const allIds = validProducts.slice(0, 50).map((p) => normalizeCatalogProductId(p.id));
+    const contents = validProducts.slice(0, 50).map((p) => ({
+      id: normalizeCatalogProductId(p.id),
+      quantity: 1,
+      item_price: Math.max(1, Number(p.price) || 990),
+    }));
+    const totalCatalogVal = contents.reduce((acc, c) => acc + c.item_price, 0);
+    const syncEventId = `dkd_autocatalog_${Date.now()}`;
+
+    if (typeof window.fbq === 'function') {
+      try {
+        window.fbq('set', 'autoConfig', true, activeMetaIds[0] || DEFAULT_DOKANDARI_META_PIXEL_ID);
+        window.fbq(
+          'track',
+          'ViewContent',
+          {
+            content_ids: allIds,
+            contents,
+            content_type: 'product',
+            content_name: `Dokandari Auto Catalog Sync (${validProducts.length} Products)`,
+            content_category: 'all_categories',
+            value: totalCatalogVal,
+            currency: 'BDT',
+          },
+          { eventID: syncEventId }
+        );
+      } catch {
+        // ignore
+      }
+    }
+
+    if (window.ttq && typeof window.ttq.track === 'function') {
+      try {
+        window.ttq.track(
+          'ViewContent',
+          {
+            content_id: allIds[0] || 'dkd-1',
+            contents: validProducts.slice(0, 30).map((p) => ({
+              content_id: normalizeCatalogProductId(p.id),
+              content_type: 'product',
+              content_name: String(p.name || 'Dokandari Product').slice(0, 100),
+              quantity: 1,
+              price: Math.max(1, Number(p.price) || 990),
+            })),
+            content_type: 'product',
+            content_name: `Dokandari Full Catalog (${validProducts.length} Products)`,
+            value: totalCatalogVal,
+            currency: 'BDT',
+          },
+          { event_id: syncEventId }
+        );
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  // 3. Notify server `/api/pixel/auto-catalog-sync` so Server CAPI & Live Catalog Mirror stay 100% synced
+  try {
+    const res = await fetch('/api/pixel/auto-catalog-sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        origin,
+        forceFullBroadcast: Boolean(options?.forceFullBroadcast),
+        metaPixelIds: activeMetaIds,
+        tiktokPixelIds: activeTiktokIds,
+        productsCount: validProducts.length,
+      }),
+    });
+    if (res.ok) {
+      const serverData = await res.json();
+      if (serverData?.success) {
+        return serverData;
+      }
+    }
+  } catch {
+    // fallback to local summary
+  }
+
+  const categoriesSummary = Array.from(categoryMap.entries()).map(([category, count]) => ({
+    category,
+    count,
+  }));
+
+  return {
+    success: true,
+    scannedProductsCount: validProducts.length,
+    scannedCategoriesCount: categoriesSummary.length,
+    categories: categoriesSummary,
+    metaPixels: activeMetaIds,
+    tiktokPixels: activeTiktokIds,
+    timestamp: Date.now(),
+  };
+}
+

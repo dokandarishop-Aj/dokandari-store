@@ -143,9 +143,15 @@ export interface Product {
   features: string[];
   images: string[];
   videos?: string[];
+  beforeImage?: string;
+  afterImage?: string;
+  beforeLabel?: string;
+  afterLabel?: string;
+  beforeAfterTitle?: string;
   variants: ProductVariant;
   inStock: boolean;
   stock?: number;
+  costPrice?: number;
   rating: number;
   reviewCount: number;
   tag?: string;
@@ -155,7 +161,29 @@ export interface Product {
   specifications?: Record<string, string>;
   status?: 'published' | 'draft';
   sourceUrl?: string;
+  lifetimeSavedAt?: number;
   createdAt?: number;
+  updatedAt?: number;
+}
+
+export interface CustomerUgcCard {
+  id: string;
+  customerName: string;
+  location: string;
+  customerDistrict?: string;
+  productName: string;
+  productId?: string;
+  reviewPhoto: string;
+  reviewVideo?: string;
+  beforePhoto?: string;
+  customerAvatar?: string;
+  testimonial: string;
+  testimonialText?: string;
+  rating: number;
+  verifiedBadge?: string;
+  verifiedBadgeText?: string;
+  status?: 'pending' | 'approved' | 'rejected';
+  createdAt: number;
   updatedAt?: number;
 }
 
@@ -355,7 +383,13 @@ export interface InventoryMovement {
   productId: string;
   productName: string;
   sku: string;
-  type: 'return_restock' | 'damage_write_off' | 'manual_adjust' | 'sale';
+  type:
+    | 'return_restock'
+    | 'damage_write_off'
+    | 'manual_adjust'
+    | 'sale'
+    | 'purchase_stock_in'
+    | 'purchase_cancel_reversal';
   quantity: number;
   previousStock: number;
   newStock: number;
@@ -363,3 +397,40 @@ export interface InventoryMovement {
   notes: string;
   createdAt: number;
 }
+
+export type PurchaseStatus = 'confirmed' | 'pending' | 'cancelled';
+
+export type PurchasePaymentMethod =
+  | 'Cash'
+  | 'bKash'
+  | 'Nagad'
+  | 'Bank Transfer'
+  | 'Alipay / RMB'
+  | 'LC / TT'
+  | 'Due / Credit';
+
+export interface PurchaseRecord {
+  id: string;
+  purchaseDate: string; // YYYY-MM-DD
+  supplierName: string;
+  supplierPhone: string;
+  invoiceNumber: string;
+  productId: string;
+  productName: string;
+  productSku: string;
+  purchaseQuantity: number;
+  unitPurchasePrice: number;
+  totalPurchaseAmount: number; // purchaseQuantity * unitPurchasePrice
+  transportCost: number;
+  otherExpenses: number;
+  grandTotalPurchaseCost: number; // totalPurchaseAmount + transportCost + otherExpenses
+  paidAmount: number;
+  dueAmount: number; // grandTotalPurchaseCost - paidAmount
+  paymentMethod: PurchasePaymentMethod;
+  notes: string;
+  status: PurchaseStatus;
+  stockApplied: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+

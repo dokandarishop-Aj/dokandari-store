@@ -239,6 +239,90 @@
         }
       },
       "required": ["id", "productId", "userName", "rating", "comment"]
+    },
+    "PurchaseRecord": {
+      "title": "PurchaseRecord",
+      "description": "Supplier purchase record and stock entry for Purchase Management (#17).",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique purchase record ID."
+        },
+        "purchaseDate": {
+          "type": "string",
+          "description": "Purchase date (YYYY-MM-DD)."
+        },
+        "supplierName": {
+          "type": "string",
+          "description": "Supplier name."
+        },
+        "invoiceNumber": {
+          "type": "string",
+          "description": "Supplier invoice number."
+        },
+        "productId": {
+          "type": "string",
+          "description": "Catalog product ID."
+        },
+        "productName": {
+          "type": "string",
+          "description": "Purchased product name."
+        },
+        "purchaseQuantity": {
+          "type": "number",
+          "description": "Quantity purchased."
+        },
+        "unitPurchasePrice": {
+          "type": "number",
+          "description": "Unit purchase price in BDT."
+        },
+        "grandTotalPurchaseCost": {
+          "type": "number",
+          "description": "Grand total cost including transport and other expenses."
+        },
+        "paidAmount": {
+          "type": "number",
+          "description": "Paid amount in BDT."
+        },
+        "dueAmount": {
+          "type": "number",
+          "description": "Due amount in BDT."
+        },
+        "status": {
+          "type": "string",
+          "description": "Purchase status: confirmed, pending, or cancelled."
+        }
+      },
+      "required": ["id", "purchaseDate", "supplierName", "invoiceNumber", "productName", "purchaseQuantity", "grandTotalPurchaseCost", "status"]
+    },
+    "CustomerUgcReview": {
+      "title": "CustomerUgcReview",
+      "description": "Customer uploaded UGC photo/video review submission with pending approval status.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique UGC review ID."
+        },
+        "customerName": {
+          "type": "string",
+          "description": "Customer name."
+        },
+        "productName": {
+          "type": "string",
+          "description": "Reviewed product name."
+        },
+        "testimonial": {
+          "type": "string",
+          "description": "Customer review text."
+        },
+        "status": {
+          "type": "string",
+          "description": "Approval status: pending, approved, or rejected."
+        }
+      },
+      "required": ["id", "customerName", "productName", "testimonial"]
     }
   },
   "firestore": {
@@ -262,6 +346,14 @@
       "schema": "InventoryMovement",
       "description": "Inventory movement and auto-stock adjustment logs."
     },
+    "/purchases/{purchaseId}": {
+      "schema": "PurchaseRecord",
+      "description": "Supplier purchase entries and stock records."
+    },
+    "/ugc_reviews/{reviewId}": {
+      "schema": "CustomerUgcReview",
+      "description": "Customer uploaded UGC reviews pending approval."
+    },
     "/users/{userId}": {
       "schema": "User",
       "description": "User profiles and customer accounts."
@@ -276,3 +368,4 @@
     }
   }
 }
+

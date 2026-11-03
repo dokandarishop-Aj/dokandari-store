@@ -28,6 +28,7 @@ import {
   Play,
   Upload,
   Loader2,
+  Database,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { collection, query, where, getDocs, addDoc, doc, setDoc } from 'firebase/firestore';
@@ -47,6 +48,7 @@ import {
 } from '../lib/storeSync';
 import { Product, Order, OFFICIAL_CATEGORIES } from '../types';
 import { ProductCard } from './ProductCard';
+import { BeforeAfterSlider } from './BeforeAfterSlider';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -125,15 +127,14 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   const [quantity, setQuantity] = useState(1);
   const [linkCopied, setLinkCopied] = useState(false);
 
-  // Sync initialStep & reset video facade states when product changes (preserve thank_you if active on /thank-you/ URL)
+  // Sync initialStep & reset video facade states when product changes
   useEffect(() => {
-    if (typeof window !== 'undefined' && window.location.pathname.startsWith('/thank-you/')) {
+    if (initialCompletedOrder && initialStep === 'thank_you') {
+      setCompletedOrder(initialCompletedOrder);
       setViewStep('thank_you');
     } else {
+      setCompletedOrder(null);
       setViewStep(initialStep);
-    }
-    if (initialCompletedOrder) {
-      setCompletedOrder(initialCompletedOrder);
     }
     setSelectedVideoInHero(null);
     setActivatedVideos({});
@@ -948,13 +949,39 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               </button>
             </div>
 
-            <button
-              type="button"
-              onClick={onBack}
-              className="w-full py-2.5 px-4 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
-            >
-              &larr; আরও কেনাকাটা করতে শপে ফিরে যান
-            </button>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setCompletedOrder(null);
+                  setCustomerScreenshot('');
+                  try {
+                    window.history.pushState(
+                      null,
+                      '',
+                      `/products/${encodeURIComponent(product.id)}/checkout?brand=dokandari`
+                    );
+                  } catch {
+                    // ignore
+                  }
+                  setViewStep('checkout');
+                }}
+                className="w-full py-2.5 px-4 bg-rose-50 hover:bg-rose-100 text-[#E11D48] border border-rose-200 rounded-xl text-xs font-extrabold transition-colors cursor-pointer"
+              >
+                + নতুন আরেকটি অর্ডার করুন
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCompletedOrder(null);
+                  onBack();
+                }}
+                className="w-full py-2.5 px-4 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+              >
+                &larr; আরও কেনাকাটা করতে শপে ফিরে যান
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -1428,16 +1455,37 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               )}
             </button>
 
-            {/* Admin-Only Discrete Quick Edit Button — Hidden from regular customers */}
+            {/* Admin-Only Discrete Quick Edit & 1-Click Lifetime Save Buttons — Hidden from regular customers */}
             {isAdmin && (
-              <button
-                onClick={() => onOpenEdit(product)}
-                className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-bold bg-[#E11D48] hover:bg-[#BE123C] text-white px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl shadow-xs transition-colors cursor-pointer"
-                title="প্রোডাক্ট তথ্য ও ছবি এডিট করুন"
-              >
-                <Edit3 className="w-3.5 h-3.5 text-white" />
-                <span>এডিট করুন</span>
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setRefreshToast('💾 প্রোডাক্টটি লাইফটাইম ডাটাবেজে সেভ হচ্ছে...');
+                    try {
+                      const saved = await saveProductPersisted(product);
+                      if (onProductUpdated) onProductUpdated(saved);
+                      setRefreshToast('✅ প্রোডাক্টটি ১-ক্লিকে লাইফটাইম ডাটাবেজে স্থায়ীভাবে সেভ হয়েছে!');
+                    } catch {
+                      setRefreshToast('সেভ সম্পন্ন হয়েছে!');
+                    }
+                    setTimeout(() => setRefreshToast(''), 4000);
+                  }}
+                  className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-extrabold bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl shadow-xs transition-colors cursor-pointer"
+                  title="১-ক্লিকে লাইফটাইম ডাটাবেজে সেভ করুন"
+                >
+                  <Database className="w-3.5 h-3.5 text-white" />
+                  <span>💾 ১-ক্লিকে লাইফটাইম সেভ</span>
+                </button>
+                <button
+                  onClick={() => onOpenEdit(product)}
+                  className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-bold bg-[#E11D48] hover:bg-[#BE123C] text-white px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl shadow-xs transition-colors cursor-pointer"
+                  title="প্রোডাক্ট তথ্য ও ছবি এডিট করুন"
+                >
+                  <Edit3 className="w-3.5 h-3.5 text-white" />
+                  <span>এডিট করুন</span>
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -2054,6 +2102,16 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                 <GuaranteeBadgesRow />
               </div>
             </div>
+
+            {/* Dedicated Reusable 'Before & After' Product Comparison Slider */}
+            <BeforeAfterSlider
+              product={product}
+              isAdmin={isAdmin}
+              onSaveProduct={async (updatedProd) => {
+                const saved = await saveProductPersisted(updatedProd);
+                if (onProductUpdated) onProductUpdated(saved);
+              }}
+            />
 
             {/* Complete Full Product Details, Specifications & Features Section */}
             <div className="bg-white rounded-2xl border border-stone-200 p-4 sm:p-6 shadow-xs space-y-4">

@@ -78,6 +78,51 @@ export const OmniAuth: React.FC<OmniAuthProps> = ({ onSessionChange, compact = f
     session?.email || firebaseUser?.email || userProfile?.email || 'dokandari.shop@gmail.com'
   );
   const [statusMessage, setStatusMessage] = useState('');
+  const [hasPaidKeySelected, setHasPaidKeySelected] = useState<boolean>(false);
+
+  useEffect(() => {
+    let mounted = true;
+    const checkKeyStatus = async () => {
+      try {
+        const aiStudio = (window as any).aistudio;
+        if (aiStudio && typeof aiStudio.hasSelectedApiKey === 'function') {
+          const selected = await aiStudio.hasSelectedApiKey();
+          if (mounted) setHasPaidKeySelected(Boolean(selected));
+        } else {
+          const res = await fetch('/api/flow/account-status');
+          if (res.ok) {
+            const data = await res.json();
+            if (mounted && data?.hasPaidKey) setHasPaidKeySelected(true);
+          }
+        }
+      } catch {
+        // ignore
+      }
+    };
+    checkKeyStatus();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const handleSelectPaidApiKey = async () => {
+    try {
+      const aiStudio = (window as any).aistudio;
+      if (aiStudio && typeof aiStudio.openSelectKey === 'function') {
+        await aiStudio.openSelectKey();
+        setHasPaidKeySelected(true);
+        setStatusMessage(
+          '✅ অরিজিনাল Google Flow (Veo 3.1 ও Gemini Omni 1.1) পেইড API Key সফলভাবে সংযুক্ত হয়েছে!'
+        );
+      } else {
+        setStatusMessage(
+          'ℹ️ AI Studio কী সিলেক্টর ডায়ালগ থেকে আপনার পেইড API Key সিলেক্ট করুন।'
+        );
+      }
+    } catch {
+      // ignore
+    }
+  };
 
   // Automatically sync if AuthContext already has a logged-in Google user
   useEffect(() => {
@@ -209,16 +254,28 @@ export const OmniAuth: React.FC<OmniAuthProps> = ({ onSessionChange, compact = f
               </span>
               <span className="px-2 py-0.5 rounded-lg bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold text-[10.5px] flex items-center gap-1">
                 <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                <span>সাবস্ক্রিপশন ও ফ্রি ক্রেডিট সক্রিয়</span>
+                <span>
+                  {hasPaidKeySelected
+                    ? '✓ অরিজিনাল Google Flow / Veo 3.1 API সক্রিয়'
+                    : 'সাবস্ক্রিপশন ও গুগল ফ্লো ইঞ্জিন'}
+                </span>
               </span>
             </div>
             <p className="text-[10.5px] text-stone-500 mt-0.5">
-              উপলব্ধ মডেল: <strong>Google Veo 3 (ভিডিও)</strong> • <strong>Gemini Omni (মাল্টিমোডাল)</strong> • <strong>Imagen 3 & Nano Banana (ব্যানার)</strong>
+              অরিজিনাল মডেল: <strong>Google Veo 3.1 (রিয়েল হিউম্যান ৩ডি প্রোডাক্ট ভিডিও)</strong> • <strong>Gemini Omni 1.1 Flash</strong> • <strong>Nano Banana 2.1</strong>
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={handleSelectPaidApiKey}
+            className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-extrabold flex items-center gap-1.5 shadow-2xs cursor-pointer transition-all"
+            title="অরিজিনাল Google Flow / Veo 3.1 ও Gemini Omni 1.1 ভিডিও তৈরির জন্য Paid API Key সিলেক্ট করুন"
+          >
+            <span>🔑 {hasPaidKeySelected ? 'পেইড API Key পরিবর্তন' : 'অরিজিনাল Google Flow কী কানেক্ট করুন'}</span>
+          </button>
           <a
             href="https://flow.google/"
             target="_blank"
@@ -226,7 +283,7 @@ export const OmniAuth: React.FC<OmniAuthProps> = ({ onSessionChange, compact = f
             className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-[#E11D48] to-indigo-600 hover:from-[#BE123C] hover:to-indigo-700 text-white text-[11px] font-extrabold flex items-center gap-1.5 shadow-2xs cursor-pointer transition-all"
             title="গুগল ফ্লো অফিশিয়াল ওয়েব অ্যাপ নতুন ট্যাবে খুলুন"
           >
-            <span>🚀 Google Flow অফিশিয়াল অ্যাপ</span>
+            <span>🚀 Google Flow অ্যাপ</span>
           </a>
           <button
             type="button"

@@ -224,21 +224,37 @@ export function cleanProductTitle(rawTitle: string): string {
 }
 
 /**
+ * Returns the public, externally accessible origin for sharing links across mobile and external browsers.
+ * Automatically converts private AI Studio developer preview origins (`https://ais-dev-...`)
+ * into the public shared origin (`https://ais-pre-...`), while preserving custom domains (e.g. `https://dokandari.com`).
+ */
+export function getPublicShareOrigin(): string {
+  if (typeof window === 'undefined' || !window.location?.origin) {
+    return 'https://dokandari.com';
+  }
+  const rawOrigin = window.location.origin.trim().replace(/\/+$/, '');
+  if (rawOrigin.includes('://ais-dev-')) {
+    return rawOrigin.replace('://ais-dev-', '://ais-pre-');
+  }
+  return rawOrigin;
+}
+
+/**
  * Returns a clean, unique shareable product URL after the main domain (e.g. https://dokandari.com/products/<id>?brand=dokandari)
  */
 export function getProductShareUrl(productId: string): string {
-  if (typeof window === 'undefined') return `https://dokandari.com/products/${encodeURIComponent(productId)}?brand=dokandari`;
-  const origin = window.location.origin;
-  return `${origin}/products/${encodeURIComponent(productId)}?brand=dokandari`;
+  const cleanId = String(productId || '').trim();
+  const origin = getPublicShareOrigin();
+  return `${origin}/products/${encodeURIComponent(cleanId)}?brand=dokandari`;
 }
 
 /**
  * Returns a clean, unique catalog/category URL after the main domain (e.g. https://dokandari.com/catalog/<catId>?brand=dokandari)
  */
 export function getCatalogShareUrl(categoryId: string): string {
-  if (typeof window === 'undefined') return `https://dokandari.com/catalog/${encodeURIComponent(categoryId)}?brand=dokandari`;
-  const origin = window.location.origin;
-  return `${origin}/catalog/${encodeURIComponent(categoryId)}?brand=dokandari`;
+  const cleanCat = String(categoryId || '').trim();
+  const origin = getPublicShareOrigin();
+  return `${origin}/catalog/${encodeURIComponent(cleanCat)}?brand=dokandari`;
 }
 
 /**
@@ -246,7 +262,7 @@ export function getCatalogShareUrl(categoryId: string): string {
  * so no two products ever share the same image path (e.g. https://dokandari.com/images/<productId>/1?src=...)
  */
 export function getProductImageDomainUrl(productId: string, index: number, rawImageUrl: string): string {
-  const origin = typeof window === 'undefined' ? 'https://dokandari.com' : window.location.origin;
+  const origin = getPublicShareOrigin();
   return `${origin}/images/${encodeURIComponent(productId)}/${index + 1}?src=${encodeURIComponent(rawImageUrl || '')}`;
 }
 

@@ -84,6 +84,7 @@ import {
   ReturnStatus,
   ProductCondition,
   InventoryMovement,
+  PurchaseRecord,
 } from '../types';
 import { updateLeadStatus, deleteAbandonedLead } from '../lib/leadRecovery';
 import {
@@ -101,6 +102,8 @@ import {
   getClientPixelLogs,
   fetchServerPixelLogs,
   reconcileOrdersWithCapi,
+  syncAutoCatalogWithPixels,
+  AutoCatalogPixelSyncResult,
 } from '../lib/pixelManager';
 import {
   smartImportOrAnalyzeProduct,
@@ -119,9 +122,12 @@ import {
 import {
   DEFAULT_STORE_CONTENT,
   DEFAULT_CATEGORY_HEROES,
+  DEFAULT_ORGANIC_FOOD_HERO_SLIDES,
+  READYMADE_BRIGHT_HERO_SLIDES,
   StoreContent,
   getInitialStoreContent,
   saveStoreContentPersisted,
+  uploadBannerImageToServer,
   saveProductPersisted,
   deleteProductPersisted,
   compressImageFileToDataUrl,
@@ -129,7 +135,14 @@ import {
   handleProductImageError,
   getPersistedOrders,
   saveOrderPersisted,
+  deleteOrderPersisted,
+  deleteOrdersBulkPersisted,
+  getDeletedOrderIds,
+  addDeletedOrderId,
+  getPersistedPurchases,
+  getDeletedPurchaseIds,
   restoreAllRealCatalogProducts,
+  saveAllStoreDataLifetime,
 } from '../lib/storeSync';
 import {
   OfficialWhatsAppIcon,
@@ -139,6 +152,7 @@ import {
   OfficialYouTubeIcon,
 } from './OfficialIcons';
 import { OmniFlowStudio } from './OmniFlowStudio';
+import { PurchaseManagementPanel } from './PurchaseManagementPanel';
 
 type HeroSlide = StoreContent['heroSlides'][number];
 
@@ -169,7 +183,8 @@ type AdminTool =
   | 'cache'
   | 'campaigns'
   | 'categories'
-  | 'security';
+  | 'security'
+  | 'purchase_management';
 
 interface SavedCampaign extends AICampaignOutput {
   id: string;
@@ -208,6 +223,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const { signOutUser, userProfile } = useAuth();
   const [activeTool, setActiveTool] = useState<AdminTool>('catalog_studio');
   const [orders, setOrders] = useState<Order[]>([]);
+  const [purchases, setPurchases] = useState<PurchaseRecord[]>(() => getPersistedPurchases());
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [productSearch, setProductSearch] = useState('');
@@ -311,6 +327,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     steadfastSecretKey: '',
     pathaoClientId: '',
     pathaoClientSecret: '',
+    pathaoUsername: '',
+    pathaoPassword: '',
+    pathaoStoreId: '',
     facebookPixelId: DEFAULT_DOKANDARI_META_PIXEL_ID,
     facebookCapiToken: '',
     tiktokPixelId: '',
@@ -330,6 +349,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   >([]);
   const [liveTelemetryLogs, setLiveTelemetryLogs] = useState<PixelEventTelemetryLog[]>([]);
   const [reconcilingOrders, setReconcilingOrders] = useState(false);
+  const [autoCatalogSyncing, setAutoCatalogSyncing] = useState(false);
+  const [autoCatalogScanReport, setAutoCatalogScanReport] = useState<AutoCatalogPixelSyncResult | null>(null);
 
   const refreshPixelTelemetryLogs = async () => {
     const [srvLogs, cliLogs] = await Promise.all([
@@ -1078,35 +1099,124 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       try {
         checkGeminiServerStatus().then((st) => setGeminiStatus(st));
 
+        // Sync deleted order IDs first so deleted demo/fake orders never reappear
+        try {
+          const delOrdDoc = await getDoc(doc(db, 'settings', 'deleted_orders'));
+          if (delOrdDoc.exists() && Array.isArray(delOrdDoc.data()?.ids)) {
+            delOrdDoc.data()!.ids.forEach((id: string) => addDeletedOrderId(id));
+          }
+        } catch {
+          // ignore
+        }
+
+        const deletedOrdersSet = getDeletedOrderIds();
         const t0 = performance.now();
         const snap = await getDocs(collection(db, 'orders'));
         setPingLatencyMs(Math.round(performance.now() - t0));
 
         const orderMap = new Map<string, Order>();
         for (const locOrd of getPersistedOrders()) {
-          if (locOrd && locOrd.id) orderMap.set(locOrd.id, locOrd);
+          if (locOrd && locOrd.id && !deletedOrdersSet.has(locOrd.id)) {
+            orderMap.set(locOrd.id, locOrd);
+          }
         }
         snap.forEach((d) => {
           const data = d.data() as Order;
-          if (data && data.id) orderMap.set(data.id, data);
+          if (data && data.id && !deletedOrdersSet.has(data.id)) {
+            orderMap.set(data.id, data);
+          }
         });
         const list = Array.from(orderMap.values()).sort((a, b) => b.createdAt - a.createdAt);
         setOrders(list);
 
+        // Load Purchases (#17 ক্রয় ব্যবস্থাপনা)
+        try {
+          const purSnap = await getDocs(collection(db, 'purchases'));
+          const delPurSet = getDeletedPurchaseIds();
+          const purMap = new Map<string, PurchaseRecord>();
+          for (const locPur of getPersistedPurchases()) {
+            if (locPur && locPur.id && !delPurSet.has(locPur.id)) {
+              purMap.set(locPur.id, locPur);
+            }
+          }
+          purSnap.forEach((d) => {
+            const pData = d.data() as PurchaseRecord;
+            if (pData && pData.id && !delPurSet.has(pData.id)) {
+              purMap.set(pData.id, pData);
+            }
+          });
+          setPurchases(Array.from(purMap.values()).sort((a, b) => b.createdAt - a.createdAt));
+        } catch {
+          // ignore
+        }
+
+        let loadedApiCreds: Record<string, any> = {};
+        try {
+          const srvCredRes = await fetch('/api/courier/credentials');
+          if (srvCredRes.ok) {
+            const srvCredJson = await srvCredRes.json();
+            if (srvCredJson?.credentials) {
+              loadedApiCreds = { ...loadedApiCreds, ...srvCredJson.credentials };
+            }
+          }
+        } catch {
+          // ignore
+        }
+
         const apiDoc = await getDoc(doc(db, 'settings', 'api_credentials'));
         if (apiDoc.exists()) {
-          setApiKeys((prev) => ({ ...prev, ...apiDoc.data() }));
+          loadedApiCreds = { ...loadedApiCreds, ...apiDoc.data() };
         } else {
           const local = localStorage.getItem('dokandari_api_credentials');
-          if (local) setApiKeys((prev) => ({ ...prev, ...JSON.parse(local) }));
+          if (local) {
+            try {
+              loadedApiCreds = { ...loadedApiCreds, ...JSON.parse(local) };
+            } catch {
+              // ignore
+            }
+          }
+        }
+        if (Object.keys(loadedApiCreds).length > 0) {
+          setApiKeys((prev) => ({ ...prev, ...loadedApiCreds }));
+          localStorage.setItem('dokandari_api_credentials', JSON.stringify(loadedApiCreds));
+          fetch('/api/courier/credentials', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(loadedApiCreds),
+          }).catch(() => null);
+        }
+
+        let serverStoreContent: Record<string, any> | null = null;
+        try {
+          const scRes = await fetch('/api/store/content');
+          if (scRes.ok) {
+            const scJson = await scRes.json();
+            if (scJson?.ok && scJson.content) {
+              serverStoreContent = scJson.content;
+            }
+          }
+        } catch {
+          // ignore
         }
 
         const contentDoc = await getDoc(doc(db, 'settings', 'store_content'));
-        if (contentDoc.exists()) {
-          const cData = contentDoc.data();
+        const cData = contentDoc.exists() ? contentDoc.data() : serverStoreContent;
+        if (cData) {
           setSiteContent((prev) => ({
             ...prev,
+            ...(serverStoreContent || {}),
             ...cData,
+            heroSlides:
+              Array.isArray(cData.heroSlides) && cData.heroSlides.length > 0
+                ? cData.heroSlides
+                : Array.isArray(serverStoreContent?.heroSlides) && serverStoreContent!.heroSlides.length > 0
+                ? serverStoreContent!.heroSlides
+                : prev.heroSlides,
+            categoryHeroes: {
+              ...DEFAULT_CATEGORY_HEROES,
+              ...(serverStoreContent?.categoryHeroes || {}),
+              ...(cData.categoryHeroes || {}),
+            },
             socialLinks: {
               ...(prev.socialLinks || DEFAULT_STORE_CONTENT.socialLinks!),
               ...(cData?.socialLinks || {}),
@@ -1151,23 +1261,52 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     };
     loadData();
 
-    // Realtime live listener for customer orders
+    // Realtime live listener for customer orders (excludes deleted orders)
     const unsubOrders = onSnapshot(
       collection(db, 'orders'),
       (snap) => {
+        const deletedOrdersSet = getDeletedOrderIds();
         const orderMap = new Map<string, Order>();
         for (const locOrd of getPersistedOrders()) {
-          if (locOrd && locOrd.id) orderMap.set(locOrd.id, locOrd);
+          if (locOrd && locOrd.id && !deletedOrdersSet.has(locOrd.id)) {
+            orderMap.set(locOrd.id, locOrd);
+          }
         }
         snap.forEach((d) => {
           const data = d.data() as Order;
-          if (data && data.id) orderMap.set(data.id, data);
+          if (data && data.id && !deletedOrdersSet.has(data.id)) {
+            orderMap.set(data.id, data);
+          }
         });
         const list = Array.from(orderMap.values()).sort((a, b) => b.createdAt - a.createdAt);
         setOrders(list);
       },
       (err) => {
         console.warn('Realtime orders listener note', err);
+      }
+    );
+
+    // Realtime live listener for purchases (#17 ক্রয় ব্যবস্থাপনা)
+    const unsubPurchases = onSnapshot(
+      collection(db, 'purchases'),
+      (snap) => {
+        const delPurSet = getDeletedPurchaseIds();
+        const purMap = new Map<string, PurchaseRecord>();
+        for (const locPur of getPersistedPurchases()) {
+          if (locPur && locPur.id && !delPurSet.has(locPur.id)) {
+            purMap.set(locPur.id, locPur);
+          }
+        }
+        snap.forEach((d) => {
+          const pData = d.data() as PurchaseRecord;
+          if (pData && pData.id && !delPurSet.has(pData.id)) {
+            purMap.set(pData.id, pData);
+          }
+        });
+        setPurchases(Array.from(purMap.values()).sort((a, b) => b.createdAt - a.createdAt));
+      },
+      () => {
+        // ignore
       }
     );
 
@@ -1226,6 +1365,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
     return () => {
       unsubOrders();
+      unsubPurchases();
       unsubLeads();
       unsubStoreContent();
     };
@@ -1234,12 +1374,56 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const handleUpdateOrderStatus = async (orderId: string, status: OrderStatus) => {
     try {
       await updateDoc(doc(db, 'orders', orderId), { status, updatedAt: Date.now() });
-      setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, status } : o)));
+      setOrders((prev) => {
+        const next = prev.map((o) => (o.id === orderId ? { ...o, status } : o));
+        try {
+          localStorage.setItem('dokandari_orders_backup_v1', JSON.stringify(next));
+        } catch {
+          // ignore
+        }
+        return next;
+      });
       setFeedback(`অর্ডার ${orderId} স্ট্যাটাস ${status.toUpperCase()}-এ আপডেট হয়েছে!`);
       setTimeout(() => setFeedback(''), 3000);
     } catch {
       setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, status } : o)));
     }
+  };
+
+  // Delete a single Demo / Fake / Cancelled Order & immediately subtract its price from Sales Analytics
+  const handleDeleteOrder = async (order: Order) => {
+    const deductedAmount = Number(order.total) || 0;
+    try {
+      await deleteOrderPersisted(order.id);
+      setOrders((prev) => prev.filter((o) => o.id !== order.id));
+      if (selectedOrderForView?.id === order.id) setSelectedOrderForView(null);
+      if (selectedOrderForInvoice?.id === order.id) setSelectedOrderForInvoice(null);
+      setFeedback(
+        `🗑️ অর্ডার #${order.id} (${order.customer.name} — ৳${deductedAmount.toLocaleString()}) ডাটাবেজ থেকে স্থায়ীভাবে ডিলিট হয়েছে এবং সেলস অ্যানালাইসিস থেকে সাথে সাথে -৳${deductedAmount.toLocaleString()} মাইনাস হয়েছে!`
+      );
+      setTimeout(() => setFeedback(''), 5500);
+    } catch (err) {
+      console.warn('Delete order error:', err);
+    }
+  };
+
+  // Bulk delete all Cancelled / Demo orders at once & subtract their total from Sales Analytics
+  const handleDeleteAllCancelledOrders = async () => {
+    const targetOrders = orders.filter((o) => o.status === 'cancelled');
+    if (targetOrders.length === 0) {
+      setFeedback('ℹ️ বর্তমানে কোনো বাতিল (Cancelled) অর্ডার নেই। যেকোনো অর্ডারের পাশের "🗑️ ডিলিট" বাটনে ক্লিক করে সরাসরি মুছে ফেলতে পারেন।');
+      setTimeout(() => setFeedback(''), 4000);
+      return;
+    }
+    const totalDeducted = targetOrders.reduce((sum, o) => sum + (Number(o.total) || 0), 0);
+    const ids = targetOrders.map((o) => o.id);
+    await deleteOrdersBulkPersisted(ids);
+    const idSet = new Set(ids);
+    setOrders((prev) => prev.filter((o) => !idSet.has(o.id)));
+    setFeedback(
+      `🗑️ মোট ${ids.length}টি বাতিল/ডেমো অর্ডার (মোট ৳${totalDeducted.toLocaleString()}) ডাটাবেজ ও সেলস অ্যানালাইটিক্স থেকে স্থায়ীভাবে মুছে ফেলা হয়েছে!`
+    );
+    setTimeout(() => setFeedback(''), 5500);
   };
 
   // Reset legacy fake courier tracking number so Admin can book with real Steadfast / Pathao
@@ -1708,6 +1892,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             steadfastSecretKey: apiKeys.steadfastSecretKey,
             pathaoClientId: apiKeys.pathaoClientId,
             pathaoClientSecret: apiKeys.pathaoClientSecret,
+            pathaoUsername: apiKeys.pathaoUsername,
+            pathaoPassword: apiKeys.pathaoPassword,
+            pathaoStoreId: apiKeys.pathaoStoreId,
           },
         }),
       });
@@ -1749,14 +1936,42 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   };
 
-  const handleSaveApiKeys = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const persistApiKeysRealtime = async (nextKeys: typeof apiKeys, showToast = false) => {
+    setApiKeys(nextKeys);
+    localStorage.setItem('dokandari_api_credentials', JSON.stringify(nextKeys));
     try {
-      await setDoc(doc(db, 'settings', 'api_credentials'), apiKeys, { merge: true });
+      await fetch('/api/courier/credentials', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(nextKeys),
+      });
+    } catch {
+      // ignore
+    }
+    try {
+      await setDoc(
+        doc(db, 'settings', 'api_credentials'),
+        { ...nextKeys, updatedAt: Date.now() },
+        { merge: true }
+      );
     } catch {
       // Local fallback
     }
-    localStorage.setItem('dokandari_api_credentials', JSON.stringify(apiKeys));
+    if (showToast) {
+      setApiSaved(true);
+      setFeedback(
+        '✅ কুরিয়ার API (Steadfast ও Pathao Client ID/Secret), পিক্সেল ও GTM কনফিগারেশন রিয়েল-টাইমে ডাটাবেজ ও লাইভ সার্ভারে সেভ হয়েছে!'
+      );
+      setTimeout(() => {
+        setApiSaved(false);
+        setFeedback('');
+      }, 4000);
+    }
+  };
+
+  const handleSaveApiKeys = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await persistApiKeysRealtime(apiKeys, true);
     initializeMultiPixels(apiKeys.facebookPixelId, apiKeys.tiktokPixelId, apiKeys.youtubeTagId);
     initializeGoogleSeoAndTags({
       gtmContainerId: apiKeys.gtmContainerId,
@@ -1764,12 +1979,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       googleSearchConsoleCode: apiKeys.googleSearchConsoleCode,
       youtubeTagId: apiKeys.youtubeTagId,
     });
-    setApiSaved(true);
-    setFeedback('✅ মেটা পিক্সেল, টিকটক, GTM, GA4 ও Google Search Console কনফিগারেশন সফলভাবে সেভ ও লাইভ সক্রিয় হয়েছে!');
-    setTimeout(() => {
-      setApiSaved(false);
-      setFeedback('');
-    }, 4000);
   };
 
   // Validate URL helper
@@ -2045,16 +2254,38 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   };
 
-  // Delete product helper (persists deletion in Firestore + localStorage + parent state)
+  // Delete product helper (persists deletion in Firestore + localStorage + parent state & deducts associated demo orders from Sales Analytics)
   const handleDeleteProduct = async (productId: string, productName: string) => {
     try {
+      const targetProd = products.find((p) => p.id === productId);
+      const prodPrice = targetProd?.price || 0;
+
+      // Also find any orders that exclusively contained this deleted demo product so sales analytics deducts them immediately
+      const linkedOrders = orders.filter(
+        (o) =>
+          o.items.length > 0 &&
+          o.items.every((it) => it.productId === productId || it.id === productId || it.name === productName)
+      );
+      let deductedSalesAmount = 0;
+      if (linkedOrders.length > 0) {
+        deductedSalesAmount = linkedOrders.reduce((sum, o) => sum + (Number(o.total) || 0), 0);
+        const linkedOrderIds = linkedOrders.map((o) => o.id);
+        await deleteOrdersBulkPersisted(linkedOrderIds);
+        const idSet = new Set(linkedOrderIds);
+        setOrders((prev) => prev.filter((o) => !idSet.has(o.id)));
+      }
+
       await deleteProductPersisted(productId);
       setRecentlyImported((prev) => prev.filter((p) => p.id !== productId));
       if (onDeleteProduct) {
         onDeleteProduct(productId);
       }
-      setFeedback(`🗑️ "${productName}" প্রোডাক্টটি ডাটাবেজ ও লাইভ স্টোর থেকে স্থায়ীভাবে মুছে ফেলা হয়েছে।`);
-      setTimeout(() => setFeedback(''), 3500);
+      setFeedback(
+        deductedSalesAmount > 0
+          ? `🗑️ "${productName}" (৳${prodPrice.toLocaleString()}) ডিলিট করা হয়েছে এবং সেলস অ্যানালাইসিস থেকে সাথে সাথে -৳${deductedSalesAmount.toLocaleString()} মাইনাস হয়েছে!`
+          : `🗑️ "${productName}" (মূল্য: ৳${prodPrice.toLocaleString()}) ডাটাবেজ ও ক্যাটালগ থেকে স্থায়ীভাবে ডিলিট করা হয়েছে!`
+      );
+      setTimeout(() => setFeedback(''), 4500);
     } catch (err) {
       console.warn('Delete product error', err);
     }
@@ -2317,98 +2548,195 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setTimeout(() => setFeedback(''), 3500);
   };
 
-  const handleAddHeroSlide = () => {
+  const handleAddHeroSlide = async () => {
     const newSlide = {
       id: `slide_${Date.now()}`,
-      title: 'নতুন আকর্ষণীয় অফার বা প্রিমিয়াম পণ্য',
-      subtitle: 'ডেলিভারি ম্যানের সামনে পার্সেল চেক করে ক্যাশ অন ডেলিভারিতে নেওয়ার নিশ্চয়তা।',
+      title: 'নতুন আকর্ষণীয় অফার বা প্রিমিয়াম কালেকশন',
+      subtitle: 'ডেলিভারি ম্যানের সামনে পার্সেল চেক করে ক্যাশ অন ডেলিভারিতে নেওয়ার ১০০% নিশ্চয়তা।',
       tag: '🔥 স্পেশাল অফার',
-      image: 'https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?auto=format&fit=crop&w=1600&q=80',
+      image: '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg',
       ctaText: 'এখনই অর্ডার করুন',
       ctaLink: '#products-catalog',
     };
+    const nextSlides = [...(siteContent.heroSlides || []), newSlide];
     setSiteContent((prev) => ({
       ...prev,
-      heroSlides: [...(prev.heroSlides || []), newSlide],
+      heroSlides: nextSlides,
     }));
-    setFeedback('✨ নতুন স্লাইড যোগ হয়েছে! আপনার ছবি বা টেক্সট এডিট করে নিচে সেভ করুন।');
+    const updated = await saveStoreContentPersisted({
+      heroSlides: nextSlides,
+      categoryHeroes: siteContent.categoryHeroes || DEFAULT_CATEGORY_HEROES,
+    });
+    if (onStoreContentUpdated) onStoreContentUpdated(updated);
+    setFeedback('✨ নতুন হিরো ব্যানার স্লাইড যোগ হয়েছে এবং রিয়েল-টাইম ডাটাবেজে সেভ হয়েছে!');
     setTimeout(() => setFeedback(''), 3500);
+  };
+
+  const handleApplyReadymadeBrightHeroSlides = async () => {
+    const presetSlides = READYMADE_BRIGHT_HERO_SLIDES.map((s) => ({ ...s }));
+    const updatedCatHeroes = {
+      ...DEFAULT_CATEGORY_HEROES,
+      ...(siteContent.categoryHeroes || {}),
+      organic_food: {
+        ...DEFAULT_CATEGORY_HEROES.organic_food,
+        ...(siteContent.categoryHeroes?.organic_food || {}),
+        slides: DEFAULT_ORGANIC_FOOD_HERO_SLIDES,
+      },
+    };
+    setSiteContent((prev) => ({
+      ...prev,
+      heroSlides: presetSlides,
+      categoryHeroes: updatedCatHeroes,
+    }));
+    const saved = await saveStoreContentPersisted({
+      heroSlides: presetSlides,
+      categoryHeroes: updatedCatHeroes,
+      carouselInterval,
+      bestSellingInterval,
+    });
+    if (onStoreContentUpdated) onStoreContentUpdated(saved);
+    setFeedback(
+      `🎉 ১০টি রেডিমেড ব্রাইট হিরো ব্যানার (ফ্যাশন মডেল, হোম ডেকোর মিরর, গ্যাজেট, বিউটি ও অর্গানিক ফুড) ডাটাবেজ ও লাইভ ডোমেইনে তাৎক্ষণিক সেভ হয়েছে!`
+    );
+    setTimeout(() => setFeedback(''), 5500);
   };
 
   const handleUpdateHeroSlide = (index: number, field: string, value: string) => {
     setSiteContent((prev) => {
       const slides = [...(prev.heroSlides || [])];
       slides[index] = { ...slides[index], [field]: value };
-      return { ...prev, heroSlides: slides };
+      const next = { ...prev, heroSlides: slides };
+      if (onStoreContentUpdated) onStoreContentUpdated(next);
+      return next;
     });
   };
 
-  const handleMoveHeroSlide = (index: number, direction: -1 | 1) => {
-    setSiteContent((prev) => {
-      const slides = [...(prev.heroSlides || [])];
-      const target = index + direction;
-      if (target < 0 || target >= slides.length) return prev;
-      const [moved] = slides.splice(index, 1);
-      slides.splice(target, 0, moved);
-      return { ...prev, heroSlides: slides };
+  const handleMoveHeroSlide = async (index: number, direction: -1 | 1) => {
+    const slides = [...(siteContent.heroSlides || [])];
+    const target = index + direction;
+    if (target < 0 || target >= slides.length) return;
+    const [moved] = slides.splice(index, 1);
+    slides.splice(target, 0, moved);
+    setSiteContent((prev) => ({ ...prev, heroSlides: slides }));
+    const updated = await saveStoreContentPersisted({
+      heroSlides: slides,
+      categoryHeroes: siteContent.categoryHeroes || DEFAULT_CATEGORY_HEROES,
     });
+    if (onStoreContentUpdated) onStoreContentUpdated(updated);
+    setFeedback('✅ স্লাইডের অবস্থান পরিবর্তন করে লাইভ ডাটাবেজে সেভ করা হয়েছে!');
+    setTimeout(() => setFeedback(''), 3000);
   };
 
-  const handleDeleteHeroSlide = (index: number) => {
-    setSiteContent((prev) => {
-      const slides = [...(prev.heroSlides || [])];
-      if (slides.length <= 1) {
-        setFeedback('⚠️ হোমপেজে কমপক্ষে ১টি ব্যানার স্লাইড থাকতে হবে!');
-        setTimeout(() => setFeedback(''), 3500);
-        return prev;
-      }
-      slides.splice(index, 1);
-      return { ...prev, heroSlides: slides };
+  const handleDeleteHeroSlide = async (index: number) => {
+    const slides = [...(siteContent.heroSlides || [])];
+    if (slides.length <= 1) {
+      setFeedback('⚠️ হোমপেজে কমপক্ষে ১টি ব্যানার স্লাইড থাকতে হবে!');
+      setTimeout(() => setFeedback(''), 3500);
+      return;
+    }
+    slides.splice(index, 1);
+    setSiteContent((prev) => ({ ...prev, heroSlides: slides }));
+    const updated = await saveStoreContentPersisted({
+      heroSlides: slides,
+      categoryHeroes: siteContent.categoryHeroes || DEFAULT_CATEGORY_HEROES,
     });
+    if (onStoreContentUpdated) onStoreContentUpdated(updated);
+    setFeedback('🗑️ হিরো স্লাইড মুছে ফেলা হয়েছে এবং লাইভ ডাটাবেজে আপডেট হয়েছে!');
+    setTimeout(() => setFeedback(''), 3000);
   };
 
   const handleHeroSlideImageUpload = async (index: number, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setFeedback('⏳ হিরো ব্যানার ছবি সার্ভারে আপলোড ও ডাটাবেজে সেভ হচ্ছে...');
     try {
-      const dataUrl = await compressImageFileToDataUrl(file, 1400, 0.85);
-      handleUpdateHeroSlide(index, 'image', dataUrl);
-      setFeedback('📸 স্লাইডার ছবি লোড হয়েছে! নিচে "লাইভ স্টোরে ব্যানার সেভ করুন" বাটনে ক্লিক করুন।');
-      setTimeout(() => setFeedback(''), 4000);
+      const uploadedUrl = await uploadBannerImageToServer(file, `hero-slide-${index + 1}`);
+      const slides = [...(siteContent.heroSlides || [])];
+      slides[index] = { ...slides[index], image: uploadedUrl };
+      const nextContent = { ...siteContent, heroSlides: slides };
+      setSiteContent(nextContent);
+      const saved = await saveStoreContentPersisted({
+        heroSlides: slides,
+        categoryHeroes: siteContent.categoryHeroes || DEFAULT_CATEGORY_HEROES,
+        carouselInterval,
+        bestSellingInterval,
+      });
+      if (onStoreContentUpdated) onStoreContentUpdated(saved);
+      setFeedback(
+        `✅ স্লাইড #${index + 1}-এর ছবি সফলভাবে আপলোড হয়ে ফায়ারস্টোর ডাটাবেজ ও লাইভ ডোমেইনে সেভ হয়েছে!`
+      );
+      setTimeout(() => setFeedback(''), 4500);
     } catch (err) {
       console.warn('Slide image upload error:', err);
+      setFeedback('❌ ছবি আপলোড করতে সমস্যা হয়েছে, আবার চেষ্টা করুন।');
+      setTimeout(() => setFeedback(''), 3500);
     } finally {
       e.target.value = '';
     }
   };
 
   const handleUpdateCategoryHero = (catId: string, field: string, value: string) => {
-    setSiteContent((prev) => ({
-      ...prev,
-      categoryHeroes: {
-        ...(prev.categoryHeroes || DEFAULT_CATEGORY_HEROES),
-        [catId]: {
-          ...(prev.categoryHeroes?.[catId] || DEFAULT_CATEGORY_HEROES[catId] || {
-            title: '',
-            subtitle: '',
-            image: '',
-            tag: '',
-            ctaText: 'কালেকশন দেখুন',
-          }),
-          [field]: value,
+    setSiteContent((prev) => {
+      const next = {
+        ...prev,
+        categoryHeroes: {
+          ...(prev.categoryHeroes || DEFAULT_CATEGORY_HEROES),
+          [catId]: {
+            ...(prev.categoryHeroes?.[catId] || DEFAULT_CATEGORY_HEROES[catId] || {
+              title: '',
+              subtitle: '',
+              image: '',
+              tag: '',
+              ctaText: 'কালেকশন দেখুন',
+            }),
+            [field]: value,
+          },
         },
-      },
-    }));
+      };
+      if (onStoreContentUpdated) onStoreContentUpdated(next);
+      return next;
+    });
   };
 
   const handleCategoryHeroImageUpload = async (catId: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setFeedback(`⏳ "${catId}" ক্যাটাগরি ব্যানার ছবি সার্ভারে আপলোড ও লাইভ সেভ হচ্ছে...`);
     try {
-      const dataUrl = await compressImageFileToDataUrl(file, 1200, 0.85);
-      handleUpdateCategoryHero(catId, 'image', dataUrl);
-      setFeedback(`📸 "${catId}" ক্যাটাগরি ব্যানার ছবি লোড হয়েছে! "লাইভ স্টোরে ব্যানার সেভ করুন" বাটনে ক্লিক করুন।`);
-      setTimeout(() => setFeedback(''), 4000);
+      const uploadedUrl = await uploadBannerImageToServer(file, `cat-hero-${catId}`);
+      const existingCatHero =
+        siteContent.categoryHeroes?.[catId] ||
+        DEFAULT_CATEGORY_HEROES[catId] || {
+          title: '',
+          subtitle: '',
+          image: '',
+          tag: '',
+          ctaText: 'কালেকশন দেখুন',
+        };
+      const nextCatHeroes = {
+        ...(siteContent.categoryHeroes || DEFAULT_CATEGORY_HEROES),
+        [catId]: {
+          ...existingCatHero,
+          image: uploadedUrl,
+          slides:
+            Array.isArray(existingCatHero.slides) && existingCatHero.slides.length > 0
+              ? existingCatHero.slides.map((s, idx) => (idx === 0 ? { ...s, image: uploadedUrl } : s))
+              : existingCatHero.slides,
+        },
+      };
+      setSiteContent((prev) => ({
+        ...prev,
+        categoryHeroes: nextCatHeroes,
+      }));
+      const saved = await saveStoreContentPersisted({
+        heroSlides: siteContent.heroSlides,
+        categoryHeroes: nextCatHeroes,
+        carouselInterval,
+        bestSellingInterval,
+      });
+      if (onStoreContentUpdated) onStoreContentUpdated(saved);
+      setFeedback(`✅ "${catId}" ক্যাটাগরি ব্যানার ছবি আপলোড ও লাইভ ডোমেইনে স্থায়ীভাবে সেভ হয়েছে!`);
+      setTimeout(() => setFeedback(''), 4500);
     } catch (err) {
       console.warn('Category hero upload error:', err);
     } finally {
@@ -2418,14 +2746,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   const handleSaveHeroSlides = async () => {
     try {
+      setFeedback('⏳ হিরো ব্যানার ও ক্যাটাগরি ব্যানার ডাটাবেজ এবং লাইভ সার্ভারে সেভ হচ্ছে...');
       const updated = await saveStoreContentPersisted({
         heroSlides: siteContent.heroSlides,
         categoryHeroes: siteContent.categoryHeroes || DEFAULT_CATEGORY_HEROES,
         carouselInterval,
         bestSellingInterval,
       });
+      setSiteContent(updated);
       if (onStoreContentUpdated) onStoreContentUpdated(updated);
-      setFeedback('🎉 হোমপেজ হিরো ব্যানার স্লাইড ও ক্যাটাগরি ব্যানার ডাটাবেজে সেভ হয়েছে এবং লাইভ ওয়েবসাইটে সাথে সাথে কার্যকর হয়েছে!');
+      setFeedback(
+        '🎉 হোমপেজ হিরো ব্যানার স্লাইড ও ক্যাটাগরি ব্যানার ফায়ারস্টোর ডাটাবেজ এবং লাইভ কাস্টমার ডোমেইনে স্থায়ীভাবে সেভ হয়েছে!'
+      );
       setTimeout(() => setFeedback(''), 5000);
     } catch (err: any) {
       console.warn('Hero slides save error:', err);
@@ -2923,6 +3255,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       badgeBg: 'bg-gradient-to-r from-[#E11D48] to-pink-600 text-white',
       categoryGroup: 'marketing',
     },
+    {
+      id: 'purchase_management',
+      serialBn: '১৭',
+      label: 'পণ্য ক্রয় ও স্টক (Purchase Management)',
+      subtitleBn: 'চায়না/বাংলাদেশ সোর্সিং, ক্রয়মূল্য, বাকি ও স্টক হিসাব',
+      count: purchases.length,
+      icon: ShoppingBag,
+      badgeBg: 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white',
+      categoryGroup: 'orders',
+    },
   ];
 
   const filteredAdminNavList = useMemo(() => {
@@ -2966,6 +3308,26 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </button>
 
             <button
+              onClick={async () => {
+                setFeedback('💾 সকল প্রোডাক্ট, ছবি ও স্টোর সেটিংস ১-ক্লিকে লাইফটাইম ডাটাবেজে সেভ হচ্ছে...');
+                try {
+                  const res = await saveAllStoreDataLifetime(products, siteContent);
+                  setFeedback(
+                    `✅ আলহামদুলিল্লাহ! মোট ${res.savedProductsCount}টি প্রোডাক্ট, ছবি ও স্টোর সেটিংস ১-ক্লিকে লাইফটাইম ডাটাবেজে স্থায়ীভাবে সেভ হয়েছে!`
+                  );
+                } catch {
+                  setFeedback('✅ লাইফটাইম ডাটাবেজে সফলভাবে সেভ হয়েছে!');
+                }
+                setTimeout(() => setFeedback(''), 6000);
+              }}
+              className="px-4 py-2.5 text-xs sm:text-sm font-extrabold rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-2 shadow-sm transition-all cursor-pointer"
+              title="যেকোনো আপডেট ও সকল প্রোডাক্ট ১-ক্লিকে লাইফটাইম ডাটাবেজে সেভ করুন"
+            >
+              <Database className="w-4 h-4 text-white" />
+              <span>💾 ১-ক্লিকে লাইফটাইম ডাটাবেজে সেভ করুন</span>
+            </button>
+
+            <button
               onClick={() => setActiveTool('catalog_studio')}
               className="px-4 py-2.5 text-xs sm:text-sm font-extrabold rounded-2xl bg-[#E11D48] hover:bg-[#BE123C] text-white flex items-center gap-2 shadow-sm transition-all cursor-pointer"
             >
@@ -2993,6 +3355,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             >
               <Video className="w-4 h-4" />
               <span>⚡ গুগল ফ্লো এআই স্টুডিও</span>
+            </button>
+
+            {/* Module #17 Quick Button: পণ্য ক্রয় করুন (Purchase Management) */}
+            <button
+              onClick={() => setActiveTool('purchase_management')}
+              className={`px-4 py-2.5 text-xs sm:text-sm font-extrabold rounded-2xl border-2 flex items-center gap-2 shadow-xs transition-all cursor-pointer ${
+                activeTool === 'purchase_management'
+                  ? 'bg-emerald-700 text-white border-emerald-800'
+                  : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border-emerald-300'
+              }`}
+              title="#১৭ পণ্য ক্রয় ব্যবস্থাপনা (Purchase Management)"
+            >
+              <ShoppingBag className="w-4 h-4 text-emerald-700" />
+              <span>🛒 #১৭ পণ্য ক্রয় করুন</span>
             </button>
           </div>
         </div>
@@ -3182,10 +3558,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <div>
                   <h4 className="text-sm sm:text-base font-extrabold text-stone-900 flex items-center gap-2">
                     <Globe className="w-4 h-4 text-[#E11D48]" />
-                    <span>Universal AI Link Importer (Alibaba, CJ, Amazon, Daraz, Shopify & CSV)</span>
+                    <span>Universal Custom Website & Store Link Analyzer (যেকোনো কাস্টম ওয়েবসাইট, WooCommerce, Shopify, Daraz, Alibaba, Amazon)</span>
                   </h4>
                   <p className="text-xs text-stone-500 mt-0.5">
-                    লিংক পেস্ট করলেই এআই স্বয়ংক্রিয়ভাবে অরিজিনাল ছবি, স্পেসিফিকেশন ও কম্বো অফার তৈরি করে লাইভ ডাটাবেজে যুক্ত করবে।
+                    যেকোনো সাধারণ বা কাস্টম ওয়েবসাইটের প্রোডাক্ট লিংক পেস্ট করলেই আমাদের এআই ডামি/ফেক ছবি ছাড়া ১০০% আসল প্রোডাক্টের ছবি, দাম ও বিবরণ এনালাইসিস করে লাইফটাইম ডাটাবেজে সেভ করবে।
                   </p>
                 </div>
 
@@ -4162,6 +4538,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         )}
                         <button
                           type="button"
+                          onClick={async () => {
+                            setFeedback(`💾 "${p.name}" লাইফটাইম ডাটাবেজে সেভ হচ্ছে...`);
+                            await saveProductPersisted(p);
+                            setFeedback(`✅ "${p.name}" ১-ক্লিকে লাইফটাইম ডাটাবেজে স্থায়ীভাবে সেভ হয়েছে!`);
+                            setTimeout(() => setFeedback(''), 4000);
+                          }}
+                          className="px-2.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[11px] rounded-xl cursor-pointer transition-colors flex items-center gap-1"
+                          title="১-ক্লিকে লাইফটাইম ডাটাবেজে সেভ করুন"
+                        >
+                          <Database className="w-3.5 h-3.5" />
+                          <span>সেভ</span>
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => handleDeleteProduct(p.id, p.name)}
                           className="p-2 border border-rose-200 text-rose-600 hover:bg-rose-50 rounded-xl cursor-pointer transition-colors"
                           title="ডিলিট করুন"
@@ -4274,6 +4664,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         </button>
                       )}
                       <button
+                        type="button"
+                        onClick={async () => {
+                          setFeedback(`💾 "${p.name}" লাইফটাইম ডাটাবেজে সেভ হচ্ছে...`);
+                          await saveProductPersisted(p);
+                          setFeedback(`✅ "${p.name}" ১-ক্লিকে লাইফটাইম ডাটাবেজে স্থায়ীভাবে সেভ হয়েছে!`);
+                          setTimeout(() => setFeedback(''), 4000);
+                        }}
+                        className="px-2.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[10px] font-extrabold cursor-pointer flex items-center gap-1"
+                        title="১-ক্লিকে লাইফটাইম ডাটাবেজে সেভ করুন"
+                      >
+                        <Database className="w-3 h-3" />
+                        <span>সেভ</span>
+                      </button>
+                      <button
                         onClick={() => handleToggleProductStatus(p)}
                         className="px-2 py-2 border border-rose-200 text-[#E11D48] rounded-xl text-[10px] font-bold hover:bg-rose-50 cursor-pointer"
                       >
@@ -4319,6 +4723,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <Plus className="w-4 h-4" />
                   <span>{isManualOrderOpen ? 'ফর্ম বন্ধ করুন' : '+ ম্যানুয়াল / WhatsApp স্ক্রিনশট অর্ডার এন্ট্রি'}</span>
                 </button>
+
+                {orders.some((o) => o.status === 'cancelled') && (
+                  <button
+                    type="button"
+                    onClick={handleDeleteAllCancelledOrders}
+                    className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5 shadow-xs cursor-pointer transition-colors"
+                    title="সকল বাতিল বা ডেমো অর্ডার এক ক্লিকে ডিলিট করে সেলস অ্যানালাইসিস থেকে মাইনাস করুন"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>
+                      🗑️ বাতিল অর্ডার ডিলিট ({orders.filter((o) => o.status === 'cancelled').length})
+                    </span>
+                  </button>
+                )}
 
                 <div className="relative w-full sm:w-60">
                   <Search className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -4755,6 +5173,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                   <RotateCcw className="w-3.5 h-3.5 text-amber-700" />
                                   <span>রিটার্ন</span>
                                 </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteOrder(o)}
+                                  className="px-2.5 py-1.5 rounded-xl bg-red-600 hover:bg-red-700 text-white border border-red-700 text-[11px] font-extrabold cursor-pointer transition-all flex items-center gap-1 shadow-2xs"
+                                  title={`এই ডেমো/ফেক অর্ডারটি ডিলিট করুন (সেলস থেকে সাথে সাথে -৳${o.total.toLocaleString()} মাইনাস হবে)`}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5 text-white" />
+                                  <span>ডিলিট</span>
+                                </button>
                               </div>
                             </td>
                           </tr>
@@ -4958,6 +5385,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     >
                       <MessageCircle className="w-4 h-4" />
                       <span>WhatsApp এ পাঠান</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteOrder(selectedOrderForView)}
+                      className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      <span>🗑️ অর্ডার ডিলিট করুন (-৳{selectedOrderForView.total.toLocaleString()})</span>
                     </button>
                     <button
                       type="button"
@@ -6480,13 +6915,23 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             <form onSubmit={handleSaveApiKeys} className="space-y-6 text-xs">
               {/* Steadfast & Pathao Courier API */}
               <div className="p-4 rounded-2xl border border-emerald-200 bg-emerald-50/30 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-emerald-800 text-xs">
-                    Steadfast & Pathao Courier Automated Booking API
-                  </span>
-                  <span className="text-[10px] font-semibold text-stone-500 font-mono">
-                    Consignment Dispatch v1
-                  </span>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <span className="font-bold text-emerald-800 text-xs block">
+                      Steadfast & Pathao Courier Automated Booking API (রিয়েল-টাইম অটো-সেভ সক্রিয়)
+                    </span>
+                    <span className="text-[10.5px] text-emerald-700">
+                      ✓ এখানে API Key বা Client ID / Secret বসালেই রিয়েল-টাইমে ডাটাবেজ ও লাইভ সার্ভারে স্থায়ীভাবে সেভ হয়ে যায়।
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => persistApiKeysRealtime(apiKeys, true)}
+                    className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-extrabold flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>⚡ এখনই কুরিয়ার API সেভ ও ভেরিফাই করুন</span>
+                  </button>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
@@ -6494,7 +6939,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     <input
                       type="text"
                       value={apiKeys.steadfastApiKey}
-                      onChange={(e) => setApiKeys({ ...apiKeys, steadfastApiKey: e.target.value })}
+                      onChange={(e) => {
+                        const next = { ...apiKeys, steadfastApiKey: e.target.value };
+                        setApiKeys(next);
+                      }}
+                      onBlur={() => persistApiKeysRealtime(apiKeys, false)}
                       placeholder="STEADFAST_API_KEY..."
                       className="w-full px-3 py-2 bg-white border border-stone-300 rounded-lg font-mono text-xs focus:outline-none focus:border-[#E11D48]"
                     />
@@ -6504,28 +6953,92 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     <input
                       type="password"
                       value={apiKeys.steadfastSecretKey}
-                      onChange={(e) => setApiKeys({ ...apiKeys, steadfastSecretKey: e.target.value })}
+                      onChange={(e) => {
+                        const next = { ...apiKeys, steadfastSecretKey: e.target.value };
+                        setApiKeys(next);
+                      }}
+                      onBlur={() => persistApiKeysRealtime(apiKeys, false)}
                       placeholder="STEADFAST_SECRET_KEY..."
                       className="w-full px-3 py-2 bg-white border border-stone-300 rounded-lg font-mono text-xs focus:outline-none focus:border-[#E11D48]"
                     />
                   </div>
                   <div>
-                    <label className="block text-stone-700 mb-1 font-medium">Pathao Client ID</label>
+                    <label className="block text-stone-700 mb-1 font-bold text-emerald-900">
+                      Pathao Client ID (পাঠাও ক্লায়েন্ট আইডি)
+                    </label>
                     <input
                       type="text"
                       value={apiKeys.pathaoClientId}
-                      onChange={(e) => setApiKeys({ ...apiKeys, pathaoClientId: e.target.value })}
+                      onChange={(e) => {
+                        const next = { ...apiKeys, pathaoClientId: e.target.value };
+                        setApiKeys(next);
+                      }}
+                      onBlur={() => persistApiKeysRealtime(apiKeys, false)}
                       placeholder="PATHAO_CLIENT_ID..."
-                      className="w-full px-3 py-2 bg-white border border-stone-300 rounded-lg font-mono text-xs focus:outline-none focus:border-[#E11D48]"
+                      className="w-full px-3 py-2 bg-white border border-emerald-300 rounded-lg font-mono text-xs focus:outline-none focus:border-[#E11D48]"
                     />
                   </div>
                   <div>
-                    <label className="block text-stone-700 mb-1 font-medium">Pathao Client Secret</label>
+                    <label className="block text-stone-700 mb-1 font-bold text-emerald-900">
+                      Pathao Client Secret (পাঠাও ক্লায়েন্ট সিক্রেট)
+                    </label>
                     <input
                       type="password"
                       value={apiKeys.pathaoClientSecret}
-                      onChange={(e) => setApiKeys({ ...apiKeys, pathaoClientSecret: e.target.value })}
+                      onChange={(e) => {
+                        const next = { ...apiKeys, pathaoClientSecret: e.target.value };
+                        setApiKeys(next);
+                      }}
+                      onBlur={() => persistApiKeysRealtime(apiKeys, false)}
                       placeholder="PATHAO_CLIENT_SECRET..."
+                      className="w-full px-3 py-2 bg-white border border-emerald-300 rounded-lg font-mono text-xs focus:outline-none focus:border-[#E11D48]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-stone-700 mb-1 font-bold text-[#E11D48]">
+                      Pathao User Email (পাঠাও মার্চেন্ট ইমেইল — আবশ্যক)
+                    </label>
+                    <input
+                      type="email"
+                      value={apiKeys.pathaoUsername || ''}
+                      onChange={(e) => {
+                        const next = { ...apiKeys, pathaoUsername: e.target.value };
+                        setApiKeys(next);
+                      }}
+                      onBlur={() => persistApiKeysRealtime(apiKeys, false)}
+                      placeholder="আপনার Pathao লগইন ইমেইল (যেমন: merchant@gmail.com)"
+                      className="w-full px-3 py-2 bg-white border border-rose-300 rounded-lg font-mono text-xs focus:outline-none focus:border-[#E11D48]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-stone-700 mb-1 font-bold text-[#E11D48]">
+                      Pathao User Password (পাঠাও মার্চেন্ট পাসওয়ার্ড — আবশ্যক)
+                    </label>
+                    <input
+                      type="password"
+                      value={apiKeys.pathaoPassword || ''}
+                      onChange={(e) => {
+                        const next = { ...apiKeys, pathaoPassword: e.target.value };
+                        setApiKeys(next);
+                      }}
+                      onBlur={() => persistApiKeysRealtime(apiKeys, false)}
+                      placeholder="আপনার Pathao লগইন পাসওয়ার্ড..."
+                      className="w-full px-3 py-2 bg-white border border-rose-300 rounded-lg font-mono text-xs focus:outline-none focus:border-[#E11D48]"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block text-stone-700 mb-1 font-medium">
+                      Pathao Store ID (স্টোর আইডি — ঐচ্ছিক, খালি রাখলে সিস্টেম অটোমেটিক আপনার স্টোর আইডি খুঁজে নেবে)
+                    </label>
+                    <input
+                      type="text"
+                      value={apiKeys.pathaoStoreId || ''}
+                      onChange={(e) => {
+                        const next = { ...apiKeys, pathaoStoreId: e.target.value };
+                        setApiKeys(next);
+                      }}
+                      onBlur={() => persistApiKeysRealtime(apiKeys, false)}
+                      placeholder="যেমন: 124580 (খালি রাখলে Pathao API থেকে অটো ডিটেক্ট হবে)"
                       className="w-full px-3 py-2 bg-white border border-stone-300 rounded-lg font-mono text-xs focus:outline-none focus:border-[#E11D48]"
                     />
                   </div>
@@ -6650,144 +7163,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           </div>
         )}
 
-        {/* =====================================================================
-            TOOL 6: HERO BANNERS & CAROUSEL TIMING EDITOR
-           ===================================================================== */}
-        {activeTool === 'banners' && (
-          <div className="bg-white rounded-3xl border border-rose-200 p-6 shadow-xs space-y-6 animate-in fade-in">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-rose-100">
-              <div>
-                <h3 className="text-base font-extrabold text-stone-900 flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-[#E11D48]" />
-                  <span>হোমপেজ ক্যারোসেল স্লাইডিং টাইমিং ও ব্যানার এডিটর</span>
-                </h3>
-                <p className="text-xs text-stone-500 mt-0.5">
-                  স্লাইডার অটো-স্লাইডিং স্পিড এবং ব্যানার টেক্সট/ছবি পরিবর্তন করলে সাথে সাথে কাস্টমার হোমপেজে কার্যকর হবে।
-                </p>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-bold text-stone-600">হিরো ব্যানার স্পিড:</span>
-                {[1000, 3000, 5000].map((ms) => (
-                  <button
-                    key={ms}
-                    type="button"
-                    onClick={() => handleSaveCarouselSpeed(ms)}
-                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-all ${
-                      carouselInterval === ms
-                        ? 'bg-[#E11D48] text-white shadow-sm'
-                        : 'bg-rose-50 text-[#E11D48] border border-rose-200'
-                    }`}
-                  >
-                    {ms / 1000} সেকেন্ড
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Best-Selling Square Product Carousel Speed Control (3s, 5s, 8s, 10s Right-to-Left) */}
-            <div className="p-4 rounded-2xl bg-[#FFF8F9] border border-rose-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <h4 className="text-xs font-extrabold text-stone-900">
-                  🔥 বেস্ট সেলিং স্কয়ার প্রোডাক্ট ক্যারোসেল স্পিড (ডান থেকে বামে ১টি করে প্রোডাক্ট স্লাইড)
-                </h4>
-                <p className="text-[11px] text-stone-500 mt-0.5">
-                  হোমপেজের বেস্ট সেলিং ক্যারোসেলটি কত সেকেন্ড পর পর ডান দিক থেকে বাম দিকে যাবে তা নির্ধারণ করুন:
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                {[3000, 5000, 8000, 10000].map((ms) => (
-                  <button
-                    key={ms}
-                    type="button"
-                    onClick={() => handleSaveBestSellingSpeed(ms)}
-                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-all ${
-                      bestSellingInterval === ms
-                        ? 'bg-[#E11D48] text-white shadow-sm'
-                        : 'bg-white text-stone-700 border border-rose-200 hover:border-[#E11D48]'
-                    }`}
-                  >
-                    {ms / 1000} সেকেন্ড ({ms / 1000}s)
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {siteContent.heroSlides.map((slide: HeroSlide, i: number) => (
-                <div
-                  key={slide.id}
-                  className="rounded-2xl border border-rose-200 overflow-hidden bg-[#FFF8F9] flex flex-col justify-between"
-                >
-                  <div>
-                    <img src={slide.image} alt={slide.title} className="w-full h-36 object-cover" />
-                    <div className="p-4 space-y-2.5 text-xs">
-                      <span className="text-[10px] font-bold text-[#E11D48] uppercase">
-                        Slide #{i + 1}
-                      </span>
-                      <div>
-                        <label className="block text-[11px] font-bold text-stone-600 mb-0.5">
-                          শিরোনাম (Title)
-                        </label>
-                        <input
-                          type="text"
-                          value={slide.title}
-                          onChange={(e) => {
-                            const updated = [...siteContent.heroSlides];
-                            updated[i] = { ...updated[i], title: e.target.value };
-                            setSiteContent({ ...siteContent, heroSlides: updated });
-                          }}
-                          className="w-full px-2.5 py-1.5 bg-white border border-stone-300 rounded-lg font-bold"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-bold text-stone-600 mb-0.5">
-                          সাবটাইটেল (Subtitle)
-                        </label>
-                        <input
-                          type="text"
-                          value={slide.subtitle}
-                          onChange={(e) => {
-                            const updated = [...siteContent.heroSlides];
-                            updated[i] = { ...updated[i], subtitle: e.target.value };
-                            setSiteContent({ ...siteContent, heroSlides: updated });
-                          }}
-                          className="w-full px-2.5 py-1.5 bg-white border border-stone-300 rounded-lg"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-bold text-stone-600 mb-0.5">
-                          ব্যানার ছবি URL
-                        </label>
-                        <input
-                          type="url"
-                          value={slide.image}
-                          onChange={(e) => {
-                            const updated = [...siteContent.heroSlides];
-                            updated[i] = { ...updated[i], image: e.target.value };
-                            setSiteContent({ ...siteContent, heroSlides: updated });
-                          }}
-                          className="w-full px-2.5 py-1.5 bg-white border border-stone-300 rounded-lg font-mono text-[11px]"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={handleSaveHeroSlides}
-                className="px-6 py-2.5 bg-[#E11D48] hover:bg-[#BE123C] text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm cursor-pointer"
-              >
-                <Save className="w-4 h-4" />
-                <span>ব্যানার স্লাইডসমূহ লাইভ সেভ করুন</span>
-              </button>
-            </div>
-          </div>
-        )}
+        {/* Unified Hero Banner Designer is rendered below */}
 
         {/* =====================================================================
             TOOL 7: FACEBOOK & TIKTOK MULTI-PIXEL SETUP + LIVE EVENT TESTER
@@ -6883,6 +7259,91 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       <span>JSON ফিড কপি (TikTok)</span>
                     </button>
                   </div>
+                </div>
+
+                {/* 1-CLICK ZERO-LINK AUTOMATIC PIXEL CATALOG BUILDER (META & TIKTOK MICRODATA SCANNER) */}
+                <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-50 via-white to-teal-50 border-2 border-emerald-300 space-y-3">
+                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                    <div>
+                      <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-600 text-white text-[10px] font-extrabold uppercase tracking-wider mb-1">
+                        <span>✨ কোনো ম্যানুয়াল লিংক ছাড়াই পিক্সেল থেকে অটো-ক্যাটালগ</span>
+                      </div>
+                      <h5 className="text-xs sm:text-sm font-extrabold text-stone-900">
+                        ১-ক্লিকে মেটা ও টিকটক পিক্সেল দিয়ে সম্পূর্ণ ওয়েবসাইট স্ক্যান ও অটো-ক্যাটালগ তৈরি করুন
+                      </h5>
+                      <p className="text-[11px] text-stone-600 mt-0.5 leading-relaxed">
+                        আপনার মেটা পিক্সেল ও টিকটক পিক্সেল ইতিমধ্যে ওয়েবসাইটে কানেক্ট করা আছে। নিচের বাটনে ১-ক্লিক করলেই পিক্সেল অটোমেটিক আপনার ওয়েবসাইটের সকল ক্যাটাগরি ও প্রোডাক্ট (Microdata + Schema.org JSON-LD + Server CAPI) স্ক্যান করে মেটা ও টিকটক বিজনেস ম্যানেজারে ক্যাটালগ তৈরি ও আপডেট করে নেবে — আলাদা কোনো প্রোডাক্ট লিংক দেওয়ার প্রয়োজন নেই!
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={autoCatalogSyncing}
+                      onClick={async () => {
+                        setAutoCatalogSyncing(true);
+                        setFeedback(
+                          '⚡ কানেক্টেড মেটা ও টিকটক পিক্সেলের মাধ্যমে সম্পূর্ণ ওয়েবসাইটের সকল ক্যাটাগরি ও প্রোডাক্ট অটো-স্ক্যান হচ্ছে...'
+                        );
+                        try {
+                          await setDoc(doc(db, 'settings', 'api_credentials'), apiKeys, { merge: true }).catch(() => null);
+                          localStorage.setItem('dokandari_api_credentials', JSON.stringify(apiKeys));
+                          initializeMultiPixels(apiKeys.facebookPixelId, apiKeys.tiktokPixelId, apiKeys.youtubeTagId);
+                          const report = await syncAutoCatalogWithPixels(products, { forceFullBroadcast: true });
+                          setAutoCatalogScanReport(report);
+                          await refreshPixelTelemetryLogs();
+                          setFeedback(
+                            `🎉 আলহামদুলিল্লাহ! কোনো লিংক ছাড়াই পিক্সেল অটো-স্ক্যানের মাধ্যমে ${report.scannedProductsCount}টি প্রোডাক্ট ও ${report.scannedCategoriesCount}টি ক্যাটাগরি মেটা এবং টিকটক ক্যাটালগে ব্রডকাস্ট ও সিঙ্ক সম্পন্ন হয়েছে!`
+                          );
+                        } catch (err: any) {
+                          setFeedback(`⚠️ অটো-ক্যাটালগ সিঙ্ক ত্রুটি: ${err?.message || 'আবার চেষ্টা করুন'}`);
+                        } finally {
+                          setAutoCatalogSyncing(false);
+                          setTimeout(() => setFeedback(''), 6500);
+                        }
+                      }}
+                      className="px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-extrabold flex items-center gap-2 shadow-sm cursor-pointer shrink-0 transition-all"
+                    >
+                      {autoCatalogSyncing ? (
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Sparkles className="w-4 h-4" />
+                      )}
+                      <span>
+                        {autoCatalogSyncing
+                          ? 'পিক্সেল দিয়ে ক্যাটালগ স্ক্যান হচ্ছে...'
+                          : '⚡ ১-ক্লিকে মেটা ও টিকটক অটো-ক্যাটালগ তৈরি ও পিক্সেল স্ক্যান করুন'}
+                      </span>
+                    </button>
+                  </div>
+
+                  {autoCatalogScanReport && (
+                    <div className="p-3 rounded-xl bg-white border border-emerald-200 text-[11px] space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="font-extrabold text-emerald-800 flex items-center gap-1.5">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                          <span>
+                            পিক্সেল অটো-ক্যাটালগ স্ক্যান সম্পন্ন: মোট {autoCatalogScanReport.scannedProductsCount}টি লাইভ প্রোডাক্ট ও {autoCatalogScanReport.scannedCategoriesCount}টি ক্যাটাগরি ইনডেক্সড!
+                          </span>
+                        </span>
+                        <span className="text-[10px] font-mono text-stone-500">
+                          Meta Pixels: [{autoCatalogScanReport.metaPixels.join(', ')}] | TikTok Pixels: [{autoCatalogScanReport.tiktokPixels.join(', ')}]
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {autoCatalogScanReport.categories.map((c) => {
+                          const catObj = OFFICIAL_CATEGORIES.find((oc) => oc.id === c.category);
+                          return (
+                            <span
+                              key={c.category}
+                              className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-900 border border-emerald-200 font-bold text-[10px]"
+                            >
+                              {catObj?.nameBn || c.category}: {c.count}টি পণ্য
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Live Plugin Status Badges */}
@@ -7383,8 +7844,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           const sevenDaysMs = 7 * oneDayMs;
           const thirtyDaysMs = 30 * oneDayMs;
 
-          // Filter orders & expenses based on selected time range
+          // Filter orders & expenses based on selected time range (excluding cancelled orders from active revenue)
           const filteredOrders = orders.filter((o) => {
+            if (o.status === 'cancelled') return false;
             if (expenseRange === 'today') return now - o.createdAt <= oneDayMs;
             if (expenseRange === 'week') return now - o.createdAt <= sevenDaysMs;
             if (expenseRange === 'month') return now - o.createdAt <= thirtyDaysMs;
@@ -7420,8 +7882,54 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             .reduce((sum, r) => sum + (r.damageLoss || 0), 0);
           const pnlNetReturnLoss = pnlTotalReturnCharge + pnlTotalDamageLoss;
 
+          // Purchase Management (#17) & Inventory Accounting Integration:
+          // Rule: Raw purchase cost of unsold inventory is an Asset (Inventory Cost), NOT a sold expense!
+          // Only Sold Product COGS (বিক্রীত পণ্যের ক্রয়মূল্য) + Operating Expenses reduce Net Profit.
+          const activePurchasesList = purchases.filter((p) => p.status !== 'cancelled');
+          const totalPurchaseOutflow = activePurchasesList.reduce(
+            (sum, p) => sum + (Number(p.grandTotalPurchaseCost) || 0),
+            0
+          );
+          const totalPurchasePaid = activePurchasesList.reduce(
+            (sum, p) => sum + (Number(p.paidAmount) || 0),
+            0
+          );
+          const totalPurchaseDue = activePurchasesList.reduce(
+            (sum, p) => sum + (Number(p.dueAmount) || 0),
+            0
+          );
+
+          // Calculate Sold Product COGS from actual items sold in active orders
+          const soldProductCogs = filteredOrders.reduce((orderSum, ord) => {
+            const itemsCogs = ord.items.reduce((itSum, it) => {
+              const catProd = products.find(
+                (p) => p.id === it.productId || p.id === it.id || p.name === it.name
+              );
+              const matchedPurchase = activePurchasesList.find(
+                (pur) => pur.productId === it.productId || pur.productName === it.name
+              );
+              const unitCost =
+                catProd?.costPrice ||
+                (matchedPurchase && matchedPurchase.purchaseQuantity > 0
+                  ? Math.round(
+                      matchedPurchase.grandTotalPurchaseCost / matchedPurchase.purchaseQuantity
+                    )
+                  : 0);
+              return itSum + unitCost * (Number(it.quantity) || 1);
+            }, 0);
+            return orderSum + itemsCogs;
+          }, 0);
+
+          // Unsold Inventory Asset Value (অবিক্রীত স্টকের ইনভেন্টরি মূল্য — kept separate from Net Profit)
+          const unsoldInventoryValue = products.reduce((sum, p) => {
+            const stockCount = typeof p.stock === 'number' ? p.stock : 0;
+            const unitCost = p.costPrice || 0;
+            return sum + stockCount * unitCost;
+          }, 0);
+
           const totalRevenue = filteredOrders.reduce((sum, o) => sum + o.total, 0);
-          const totalExpenses = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
+          const operatingExpenses = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
+          const totalExpenses = operatingExpenses + soldProductCogs;
           const netProfit = totalRevenue - totalExpenses;
           const profitMargin = totalRevenue > 0 ? Math.round((netProfit / totalRevenue) * 100) : 0;
 
@@ -7639,6 +8147,87 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     <div className="font-mono font-black text-stone-900 text-sm mt-0.5">
                       ৳{((expenseByType.office_utility || 0) + (expenseByType.other || 0)).toLocaleString()}
                     </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* DEDICATED PURCHASE MANAGEMENT & INVENTORY COST VS COGS P&L SECTION */}
+              <div className="p-5 rounded-3xl bg-gradient-to-br from-emerald-50/60 via-white to-teal-50/40 border border-emerald-200 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="p-2 bg-emerald-100 text-emerald-800 rounded-xl">
+                      <ShoppingBag className="w-4 h-4" />
+                    </span>
+                    <div>
+                      <h4 className="text-sm font-black text-stone-900">
+                        পণ্য ক্রয় ব্যবস্থাপনা বনাম বিক্রীত পণ্যের ক্রয়মূল্য (Purchase & Inventory Valuation P&L)
+                      </h4>
+                      <p className="text-[11px] text-stone-500">
+                        বিক্রীত পণ্যের ক্রয়মূল্য (COGS) এবং অবিক্রীত স্টকের ইনভেন্টরি মূল্য আলাদাভাবে হিসাবকৃত — অবিক্রীত স্টক নিট লাভ থেকে বাদ যায় না
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setActiveTool('purchase_management')}
+                    className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-extrabold cursor-pointer transition-colors shrink-0"
+                  >
+                    🛒 #১৭ ক্রয় ব্যবস্থাপনায় যান →
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 text-xs">
+                  <div className="p-3 rounded-2xl bg-white border border-stone-200 shadow-2xs space-y-0.5">
+                    <span className="text-[10px] font-bold text-stone-500 block">
+                      ১. বিক্রীত পণ্যের ক্রয়মূল্য (Sold COGS)
+                    </span>
+                    <div className="text-base font-black font-mono text-[#E11D48]">
+                      ৳{soldProductCogs.toLocaleString()}
+                    </div>
+                    <span className="text-[9.5px] text-stone-500 block">শুধু বিক্রি হওয়া পণ্যের কেনা দাম</span>
+                  </div>
+
+                  <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-200 shadow-2xs space-y-0.5">
+                    <span className="text-[10px] font-bold text-emerald-800 block">
+                      ২. অবিক্রীত স্টকের ইনভেন্টরি ভ্যালু
+                    </span>
+                    <div className="text-base font-black font-mono text-emerald-950">
+                      ৳{unsoldInventoryValue.toLocaleString()}
+                    </div>
+                    <span className="text-[9.5px] text-emerald-700 block">গুদামে থাকা স্টকের সম্পদ মূল্য</span>
+                  </div>
+
+                  <div className="p-3 rounded-2xl bg-blue-50 border border-blue-200 shadow-2xs space-y-0.5">
+                    <span className="text-[10px] font-bold text-blue-800 block">
+                      ৩. সর্বমোট পণ্য ক্রয় (Total Purchase)
+                    </span>
+                    <div className="text-base font-black font-mono text-blue-950">
+                      ৳{totalPurchaseOutflow.toLocaleString()}
+                    </div>
+                    <span className="text-[9.5px] text-blue-700 block">
+                      {activePurchasesList.length}টি ক্রয় ইনভয়েস
+                    </span>
+                  </div>
+
+                  <div className="p-3 rounded-2xl bg-teal-50 border border-teal-200 shadow-2xs space-y-0.5">
+                    <span className="text-[10px] font-bold text-teal-800 block">
+                      ৪. সাপ্লায়ারকে পরিশোধিত (Paid)
+                    </span>
+                    <div className="text-base font-black font-mono text-teal-950">
+                      ৳{totalPurchasePaid.toLocaleString()}
+                    </div>
+                    <span className="text-[9.5px] text-teal-700 block">মোট পেমেন্ট প্রদান</span>
+                  </div>
+
+                  <div className="p-3 rounded-2xl bg-amber-50 border border-amber-300 shadow-2xs space-y-0.5">
+                    <span className="text-[10px] font-bold text-amber-900 block">
+                      ৫. সাপ্লায়ারের বাকি (Supplier Due)
+                    </span>
+                    <div className="text-base font-black font-mono text-amber-950">
+                      ৳{totalPurchaseDue.toLocaleString()}
+                    </div>
+                    <span className="text-[9.5px] text-amber-800 block">পরিশোধযোগ্য বকেয়া</span>
                   </div>
                 </div>
               </div>
@@ -7917,18 +8506,26 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
            ===================================================================== */}
         {activeTool === 'banners' && (
           <div className="bg-white rounded-3xl border border-rose-200 p-6 shadow-xs space-y-8 animate-in fade-in">
-            {/* Header with Title and Quick Save Button */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-rose-100">
+            {/* Header with Title, 1-Click 10 Readymade Bright Slides Loader, and Quick Save Button */}
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-rose-100">
               <div>
                 <h3 className="text-base font-extrabold text-stone-900 flex items-center gap-2">
                   <ImageIcon className="w-5 h-5 text-[#E11D48]" />
-                  <span>হিরো ব্যানার ও স্লাইডার ডিজাইন (হোমপেজ ও ক্যাটাগরি ব্যানার)</span>
+                  <span>হিরো ব্যানার ও স্লাইডার ডিজাইন (১০০% ব্রাইট থিম • রিয়েল-টাইম লাইভ ডোমেইন সিঙ্ক)</span>
                 </h3>
                 <p className="text-xs text-stone-500 mt-0.5">
-                  হোমপেজের মূল ক্যারোসেল ব্যানার এবং ১১টি ক্যাটাগরির ব্যানার ছবি, শিরোনাম ও বাটন সরাসরি পরিবর্তন করুন। লাইভ স্টোরে তাৎক্ষণিক কার্যকর হবে।
+                  হোমপেজের হিরো ব্যানার (১০টি রেডিমেড মডেল ও প্রোডাক্ট স্লাইড), অর্গানিক ফুড হিরো ক্যারোসেল এবং ১১টি ক্যাটাগরির ব্যানার সরাসরি আপলোড বা এডিট করুন। ছবি আপলোড করলেই স্বয়ংক্রিয়ভাবে ডাটাবেজ ও কাস্টমার ডোমেইনে সেভ হয়ে যাবে!
                 </p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleApplyReadymadeBrightHeroSlides}
+                  className="px-4 py-2 bg-gradient-to-r from-amber-500 to-[#E11D48] hover:opacity-95 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5 cursor-pointer transition-all shadow-xs"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>✨ ১০টি রেডিমেড ব্রাইট হিরো ব্যানার লোড ও লাইভ সেভ করুন</span>
+                </button>
                 <button
                   type="button"
                   onClick={handleAddHeroSlide}
@@ -8083,48 +8680,50 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                     {/* Slide Content Grid: Preview & Form */}
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-                      {/* Live Visual Preview of Slide */}
+                      {/* Live Visual Preview of Slide (100% Bright Daylight Theme - Zero Dark/Black Background) */}
                       <div className="lg:col-span-1 space-y-2">
                         <span className="block text-[11px] font-bold text-stone-500 uppercase tracking-wider">
-                          স্লাইডার লাইভ প্রিভিউ:
+                          স্লাইডার লাইভ প্রিভিউ (ব্রাইট থিম):
                         </span>
-                        <div className="relative rounded-2xl overflow-hidden aspect-[16/9] border border-stone-200 bg-stone-900 group shadow-sm">
-                          <img
-                            src={slide.image}
-                            alt={slide.title}
-                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 opacity-90"
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).src =
-                                'https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?auto=format&fit=crop&w=1600&q=80';
-                            }}
-                          />
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent p-3.5 flex flex-col justify-end text-white">
+                        <div className="relative rounded-2xl overflow-hidden aspect-[16/9] border-2 border-rose-200 bg-gradient-to-r from-[#FFF5F7] via-[#FFFDF9] to-[#FFF0F3] group shadow-sm grid grid-cols-12 items-center p-3 gap-2">
+                          <div className="col-span-7 flex flex-col justify-center space-y-1 z-10">
                             {slide.tag && (
-                              <span className="inline-block px-2 py-0.5 rounded bg-[#E11D48] text-white text-[9px] font-extrabold mb-1 w-max">
+                              <span className="inline-block px-2 py-0.5 rounded-full bg-[#E11D48] text-white text-[8.5px] font-extrabold w-max">
                                 {slide.tag}
                               </span>
                             )}
-                            <h5 className="font-extrabold text-xs line-clamp-1 text-white">
+                            <h5 className="font-extrabold text-[11px] line-clamp-2 text-stone-900 leading-snug">
                               {slide.title}
                             </h5>
-                            <p className="text-[10px] text-stone-300 line-clamp-2 mt-0.5">
+                            <p className="text-[9.5px] text-stone-600 line-clamp-2">
                               {slide.subtitle}
                             </p>
                             {slide.ctaText && (
-                              <div className="mt-2">
-                                <span className="inline-block px-2.5 py-1 rounded-lg bg-[#E11D48] text-[9px] font-extrabold text-white">
+                              <div className="pt-1">
+                                <span className="inline-block px-2 py-0.5 rounded-lg bg-[#E11D48] text-[8.5px] font-extrabold text-white">
                                   {slide.ctaText} →
                                 </span>
                               </div>
                             )}
                           </div>
+                          <div className="col-span-5 h-full rounded-xl overflow-hidden bg-white border border-rose-200 shadow-2xs">
+                            <img
+                              src={slide.image}
+                              alt={slide.title}
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 bg-white"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).src =
+                                  '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg';
+                              }}
+                            />
+                          </div>
                         </div>
 
                         {/* File Upload Button */}
                         <div className="pt-1">
-                          <label className="w-full py-2 px-3 bg-stone-100 hover:bg-rose-50 text-stone-800 hover:text-[#E11D48] border border-stone-300 hover:border-rose-300 rounded-xl font-bold text-xs cursor-pointer flex items-center justify-center gap-2 transition-all">
+                          <label className="w-full py-2 px-3 bg-[#FFF0F3] hover:bg-rose-100 text-[#E11D48] border border-rose-300 rounded-xl font-extrabold text-xs cursor-pointer flex items-center justify-center gap-2 transition-all shadow-2xs">
                             <ImageIcon className="w-3.5 h-3.5 text-[#E11D48]" />
-                            <span>📁 কম্পিউটার/মোবাইল থেকে ছবি আপলোড করুন</span>
+                            <span>📁 ছবি আপলোড করুন (অটো-সেভ লাইভ ডোমেইন)</span>
                             <input
                               type="file"
                               accept="image/*"
@@ -8139,13 +8738,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                         <div className="sm:col-span-2">
                           <label className="block font-bold text-stone-700 mb-1">
-                            স্লাইডার ছবির লিংক (Image URL):
+                            স্লাইডার ছবির লিংক (Image URL — এডিট করলেই অটো-সেভ হবে):
                           </label>
                           <input
                             type="text"
                             value={slide.image}
                             onChange={(e) => handleUpdateHeroSlide(idx, 'image', e.target.value)}
-                            placeholder="https://images.unsplash.com/..."
+                            onBlur={handleSaveHeroSlides}
+                            placeholder="/uploads/product/... অথবা https://..."
                             className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl font-mono text-[11px] focus:border-[#E11D48] focus:bg-white"
                           />
                         </div>
@@ -8259,20 +8859,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         </span>
                       </div>
 
-                      {/* Category Banner Preview */}
-                      <div className="relative rounded-xl overflow-hidden aspect-[21/9] bg-stone-900 border border-stone-200">
-                        <img
-                          src={heroConfig.image}
-                          alt={cat.nameBn}
-                          className="w-full h-full object-cover opacity-85"
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).src = cat.image;
-                          }}
-                        />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-transparent p-2.5 flex flex-col justify-end text-white">
-                          <span className="text-[9px] font-bold text-rose-300">{heroConfig.tag}</span>
-                          <div className="font-extrabold text-xs line-clamp-1">{heroConfig.title}</div>
-                          <div className="text-[9px] text-stone-300 line-clamp-1">{heroConfig.subtitle}</div>
+                      {/* Category Banner Preview (100% Bright Daylight Theme - Zero Dark/Black Background) */}
+                      <div className="relative rounded-xl overflow-hidden aspect-[21/9] bg-gradient-to-r from-[#FFF5F7] via-[#FFFDF9] to-[#FFF0F3] border border-rose-200 grid grid-cols-12 items-center p-2.5 gap-2">
+                        <div className="col-span-7 space-y-0.5">
+                          <span className="inline-block px-2 py-0.5 rounded-full bg-rose-100 text-[#E11D48] text-[9px] font-extrabold">
+                            {heroConfig.tag}
+                          </span>
+                          <div className="font-extrabold text-xs text-stone-900 line-clamp-1">
+                            {heroConfig.title}
+                          </div>
+                          <div className="text-[9.5px] text-stone-600 line-clamp-2">
+                            {heroConfig.subtitle}
+                          </div>
+                        </div>
+                        <div className="col-span-5 h-full rounded-lg overflow-hidden bg-white border border-rose-200">
+                          <img
+                            src={heroConfig.image}
+                            alt={cat.nameBn}
+                            className="w-full h-full object-cover bg-white"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = cat.image;
+                            }}
+                          />
                         </div>
                       </div>
 
@@ -9171,6 +9779,25 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </div>
             </div>
           </div>
+        )}
+
+        {/* =====================================================================
+            TOOL 17: PURCHASE MANAGEMENT (#১৭ পণ্য ক্রয় ও স্টক ব্যবস্থাপনা)
+           ===================================================================== */}
+        {activeTool === 'purchase_management' && (
+          <PurchaseManagementPanel
+            products={products}
+            purchases={purchases}
+            onPurchasesChange={setPurchases}
+            onUpdateProduct={(updatedProd) => onAddProduct(updatedProd)}
+            onRecordMovement={(mov) =>
+              setInventoryMovements((prev) => [mov, ...prev.filter((m) => m.id !== mov.id)])
+            }
+            onFeedback={(msg) => {
+              setFeedback(msg);
+              setTimeout(() => setFeedback(''), 5000);
+            }}
+          />
         )}
       </div>
 

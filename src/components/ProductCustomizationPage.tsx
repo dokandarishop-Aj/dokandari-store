@@ -31,6 +31,7 @@ import {
   deleteProductPersisted,
   compressImageFileToDataUrl,
 } from '../lib/storeSync';
+import { BeforeAfterSlider } from './BeforeAfterSlider';
 
 interface ProductCustomizationPageProps {
   product: Product;
@@ -434,10 +435,10 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
             <button
               onClick={handleSaveAndPublish}
               disabled={saving}
-              className="px-5 py-2 bg-[#E11D48] hover:bg-[#BE123C] border border-rose-300 text-white text-xs font-bold rounded-xl shadow-md transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-60"
+              className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 border border-emerald-300 text-white text-xs font-extrabold rounded-xl shadow-md transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-60"
             >
               <Save className="w-4 h-4" />
-              <span>{saving ? 'সেভ হচ্ছে...' : 'Save & Live Publish'}</span>
+              <span>{saving ? 'সেভ হচ্ছে...' : '💾 ১-ক্লিকে লাইফটাইম সেভ ও পাবলিশ'}</span>
             </button>
           </div>
         </div>
@@ -660,6 +661,19 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
                 </div>
               </div>
             </div>
+
+            {/* Dedicated Before & After Product Comparison Slider Editor */}
+            <BeforeAfterSlider
+              product={product}
+              isAdmin={true}
+              compact={true}
+              onSaveProduct={async (updatedProd) => {
+                const saved = await saveProductPersisted(updatedProd);
+                onProductUpdated(saved);
+                setToastMessage('✅ Before & After ছবি লাইফটাইম ডাটাবেজে সেভ হয়েছে!');
+                setTimeout(() => setToastMessage(''), 4000);
+              }}
+            />
 
             {/* Smart Auto-Product Import matching image_7747cc85.png */}
             <div className="bg-white rounded-2xl border border-rose-100 p-5 shadow-xs space-y-3">
