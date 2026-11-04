@@ -67,7 +67,7 @@ import {
   trackPixelWhatsAppConversion,
   updateProductStructuredData,
 } from '../lib/pixelManager';
-import { captureAbandonedLeadDebounced, markLeadConverted } from '../lib/leadRecovery';
+import { captureAbandonedLeadDebounced, markLeadConverted, normalizePhone } from '../lib/leadRecovery';
 
 interface ProductDetailPageProps {
   product: Product;
@@ -122,8 +122,8 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   const [selectedImage, setSelectedImage] = useState(0);
   const [selectedVideoInHero, setSelectedVideoInHero] = useState<number | null>(null);
   const [activatedVideos, setActivatedVideos] = useState<Record<number, boolean>>({});
-  const [selectedColor, setSelectedColor] = useState(product.variants.colors?.[0] || '');
-  const [selectedSize, setSelectedSize] = useState(product.variants.sizes?.[0] || '');
+  const [selectedColor, setSelectedColor] = useState(product.variants?.colors?.[0] || '');
+  const [selectedSize, setSelectedSize] = useState(product.variants?.sizes?.[0] || '');
   const [quantity, setQuantity] = useState(1);
   const [linkCopied, setLinkCopied] = useState(false);
 
@@ -325,11 +325,12 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   const subtotalPrice = Math.max(0, rawSubtotal - comboDiscount);
   const totalPrice = subtotalPrice + finalShipping;
 
-  // Real-time Lead Recovery mechanism: automatically captures customer phone & details on Instant Checkout page
+  // Real-time Lead Recovery mechanism: automatically captures customer phone & details on Product & Checkout page
   useEffect(() => {
-    if (customerPhone && customerPhone.replace(/\D/g, '').length >= 6) {
+    const cleanPhone = normalizePhone(customerPhone);
+    if (cleanPhone && cleanPhone.length >= 6) {
       captureAbandonedLeadDebounced({
-        customerPhone,
+        customerPhone: cleanPhone,
         customerName,
         customerAddress,
         deliveryArea,
@@ -406,13 +407,22 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     setTimeout(() => setAddedToCartToast(false), 2500);
   };
 
-  // Transition to Separate Instant Checkout Page
+  // Scroll directly to the 1-Click Order Form on the Product Page (or open checkout view)
   const handleGoToInstantCheckout = () => {
+    const formEl = document.getElementById('direct-pdp-order-form');
+    if (formEl && viewStep === 'product') {
+      formEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const firstInput = formEl.querySelector('input') as HTMLInputElement | null;
+      if (firstInput) {
+        setTimeout(() => firstInput.focus(), 350);
+      }
+      return;
+    }
     try {
       window.history.pushState(
         null,
         '',
-        `/products/${encodeURIComponent(product.id)}/checkout?brand=dokandari`
+        `/?product=${encodeURIComponent(product.id)}&step=checkout`
       );
     } catch {
       // ignore
@@ -430,7 +440,8 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
       setOrderError('অনুগ্রহ করে আপনার নাম লিখুন।');
       return;
     }
-    if (!customerPhone.trim() || customerPhone.replace(/\D/g, '').length < 11) {
+    const cleanPhoneDigits = normalizePhone(customerPhone);
+    if (!cleanPhoneDigits || cleanPhoneDigits.length < 10) {
       setOrderError('সঠিক ১১ ডিজিটের মোবাইল নম্বর দিন (যেমন: 017XXXXXXXX)।');
       return;
     }
@@ -448,7 +459,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
         id: orderId,
         customer: {
           name: customerName.trim(),
-          phone: customerPhone.trim(),
+          phone: cleanPhoneDigits,
           address: customerAddress.trim(),
           city: deliveryArea === 'dhaka' ? 'Dhaka' : 'Outside Dhaka',
           district: deliveryArea === 'dhaka' ? 'ঢাকা' : 'সারা বাংলাদেশ',
@@ -491,12 +502,12 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
       await saveOrderPersisted(newOrder);
 
       // Mark the captured lead as converted
-      markLeadConverted(customerPhone, orderId);
+      markLeadConverted(cleanPhoneDigits, orderId);
 
-      // CRITICAL: Change URL to /thank-you/:orderId FIRST before firing PageView + Purchase
-      // so Meta Ads Data Advisor & TikTok Pixel Helper associate Purchase with the /thank-you/ URL!
+      // CRITICAL: Change URL to /?thank_you=:orderId FIRST before firing PageView + Purchase
+      // so refreshing never causes a 404 in any external browser!
       try {
-        window.history.pushState(null, '', `/thank-you/${encodeURIComponent(orderId)}?brand=dokandari`);
+        window.history.pushState(null, '', `/?thank_you=${encodeURIComponent(orderId)}&brand=dokandari`);
       } catch {
         // ignore
       }
@@ -604,8 +615,8 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
         images: result.images && result.images.length > 0 ? result.images : product.images,
         videos: result.videos && result.videos.length > 0 ? result.videos : product.videos,
         variants: {
-          colors: result.colors?.length ? result.colors : product.variants.colors,
-          sizes: result.sizes?.length ? result.sizes : product.variants.sizes,
+          colors: result.colors?.length ? result.colors : product.variants?.colors || [],
+          sizes: result.sizes?.length ? result.sizes : product.variants?.sizes || [],
         },
         sourceUrl: refreshUrl.trim(),
         updatedAt: Date.now(),
@@ -834,14 +845,110 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     </div>
   );
 
+  const renderSuggestedCategoryProducts = (fromThankYou = false) => {
+    const sameCategory = allProducts.filter(
+      (p) => p.id !== product.id && p.category === product.category
+    );
+    const otherPopular = allProducts.filter(
+      (p) => p.id !== product.id && p.category !== product.category
+    );
+    const suggestedList = (sameCategory.length > 0 ? sameCategory : [...sameCategory, ...otherPopular]).slice(0, 8);
+
+    if (suggestedList.length === 0) return null;
+
+    return (
+      <section className="pt-4 sm:pt-6 space-y-4 text-left">
+        <div
+          className={`bg-white border rounded-2xl p-3.5 sm:p-5 flex items-center justify-between shadow-2xs flex-wrap gap-2 ${
+            isOrganic ? 'border-emerald-200' : 'border-rose-200/80'
+          }`}
+        >
+          <div className="flex items-center gap-2.5">
+            <span
+              className={`w-8 h-8 rounded-xl text-white flex items-center justify-center text-sm font-bold shrink-0 shadow-2xs ${
+                isOrganic ? 'bg-[#16A34A]' : 'bg-[#E11D48]'
+              }`}
+            >
+              {isOrganic ? '🌿' : '✨'}
+            </span>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-sm sm:text-lg font-extrabold text-stone-900">
+                  {fromThankYou
+                    ? `${categoryNameBn} ক্যাটাগরির আরও জনপ্রিয় প্রোডাক্ট (Suggested Products)`
+                    : `সাজেস্টেড ও সম্পর্কিত প্রোডাক্ট (${categoryNameBn})`}
+                </h2>
+                <span
+                  className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${
+                    isOrganic
+                      ? 'text-[#15803D] bg-[#ECFDF5] border-emerald-200'
+                      : 'text-[#E11D48] bg-rose-50 border-rose-200'
+                  }`}
+                >
+                  {suggestedList.length} টি বাছাইকৃত পণ্য
+                </span>
+              </div>
+              <p className="text-[11px] text-stone-500 mt-0.5">
+                আপনার পছন্দের এই ক্যাটাগরির আরও জনপ্রিয় ও ১০০% অরিজিনাল কালেকশন দেখুন ও অর্ডার করুন
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              setCompletedOrder(null);
+              onBack();
+            }}
+            className={`px-3.5 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer shrink-0 ${
+              isOrganic
+                ? 'bg-[#ECFDF5] hover:bg-[#16A34A] text-[#15803D] hover:text-white border-emerald-200'
+                : 'bg-[#FFF1F2] hover:bg-[#E11D48] text-[#E11D48] hover:text-white border-rose-200'
+            }`}
+          >
+            সকল প্রোডাক্ট দেখুন &rarr;
+          </button>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-4">
+          {suggestedList.map((sugProd) => (
+            <ProductCard
+              key={sugProd.id}
+              product={sugProd}
+              greenTheme={sugProd.category === 'organic_food' || isOrganic}
+              onOpenDetail={(p) => {
+                setCompletedOrder(null);
+                setViewStep('product');
+                if (onSelectProduct) {
+                  onSelectProduct(p);
+                }
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              onInstantOrder={(p) => {
+                setCompletedOrder(null);
+                if (onInstantOrderProduct) {
+                  onInstantOrderProduct(p);
+                } else if (onSelectProduct) {
+                  onSelectProduct(p);
+                }
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              onEditProduct={isAdmin ? (p) => onOpenEdit(p) : undefined}
+            />
+          ))}
+        </div>
+      </section>
+    );
+  };
+
   // ============================================================================
-  // STEP 3: DEDICATED THANK YOU PAGE (থ্যাঙ্ক ইউ পেইজ)
+  // STEP 3: DEDICATED THANK YOU PAGE (থ্যাঙ্ক ইউ পেইজ + একই ক্যাটাগরির সাজেস্টেড প্রোডাক্ট)
   // ============================================================================
   if (viewStep === 'thank_you' && completedOrder) {
     return (
-      <div className="bg-[#FAF9F6] min-h-screen py-6 sm:py-10 px-3 sm:px-6 animate-in fade-in">
-        <div className="max-w-2xl mx-auto space-y-5">
-          <div className="bg-white rounded-3xl border-2 border-emerald-200 p-5 sm:p-8 shadow-md text-center space-y-4">
+      <div className="bg-[#FAF9F6] min-h-screen py-4 sm:py-8 px-3 sm:px-6 lg:px-8 animate-in fade-in">
+        <div className="max-w-7xl mx-auto space-y-6">
+          <div className="max-w-2xl mx-auto bg-white rounded-3xl border-2 border-emerald-200 p-5 sm:p-8 shadow-md text-center space-y-4">
             <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto shadow-inner animate-bounce">
               <CheckCircle2 className="w-10 h-10 sm:w-12 sm:h-12" />
             </div>
@@ -959,7 +1066,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                     window.history.pushState(
                       null,
                       '',
-                      `/products/${encodeURIComponent(product.id)}/checkout?brand=dokandari`
+                      `/?product=${encodeURIComponent(product.id)}&step=checkout`
                     );
                   } catch {
                     // ignore
@@ -983,6 +1090,9 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               </button>
             </div>
           </div>
+
+          {/* Same-Category Suggested Products directly on the Thank You Page */}
+          {renderSuggestedCategoryProducts(true)}
         </div>
       </div>
     );
@@ -1005,7 +1115,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                   window.history.pushState(
                     null,
                     '',
-                    `/products/${encodeURIComponent(product.id)}?brand=dokandari`
+                    `/?product=${encodeURIComponent(product.id)}`
                   );
                 } catch {
                   // ignore
@@ -1413,10 +1523,10 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   }
 
   // ============================================================================
-  // STEP 1: CLEAN PRODUCT DETAIL PAGE (মোবাইল ফ্রেন্ডলি ছোট ফন্ট, উপরে অর্ডার বাটন ও ৪ কলামের গ্যারান্টি ব্যাজ)
+  // STEP 1: CLEAN PRODUCT DETAIL PAGE (হেডারের ঠিক নিচে প্রোডাক্টের ছবি + নিচে একই ক্যাটাগরির সাজেস্টেড প্রোডাক্ট)
   // ============================================================================
   return (
-    <div className="bg-[#FAF9F6] min-h-screen py-4 sm:py-8 animate-in fade-in relative">
+    <div className="bg-[#FAF9F6] min-h-screen pt-1.5 pb-8 sm:py-6 animate-in fade-in relative">
       {/* Toast Feedback */}
       {refreshToast && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 px-5 py-2.5 bg-[#E11D48] text-white font-bold text-xs rounded-full shadow-2xl flex items-center gap-2 animate-bounce">
@@ -1425,22 +1535,14 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
         </div>
       )}
 
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 space-y-4 sm:space-y-6">
-        {/* Top Breadcrumb & Back Navigation with Share and Quick Refresh */}
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <button
-            onClick={onBack}
-            className="inline-flex items-center gap-1.5 text-[11px] sm:text-xs font-bold text-stone-700 hover:text-[#E11D48] transition-colors cursor-pointer bg-white px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl border border-stone-200 shadow-2xs"
-          >
-            <ArrowLeft className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-            <span>&larr; শপে ফিরে যান</span>
-          </button>
-
-          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+      <div className="max-w-7xl mx-auto px-2.5 sm:px-6 lg:px-8 space-y-4 sm:space-y-6">
+        {/* Admin-Only Discrete Quick Edit & 1-Click Lifetime Save Bar — Hidden from regular customers so Product Image appears directly below Header */}
+        {isAdmin && (
+          <div className="flex items-center justify-end flex-wrap gap-2">
             <button
               onClick={handleCopyLink}
-              className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-bold text-stone-700 bg-white hover:bg-rose-50 px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-xl border border-stone-200 shadow-2xs transition-colors cursor-pointer"
-              title="প্রোডাক্ট লিংক কপি করুন"
+              className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-bold text-stone-700 bg-white hover:bg-rose-50 px-2.5 py-1.5 rounded-xl border border-stone-200 shadow-2xs transition-colors cursor-pointer"
+              title="প্রোডাক্ট লিংক কপি করুন (অ্যাডমিন)"
             >
               {linkCopied ? (
                 <>
@@ -1454,47 +1556,51 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                 </>
               )}
             </button>
-
-            {/* Admin-Only Discrete Quick Edit & 1-Click Lifetime Save Buttons — Hidden from regular customers */}
-            {isAdmin && (
-              <>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    setRefreshToast('💾 প্রোডাক্টটি লাইফটাইম ডাটাবেজে সেভ হচ্ছে...');
-                    try {
-                      const saved = await saveProductPersisted(product);
-                      if (onProductUpdated) onProductUpdated(saved);
-                      setRefreshToast('✅ প্রোডাক্টটি ১-ক্লিকে লাইফটাইম ডাটাবেজে স্থায়ীভাবে সেভ হয়েছে!');
-                    } catch {
-                      setRefreshToast('সেভ সম্পন্ন হয়েছে!');
-                    }
-                    setTimeout(() => setRefreshToast(''), 4000);
-                  }}
-                  className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-extrabold bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl shadow-xs transition-colors cursor-pointer"
-                  title="১-ক্লিকে লাইফটাইম ডাটাবেজে সেভ করুন"
-                >
-                  <Database className="w-3.5 h-3.5 text-white" />
-                  <span>💾 ১-ক্লিকে লাইফটাইম সেভ</span>
-                </button>
-                <button
-                  onClick={() => onOpenEdit(product)}
-                  className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-bold bg-[#E11D48] hover:bg-[#BE123C] text-white px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl shadow-xs transition-colors cursor-pointer"
-                  title="প্রোডাক্ট তথ্য ও ছবি এডিট করুন"
-                >
-                  <Edit3 className="w-3.5 h-3.5 text-white" />
-                  <span>এডিট করুন</span>
-                </button>
-              </>
-            )}
+            <button
+              type="button"
+              onClick={async () => {
+                setRefreshToast('💾 প্রোডাক্টটি লাইফটাইম ডাটাবেজে সেভ হচ্ছে...');
+                try {
+                  const saved = await saveProductPersisted(product);
+                  if (onProductUpdated) onProductUpdated(saved);
+                  setRefreshToast('✅ প্রোডাক্টটি ১-ক্লিকে লাইফটাইম ডাটাবেজে স্থায়ীভাবে সেভ হয়েছে!');
+                } catch {
+                  setRefreshToast('সেভ সম্পন্ন হয়েছে!');
+                }
+                setTimeout(() => setRefreshToast(''), 4000);
+              }}
+              className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-extrabold bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-xl shadow-xs transition-colors cursor-pointer"
+              title="১-ক্লিকে লাইফটাইম ডাটাবেজে সেভ করুন"
+            >
+              <Database className="w-3.5 h-3.5 text-white" />
+              <span>💾 ১-ক্লিকে লাইফটাইম সেভ</span>
+            </button>
+            <button
+              onClick={() => onOpenEdit(product)}
+              className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-bold bg-[#E11D48] hover:bg-[#BE123C] text-white px-3 py-1.5 rounded-xl shadow-xs transition-colors cursor-pointer"
+              title="প্রোডাক্ট তথ্য ও ছবি এডিট করুন"
+            >
+              <Edit3 className="w-3.5 h-3.5 text-white" />
+              <span>এডিট করুন</span>
+            </button>
           </div>
-        </div>
+        )}
 
-        {/* Main Product Details Split Layout */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-8 items-start">
+        {/* Main Product Details Split Layout — Product Image sits directly below Header */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-8 items-start">
           {/* Left Column: Image Gallery & Responsive Non-Blocking YouTube IFrame Embed Player (5 cols) */}
           <div className="lg:col-span-5 space-y-3 sm:space-y-4">
             <div className="relative aspect-square w-full rounded-2xl overflow-hidden bg-white border border-stone-200 shadow-xs">
+              {/* Compact side back button overlaid on the top-left of the image so the product photo stays right under the Header */}
+              <button
+                type="button"
+                onClick={onBack}
+                className="absolute top-2.5 left-2.5 z-20 inline-flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-white/90 hover:bg-white text-stone-800 hover:text-[#E11D48] border border-stone-200/90 shadow-sm backdrop-blur-xs transition-all cursor-pointer"
+                title="পেছনে ফিরে যান"
+                aria-label="পেছনে ফিরে যান"
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </button>
               {selectedVideoInHero !== null && cleanVideos[selectedVideoInHero] ? (
                 (() => {
                   const heroEmbed = parseEmbedVideoUrl(cleanVideos[selectedVideoInHero]);
@@ -1793,7 +1899,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
 
               {/* Compact Variants & 3 High-Conversion Combo Pack Offers */}
               <div className="space-y-3.5">
-                {product.variants.colors && product.variants.colors.length > 0 && (
+                {product.variants?.colors && product.variants.colors.length > 0 && (
                   <div>
                     <span className="block text-[11px] sm:text-xs font-bold text-stone-900 mb-1.5">
                       {isOrganic ? 'ধরন / প্যাক নির্বাচন:' : 'কালার নির্বাচন:'}
@@ -1819,7 +1925,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                   </div>
                 )}
 
-                {product.variants.sizes && product.variants.sizes.length > 0 && (
+                {product.variants?.sizes && product.variants.sizes.length > 0 && (
                   <div>
                     <span className="block text-[11px] sm:text-xs font-bold text-stone-900 mb-1.5">
                       {isOrganic ? 'ওজন / পরিমাণ নির্বাচন:' : 'সাইজ নির্বাচন:'}
@@ -2103,6 +2209,167 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               </div>
             </div>
 
+            {/* DIRECT 1-CLICK CASH ON DELIVERY ORDER FORM ON PRODUCT PAGE (অ্যাড ক্যাম্পেইন থেকে আসা কাস্টমারদের ১-ক্লিকে সরাসরি অর্ডার ফর্ম) */}
+            <div
+              id="direct-pdp-order-form"
+              className={`bg-white rounded-2xl border-2 p-4 sm:p-6 shadow-md space-y-3.5 ${
+                isOrganic ? 'border-emerald-300' : 'border-rose-300'
+              }`}
+            >
+              <div
+                className={`p-3 rounded-xl border flex items-center justify-between gap-2 flex-wrap ${
+                  isOrganic
+                    ? 'bg-[#ECFDF5] border-emerald-200'
+                    : 'bg-[#FFF0F3] border-rose-200'
+                }`}
+              >
+                <h3
+                  className={`text-sm sm:text-base font-extrabold flex items-center gap-2 ${
+                    isOrganic ? 'text-emerald-950' : 'text-rose-950'
+                  }`}
+                >
+                  <ShoppingBag
+                    className={`w-4 h-4 shrink-0 ${
+                      isOrganic ? 'text-[#16A34A]' : 'text-[#E11D48]'
+                    }`}
+                  />
+                  <span>অর্ডার করতে নিচের ফর্মটি পূরণ করুন (ক্যাশ অন ডেলিভারি)</span>
+                </h3>
+                <span className="text-[11px] font-bold text-emerald-700 bg-white px-2.5 py-1 rounded-full border border-emerald-200">
+                  ✓ ১ টাকাও অগ্রিম লাগবে না
+                </span>
+              </div>
+
+              {orderError && (
+                <div className="p-2.5 bg-rose-100 border border-rose-300 text-xs font-bold text-rose-900 rounded-xl">
+                  ⚠️ {orderError}
+                </div>
+              )}
+
+              <form onSubmit={handleDirectOrder} className="space-y-3 text-xs sm:text-sm">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-stone-800 font-extrabold mb-1 flex items-center gap-1.5">
+                      <User className="w-3.5 h-3.5 text-[#E11D48]" />
+                      <span>আপনার নাম *</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={customerName}
+                      onChange={(e) => setCustomerName(e.target.value)}
+                      placeholder="আপনার সম্পূর্ণ নাম লিখুন"
+                      className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:border-[#E11D48] focus:bg-white font-medium"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-stone-800 font-extrabold mb-1 flex items-center gap-1.5">
+                      <Phone className="w-3.5 h-3.5 text-[#E11D48]" />
+                      <span>মোবাইল নম্বর (১১ ডিজিট) *</span>
+                    </label>
+                    <input
+                      type="tel"
+                      required
+                      value={customerPhone}
+                      onChange={(e) => setCustomerPhone(e.target.value)}
+                      placeholder="01XXXXXXXXX"
+                      className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:border-[#E11D48] focus:bg-white font-mono font-bold"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-stone-800 font-extrabold mb-1 flex items-center gap-1.5">
+                    <MapPin className="w-3.5 h-3.5 text-[#E11D48]" />
+                    <span>সম্পূর্ণ ডেলিভারি ঠিকানা *</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={customerAddress}
+                    onChange={(e) => setCustomerAddress(e.target.value)}
+                    placeholder="বাসা/রোড, বাজার/এলাকা, থানা ও জেলা লিখুন..."
+                    className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:border-[#E11D48] focus:bg-white"
+                  />
+                </div>
+
+                {/* Delivery Area Selector */}
+                <div className="grid grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setDeliveryArea('dhaka')}
+                    className={`p-2.5 rounded-xl border-2 text-left transition-all cursor-pointer flex items-center justify-between ${
+                      deliveryArea === 'dhaka'
+                        ? 'border-[#E11D48] bg-[#FFF0F3] text-[#E11D48] font-extrabold'
+                        : 'border-stone-200 bg-stone-50 text-stone-700 font-semibold hover:border-rose-200'
+                    }`}
+                  >
+                    <span className="text-xs font-extrabold">
+                      {deliveryArea === 'dhaka' ? '✓ ' : ''}ঢাকার ভেতরে
+                    </span>
+                    <span className="text-xs font-mono font-black bg-white px-2 py-0.5 rounded border border-rose-200 text-[#E11D48]">
+                      ৳৭০
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setDeliveryArea('outside_dhaka')}
+                    className={`p-2.5 rounded-xl border-2 text-left transition-all cursor-pointer flex items-center justify-between ${
+                      deliveryArea === 'outside_dhaka'
+                        ? 'border-[#E11D48] bg-[#FFF0F3] text-[#E11D48] font-extrabold'
+                        : 'border-stone-200 bg-stone-50 text-stone-700 font-semibold hover:border-rose-200'
+                    }`}
+                  >
+                    <span className="text-xs font-extrabold">
+                      {deliveryArea === 'outside_dhaka' ? '✓ ' : ''}ঢাকার বাইরে
+                    </span>
+                    <span className="text-xs font-mono font-black bg-white px-2 py-0.5 rounded border border-rose-200 text-[#E11D48]">
+                      ৳১২০
+                    </span>
+                  </button>
+                </div>
+
+                {/* Compact Total Summary */}
+                <div
+                  className={`px-3.5 py-2.5 rounded-xl flex items-center justify-between border ${
+                    isOrganic
+                      ? 'bg-[#ECFDF5] border-emerald-200'
+                      : 'bg-[#FFF0F3]/80 border-rose-200'
+                  }`}
+                >
+                  <span className="text-xs font-bold text-stone-800">
+                    মোট বিল ({quantity}টি পণ্য + ডেলিভারি ৳{finalShipping}):
+                  </span>
+                  <span
+                    className={`text-base sm:text-lg font-mono font-black ${
+                      isOrganic ? 'text-[#15803D]' : 'text-[#E11D48]'
+                    }`}
+                  >
+                    ৳{totalPrice.toLocaleString()}
+                  </span>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isOrdering}
+                  className={`w-full py-3.5 px-5 active:scale-[0.99] disabled:bg-stone-400 text-white rounded-xl text-sm sm:text-base font-extrabold shadow-md transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                    isOrganic
+                      ? 'bg-[#16A34A] hover:bg-[#15803D] ring-2 ring-emerald-300/70'
+                      : 'bg-gradient-to-r from-[#E11D48] via-[#F43F5E] to-[#BE123C] hover:from-[#BE123C] hover:to-[#9F1239] ring-2 ring-rose-300/70'
+                  }`}
+                >
+                  <ShoppingBag className="w-5 h-5" />
+                  <span>
+                    {isOrdering
+                      ? 'অর্ডার প্রসেস হচ্ছে...'
+                      : `অর্ডার কনফার্ম করুন — ৳${totalPrice.toLocaleString()}`}
+                  </span>
+                </button>
+              </form>
+            </div>
+
             {/* Dedicated Reusable 'Before & After' Product Comparison Slider */}
             <BeforeAfterSlider
               product={product}
@@ -2176,94 +2443,9 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
         </div>
 
         {/* ============================================================================
-            SUGGESTED & RELATED PRODUCTS SECTION (সাজেস্টেড প্রোডাক্ট — রিভিউয়ের পরিবর্তে একই ক্যাটাগরির পণ্য)
+            SUGGESTED & RELATED PRODUCTS SECTION (সাজেস্টেড প্রোডাক্ট — একই ক্যাটাগরির পণ্য)
             ============================================================================ */}
-        {(() => {
-          const sameCategory = allProducts.filter(
-            (p) => p.id !== product.id && p.category === product.category
-          );
-          const otherPopular = allProducts.filter(
-            (p) => p.id !== product.id && p.category !== product.category
-          );
-          const suggestedList = [...sameCategory, ...otherPopular].slice(0, 8);
-
-          if (suggestedList.length === 0) return null;
-
-          return (
-            <section className="pt-4 sm:pt-6 space-y-4">
-              <div
-                className={`bg-white border rounded-2xl p-3.5 sm:p-5 flex items-center justify-between shadow-2xs flex-wrap gap-2 ${
-                  isOrganic ? 'border-emerald-200' : 'border-rose-200/80'
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <span
-                    className={`w-8 h-8 rounded-xl text-white flex items-center justify-center text-sm font-bold shrink-0 shadow-2xs ${
-                      isOrganic ? 'bg-[#16A34A]' : 'bg-[#E11D48]'
-                    }`}
-                  >
-                    {isOrganic ? '🌿' : '✨'}
-                  </span>
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h2 className="text-sm sm:text-lg font-extrabold text-stone-900">
-                        সাজেস্টেড ও সম্পর্কিত প্রোডাক্ট ({categoryNameBn})
-                      </h2>
-                      <span
-                        className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${
-                          isOrganic
-                            ? 'text-[#15803D] bg-[#ECFDF5] border-emerald-200'
-                            : 'text-[#E11D48] bg-rose-50 border-rose-200'
-                        }`}
-                      >
-                        {suggestedList.length} টি বাছাইকৃত পণ্য
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-stone-500 mt-0.5">
-                      আপনার পছন্দের এই ক্যাটাগরির আরও জনপ্রিয় ও ১০০% অরিজিনাল কালেকশন দেখুন
-                    </p>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={onBack}
-                  className={`px-3.5 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer shrink-0 ${
-                    isOrganic
-                      ? 'bg-[#ECFDF5] hover:bg-[#16A34A] text-[#15803D] hover:text-white border-emerald-200'
-                      : 'bg-[#FFF1F2] hover:bg-[#E11D48] text-[#E11D48] hover:text-white border-rose-200'
-                  }`}
-                >
-                  সকল প্রোডাক্ট দেখুন &rarr;
-                </button>
-              </div>
-
-              <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-4">
-                {suggestedList.map((sugProd) => (
-                  <ProductCard
-                    key={sugProd.id}
-                    product={sugProd}
-                    greenTheme={sugProd.category === 'organic_food' || isOrganic}
-                    onOpenDetail={(p) => {
-                      if (onSelectProduct) {
-                        onSelectProduct(p);
-                      }
-                      window.scrollTo({ top: 0, behavior: 'smooth' });
-                    }}
-                    onInstantOrder={(p) => {
-                      if (onInstantOrderProduct) {
-                        onInstantOrderProduct(p);
-                      } else if (onSelectProduct) {
-                        onSelectProduct(p);
-                      }
-                    }}
-                    onEditProduct={isAdmin ? (p) => onOpenEdit(p) : undefined}
-                  />
-                ))}
-              </div>
-            </section>
-          );
-        })()}
+        {renderSuggestedCategoryProducts(false)}
       </div>
     </div>
   );

@@ -3,6 +3,30 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      (function() {
+        try {
+          var p = window.location.pathname || '/';
+          var s = new URLSearchParams(window.location.search || '');
+          var prodMatch = p.match(/^\/(?:products?|p|item)\/([^/]+)(?:\/(checkout))?/i);
+          var catMatch = p.match(/^\/(?:catalog|category|categories|cat|collections?)\/([^/]+)/i);
+          var tyMatch = p.match(/^\/thank-you\/([^/]+)/i);
+          if (prodMatch && prodMatch[1]) {
+            s.set('product', decodeURIComponent(prodMatch[1]).trim());
+            if (prodMatch[2] && prodMatch[2].toLowerCase() === 'checkout') {
+              s.set('step', 'checkout');
+            }
+            window.history.replaceState(null, '', '/?' + s.toString());
+          } else if (catMatch && catMatch[1]) {
+            s.set('catalog', decodeURIComponent(catMatch[1]).trim());
+            window.history.replaceState(null, '', '/?' + s.toString());
+          } else if (tyMatch && tyMatch[1]) {
+            s.set('thank_you', decodeURIComponent(tyMatch[1]).trim());
+            window.history.replaceState(null, '', '/?' + s.toString());
+          }
+        } catch (e) {}
+      })();
+    </script>
     <title>Dokandari — Modest Fashion, Luxury Abayas &amp; Skincare</title>
     <meta name="description" content="Dokandari online shopping store featuring premium home decor, beauty &amp; personal care, smart gadgets, modest fashion, Dubai cherry abayas, and organic skincare in Bangladesh with nationwide Cash on Delivery." />
     <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
@@ -47,34 +71,166 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <!-- Meta Pixel Code Start -->
+    <!-- Meta & TikTok Pixel Advanced Matching + Sandbox Domain Guard Start -->
     <script>
-      !function(f,b,e,v,n,t,s)
-      {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
-      n.callMethod.apply(n,arguments):n.queue.push(arguments)};
-      if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
-      n.queue=[];n.disablePushState=!0;t=b.createElement(e);t.async=!0;
-      t.id='meta-pixel-base-script';t.src=v;s=b.getElementsByTagName(e)[0];
-      s.parentNode.insertBefore(t,s)}(window, document,'script',
-      'https://connect.facebook.net/en_US/fbevents.js');
-      fbq('set', 'autoConfig', true, '1994859257776698');
-      fbq('init', '1994859257776698');
-      fbq('track', 'PageView');
-      window.__dokandari_meta_script_loaded = true;
-      window.__dokandari_meta_initialized_ids = new Set(['1994859257776698']);
+      (function(w, d) {
+        function sha256Ascii(ascii) {
+          function rightRotate(v, amount) { return (v >>> amount) | (v << (32 - amount)); }
+          var mathPow = Math.pow, maxWord = mathPow(2, 32), lengthProperty = 'length', i, j, result = '';
+          var words = [], asciiBitLength = ascii[lengthProperty] * 8;
+          var hash = sha256Ascii.h = sha256Ascii.h || [];
+          var k = sha256Ascii.k = sha256Ascii.k || [];
+          var primeCounter = k[lengthProperty];
+          var isComposite = {};
+          for (var candidate = 2; primeCounter < 64; candidate++) {
+            if (!isComposite[candidate]) {
+              for (i = 0; i < 313; i += candidate) isComposite[i] = candidate;
+              hash[primeCounter] = (mathPow(candidate, 0.5) * maxWord) | 0;
+              k[primeCounter++] = (mathPow(candidate, 1 / 3) * maxWord) | 0;
+            }
+          }
+          ascii += '\x80';
+          while ((ascii[lengthProperty] % 64) - 56) ascii += '\x00';
+          for (i = 0; i < ascii[lengthProperty]; i++) {
+            j = ascii.charCodeAt(i);
+            if (j >> 8) return '';
+            words[i >> 2] |= j << ((3 - (i % 4)) * 8);
+          }
+          words[words[lengthProperty]] = (asciiBitLength / maxWord) | 0;
+          words[words[lengthProperty]] = asciiBitLength;
+          for (j = 0; j < words[lengthProperty]; ) {
+            var wSlice = words.slice(j, (j += 16)), oldHash = hash;
+            hash = hash.slice(0, 8);
+            for (i = 0; i < 64; i++) {
+              var w15 = wSlice[i - 15], w2 = wSlice[i - 2];
+              var a = hash[0], e = hash[4];
+              var temp1 =
+                hash[7] +
+                (rightRotate(e, 6) ^ rightRotate(e, 11) ^ rightRotate(e, 25)) +
+                ((e & hash[5]) ^ (~e & hash[6])) +
+                k[i] +
+                (wSlice[i] =
+                  i < 16
+                    ? wSlice[i]
+                    : (wSlice[i - 16] +
+                        (rightRotate(w15, 7) ^ rightRotate(w15, 18) ^ (w15 >>> 3)) +
+                        wSlice[i - 7] +
+                        (rightRotate(w2, 17) ^ rightRotate(w2, 19) ^ (w2 >>> 10))) |
+                      0);
+              var temp2 =
+                (rightRotate(a, 2) ^ rightRotate(a, 13) ^ rightRotate(a, 22)) +
+                ((a & hash[1]) ^ (a & hash[2]) ^ (hash[1] & hash[2]));
+              hash = [(temp1 + temp2) | 0].concat(hash);
+              hash[4] = (hash[4] + temp1) | 0;
+            }
+            for (i = 0; i < 8; i++) hash[i] = (hash[i] + oldHash[i]) | 0;
+          }
+          for (i = 0; i < 8; i++) {
+            for (j = 3; j + 1; j--) {
+              var b = (hash[i] >> (j * 8)) & 255;
+              result += (b < 16 ? 0 : '') + b.toString(16);
+            }
+          }
+          return result;
+        }
+        w.__dokandari_sha256 = sha256Ascii;
+
+        var host = (w.location && w.location.hostname ? w.location.hostname : '').toLowerCase();
+        var isSandboxHost =
+          host.indexOf('ais-dev-') !== -1 ||
+          host.indexOf('ais-pre-') !== -1 ||
+          host.indexOf('.run.app') !== -1 ||
+          host === 'localhost' ||
+          host === '127.0.0.1';
+        w.__dokandari_is_sandbox_host = isSandboxHost;
+
+        try {
+          var qs = new URLSearchParams(w.location.search || '');
+          var ttclid = qs.get('ttclid');
+          var fbclid = qs.get('fbclid');
+          if (ttclid) {
+            localStorage.setItem('dokandari_ttclid', ttclid);
+            d.cookie = 'ttclid=' + encodeURIComponent(ttclid) + '; path=/; max-age=2592000; SameSite=Lax';
+          }
+          if (fbclid) {
+            var fbcVal = 'fb.1.' + Date.now() + '.' + fbclid;
+            localStorage.setItem('dokandari_fbc', fbcVal);
+            d.cookie = '_fbc=' + encodeURIComponent(fbcVal) + '; path=/; max-age=7776000; SameSite=Lax';
+          }
+        } catch (e) {}
+
+        var savedIdentity = {};
+        try {
+          var rawId = localStorage.getItem('dokandari_pixel_user_identity');
+          if (rawId) savedIdentity = JSON.parse(rawId) || {};
+        } catch (e) {}
+
+        var extIdRaw = savedIdentity.externalId || '';
+        if (!extIdRaw) {
+          extIdRaw = 'dkd_usr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
+          savedIdentity.externalId = extIdRaw;
+        }
+        var phoneRaw = savedIdentity.phone || '+8801747177001';
+        var emailRaw = (savedIdentity.email || (extIdRaw + '@dokandari.com')).toLowerCase().trim();
+        try {
+          localStorage.setItem('dokandari_pixel_user_identity', JSON.stringify({
+            externalId: extIdRaw,
+            phone: phoneRaw,
+            email: emailRaw
+          }));
+        } catch (e) {}
+
+        var hashedEmail = sha256Ascii(emailRaw);
+        var hashedPhone = sha256Ascii(phoneRaw.replace(/[^0-9+]/g, ''));
+        var hashedPhoneDigits = sha256Ascii(phoneRaw.replace(/\D/g, ''));
+        var hashedExtId = sha256Ascii(extIdRaw);
+        var hashedCountry = sha256Ascii('bd');
+
+        w.__dokandari_initial_em = hashedEmail;
+        w.__dokandari_initial_ph = hashedPhone;
+        w.__dokandari_initial_ext = hashedExtId;
+
+        if (!isSandboxHost) {
+          // Meta Pixel Code (Only fires browser beacons on real domain dokandari.com / dukandari.com)
+          !function(f,b,e,v,n,t,s)
+          {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+          n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+          if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+          n.queue=[];n.disablePushState=!0;t=b.createElement(e);t.async=!0;
+          t.id='meta-pixel-base-script';t.src=v;s=b.getElementsByTagName(e)[0];
+          s.parentNode.insertBefore(t,s)}(w, d,'script',
+          'https://connect.facebook.net/en_US/fbevents.js');
+          w.fbq('set', 'autoConfig', true, '1994859257776698');
+          w.fbq('init', '1994859257776698', {
+            em: hashedEmail,
+            ph: hashedPhoneDigits,
+            external_id: hashedExtId,
+            country: hashedCountry
+          });
+          w.fbq('track', 'PageView');
+          w.__dokandari_meta_script_loaded = true;
+          w.__dokandari_meta_initialized_ids = new Set(['1994859257776698']);
+
+          // TikTok Pixel Code (Calls ttq.identify BEFORE ttq.page so 100% of events have email, phone_number, external_id)
+          !function (w, d, t) {
+            w.TiktokAnalyticsObject=t;var ttq=w[t]=w[t]||[];ttq.methods=["page","track","identify","instances","debug","on","off","once","ready","alias","group","enableCookie","disableCookie","holdConsent","revokeConsent","grantConsent"],ttq.setAndDefer=function(t,e){t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}};for(var i=0;i<ttq.methods.length;i++)ttq.setAndDefer(ttq,ttq.methods[i]);ttq.instance=function(t){for(var e=ttq._i[t]||[],n=0;n<ttq.methods.length;n++)ttq.setAndDefer(e,ttq.methods[n]);return e},ttq.load=function(e,n){var r="https://analytics.tiktok.com/i18n/pixel/events.js",o=n&&n.partner;ttq._i=ttq._i||{},ttq._i[e]=[],ttq._i[e]._u=r,ttq._t=ttq._t||{},ttq._t[e]=+new Date,ttq._o=ttq._o||{},ttq._o[e]=n||{};n=d.createElement("script");n.type="text/javascript",n.async=!0,n.src=r+"?sdkid="+e+"&lib="+t;e=d.getElementsByTagName("script")[0];e.parentNode.insertBefore(n,e)};
+            ttq.load('DBJGOSRC77U3VQV6KLB0');
+            ttq.identify({
+              email: hashedEmail,
+              phone_number: hashedPhone,
+              external_id: hashedExtId
+            });
+            ttq.page();
+            w.__dokandari_tiktok_script_loaded = true;
+            w.__dokandari_tiktok_initialized_ids = new Set(['DBJGOSRC77U3VQV6KLB0']);
+          }(w, d, 'ttq');
+        } else {
+          w.__dokandari_meta_initialized_ids = new Set(['1994859257776698']);
+          w.__dokandari_tiktok_initialized_ids = new Set(['DBJGOSRC77U3VQV6KLB0']);
+        }
+      })(window, document);
     </script>
-    <!-- Meta Pixel Code End -->
-    <!-- TikTok Pixel Code Start -->
-    <script>
-      !function (w, d, t) {
-        w.TiktokAnalyticsObject=t;var ttq=w[t]=w[t]||[];ttq.methods=["page","track","identify","instances","debug","on","off","once","ready","alias","group","enableCookie","disableCookie","holdConsent","revokeConsent","grantConsent"],ttq.setAndDefer=function(t,e){t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}};for(var i=0;i<ttq.methods.length;i++)ttq.setAndDefer(ttq,ttq.methods[i]);ttq.instance=function(t){for(var e=ttq._i[t]||[],n=0;n<ttq.methods.length;n++)ttq.setAndDefer(e,ttq.methods[n]);return e},ttq.load=function(e,n){var r="https://analytics.tiktok.com/i18n/pixel/events.js",o=n&&n.partner;ttq._i=ttq._i||{},ttq._i[e]=[],ttq._i[e]._u=r,ttq._t=ttq._t||{},ttq._t[e]=+new Date,ttq._o=ttq._o||{},ttq._o[e]=n||{};n=document.createElement("script");n.type="text/javascript",n.async=!0,n.src=r+"?sdkid="+e+"&lib="+t;e=document.getElementsByTagName("script")[0];e.parentNode.insertBefore(n,e)};
-        ttq.load('DBJGOSRC77U3VQV6KLB0');
-        ttq.page();
-        w.__dokandari_tiktok_script_loaded = true;
-        w.__dokandari_tiktok_initialized_ids = new Set(['DBJGOSRC77U3VQV6KLB0']);
-      }(window, document, 'ttq');
-    </script>
-    <!-- TikTok Pixel Code End -->
+    <!-- Meta & TikTok Pixel Advanced Matching + Sandbox Domain Guard End -->
     <!-- DOKANDARI_SSR_META_INJECTION -->
   </head>
   <body class="bg-[#FAF9F6] text-stone-900 antialiased selection:bg-rose-100 selection:text-rose-900">

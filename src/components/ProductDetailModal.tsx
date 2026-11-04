@@ -26,8 +26,8 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
 
   const { addToCart } = useCart();
   const [selectedImage, setSelectedImage] = useState(0);
-  const [selectedColor, setSelectedColor] = useState(product.variants.colors?.[0] || '');
-  const [selectedSize, setSelectedSize] = useState(product.variants.sizes?.[0] || '');
+  const [selectedColor, setSelectedColor] = useState(product.variants?.colors?.[0] || '');
+  const [selectedSize, setSelectedSize] = useState(product.variants?.sizes?.[0] || '');
   const [quantity, setQuantity] = useState(1);
   const [activeTab, setActiveTab] = useState<'details' | 'care' | 'reviews'>('details');
   const [isAdded, setIsAdded] = useState(false);
@@ -174,23 +174,6 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                   <span className="text-emerald-700 text-[11px] font-semibold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
                     ✔️ dokandari.com ভেরিফাইড
                   </span>
-                  <button
-                    onClick={handleCopyLink}
-                    className="inline-flex items-center gap-1 text-[11px] font-bold text-stone-600 hover:text-[#E11D48] bg-stone-100 hover:bg-rose-50 px-2 py-0.5 rounded-md transition-colors cursor-pointer"
-                    title="প্রোডাক্ট লিংক কপি করুন"
-                  >
-                    {linkCopied ? (
-                      <>
-                        <CheckCheck className="w-3 h-3 text-emerald-600" />
-                        <span className="text-emerald-700">কপি হয়েছে!</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3 h-3" />
-                        <span>লিংক কপি</span>
-                      </>
-                    )}
-                  </button>
                 </div>
               </div>
 
@@ -241,7 +224,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
               )}
 
               {/* Color Selector */}
-              {product.variants.colors && product.variants.colors.length > 0 && (
+              {product.variants?.colors && product.variants.colors.length > 0 && (
                 <div className="mt-5 space-y-2">
                   <div className="flex items-center justify-between text-xs">
                     <span className="font-medium text-stone-900">Color:</span>
@@ -266,7 +249,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
               )}
 
               {/* Size Selector */}
-              {product.variants.sizes && product.variants.sizes.length > 0 && (
+              {product.variants?.sizes && product.variants.sizes.length > 0 && (
                 <div className="mt-4 space-y-2">
                   <div className="flex items-center justify-between text-xs">
                     <span className="font-medium text-stone-900">সাইজ / মাপ:</span>

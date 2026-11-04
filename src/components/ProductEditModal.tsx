@@ -9,6 +9,7 @@ import { doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Product, OFFICIAL_CATEGORIES } from '../types';
 import { parseEmbedVideoUrl } from '../lib/gemini';
+import { saveProductPersisted, deleteProductPersisted } from '../lib/storeSync';
 
 interface ProductEditModalProps {
   product: Product | null;
@@ -33,8 +34,8 @@ export const ProductEditModal: React.FC<ProductEditModalProps> = ({
   const [inStock, setInStock] = useState(product.inStock);
   const [imageUrl, setImageUrl] = useState(product.images[0] || '');
   const [videoUrl, setVideoUrl] = useState(product.videos?.[0] || '');
-  const [colorsStr, setColorsStr] = useState(product.variants.colors?.join(', ') || '');
-  const [sizesStr, setSizesStr] = useState(product.variants.sizes?.join(', ') || '');
+  const [colorsStr, setColorsStr] = useState(product.variants?.colors?.join(', ') || '');
+  const [sizesStr, setSizesStr] = useState(product.variants?.sizes?.join(', ') || '');
   const [description, setDescription] = useState(product.description);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState('');
@@ -65,36 +66,35 @@ export const ProductEditModal: React.FC<ProductEditModalProps> = ({
       images: imageUrl ? [imageUrl, ...product.images.slice(1)] : product.images,
       videos: videoUrl.trim() ? [videoUrl.trim(), ...(product.videos?.slice(1) || [])] : [],
       variants: {
-        colors: colors.length > 0 ? colors : product.variants.colors,
-        sizes: sizes.length > 0 ? sizes : product.variants.sizes,
+        colors: colors.length > 0 ? colors : product.variants?.colors || [],
+        sizes: sizes.length > 0 ? sizes : product.variants?.sizes || [],
       },
+      updatedAt: Date.now(),
     };
 
     try {
-      // Direct Firestore update
-      await setDoc(doc(db, 'products', product.id), updatedProduct, { merge: true });
-      onProductUpdated(updatedProduct);
+      const persisted = await saveProductPersisted(updatedProduct);
+      onProductUpdated(persisted);
       setFeedback('প্রোডাক্ট সফলভাবে ডাটাবেজে আপডেট হয়েছে!');
       setTimeout(() => {
         onClose();
-      }, 1000);
+      }, 800);
     } catch (err) {
       console.warn('Firestore write warning, updated locally', err);
       onProductUpdated(updatedProduct);
       setFeedback('প্রোডাক্ট আপডেট সম্পন্ন হয়েছে!');
       setTimeout(() => {
         onClose();
-      }, 1000);
+      }, 800);
     } finally {
       setSaving(false);
     }
   };
 
   const handleDelete = async () => {
-    if (!window.confirm(`আপনি কি নিশ্চিত যে "${product.name}" মুছে ফেলতে চান?`)) return;
     try {
-      await deleteDoc(doc(db, 'products', product.id));
       if (onProductDeleted) onProductDeleted(product.id);
+      await deleteProductPersisted(product.id);
       onClose();
     } catch (err) {
       if (onProductDeleted) onProductDeleted(product.id);

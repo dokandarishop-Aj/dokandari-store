@@ -30,7 +30,7 @@ export const OFFICIAL_CATEGORIES: MainCategory[] = [
     nameEn: 'Home Decor',
     order: 1,
     icon: '',
-    image: 'https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?auto=format&fit=crop&w=400&q=80',
+    image: 'https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?auto=format&fit=crop&w=1200&q=90',
     visible: true,
   },
   {
@@ -39,7 +39,7 @@ export const OFFICIAL_CATEGORIES: MainCategory[] = [
     nameEn: 'Gadgets & Electronics',
     order: 2,
     icon: '',
-    image: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=400&q=80',
+    image: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=1200&q=90',
     visible: true,
   },
   {
@@ -57,7 +57,7 @@ export const OFFICIAL_CATEGORIES: MainCategory[] = [
     nameEn: 'Beauty & Personal Care',
     order: 4,
     icon: '',
-    image: 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&w=400&q=80',
+    image: 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&w=1200&q=90',
     visible: true,
   },
   {
@@ -66,7 +66,7 @@ export const OFFICIAL_CATEGORIES: MainCategory[] = [
     nameEn: 'Home & Kitchen',
     order: 5,
     icon: '',
-    image: 'https://images.unsplash.com/photo-1556911220-e15b29be8c8f?auto=format&fit=crop&w=400&q=80',
+    image: 'https://images.unsplash.com/photo-1556911220-e15b29be8c8f?auto=format&fit=crop&w=1200&q=90',
     visible: true,
   },
   {
@@ -75,7 +75,7 @@ export const OFFICIAL_CATEGORIES: MainCategory[] = [
     nameEn: 'Mobile Accessories',
     order: 6,
     icon: '',
-    image: 'https://images.unsplash.com/photo-1584438784894-089d6a62b8fa?auto=format&fit=crop&w=400&q=80',
+    image: 'https://images.unsplash.com/photo-1584438784894-089d6a62b8fa?auto=format&fit=crop&w=1200&q=90',
     visible: true,
   },
   {
@@ -84,7 +84,7 @@ export const OFFICIAL_CATEGORIES: MainCategory[] = [
     nameEn: 'Lifestyle Products',
     order: 7,
     icon: '',
-    image: 'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?auto=format&fit=crop&w=400&q=80',
+    image: 'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?auto=format&fit=crop&w=1200&q=90',
     visible: true,
   },
   {
@@ -93,7 +93,7 @@ export const OFFICIAL_CATEGORIES: MainCategory[] = [
     nameEn: 'Travel & Outdoor',
     order: 8,
     icon: '',
-    image: 'https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=400&q=80',
+    image: 'https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=1200&q=90',
     visible: true,
   },
   {
@@ -102,7 +102,7 @@ export const OFFICIAL_CATEGORIES: MainCategory[] = [
     nameEn: 'Health & Fitness Accessories',
     order: 9,
     icon: '',
-    image: 'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?auto=format&fit=crop&w=400&q=80',
+    image: 'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?auto=format&fit=crop&w=1200&q=90',
     visible: true,
   },
   {
@@ -111,7 +111,7 @@ export const OFFICIAL_CATEGORIES: MainCategory[] = [
     nameEn: 'Kids & Baby Products',
     order: 10,
     icon: '',
-    image: 'https://images.unsplash.com/photo-1515488042361-ee00e0ddd4e4?auto=format&fit=crop&w=400&q=80',
+    image: 'https://images.unsplash.com/photo-1515488042361-ee00e0ddd4e4?auto=format&fit=crop&w=1200&q=90',
     visible: true,
   },
   {
@@ -120,7 +120,7 @@ export const OFFICIAL_CATEGORIES: MainCategory[] = [
     nameEn: 'Office & Everyday Essentials',
     order: 11,
     icon: '',
-    image: 'https://images.unsplash.com/photo-1497215728101-856f4ea42174?auto=format&fit=crop&w=400&q=80',
+    image: 'https://images.unsplash.com/photo-1497215728101-856f4ea42174?auto=format&fit=crop&w=1200&q=90',
     visible: true,
   },
 ];

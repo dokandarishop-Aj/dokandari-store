@@ -13,7 +13,7 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { INITIAL_PRODUCTS } from '../data/initialCatalog';
-import { Product, Order, CustomerUgcCard, PurchaseRecord, OFFICIAL_CATEGORIES } from '../types';
+import { Product, Order, CustomerUgcCard, PurchaseRecord, CourierReturn, OFFICIAL_CATEGORIES } from '../types';
 
 export const OFFICIAL_WHATSAPP = '01885533437';
 export const OFFICIAL_WHATSAPP_INT = '8801885533437';
@@ -27,6 +27,8 @@ const LS_ORDERS_BACKUP_KEY = 'dokandari_orders_backup_v1';
 const LS_DELETED_ORDER_IDS_KEY = 'dokandari_deleted_order_ids_v1';
 const LS_PURCHASES_BACKUP_KEY = 'dokandari_purchases_backup_v1';
 const LS_DELETED_PURCHASE_IDS_KEY = 'dokandari_deleted_purchase_ids_v1';
+const LS_COURIER_RETURNS_BACKUP_KEY = 'dokandari_courier_returns_backup_v1';
+const LS_DELETED_RETURN_IDS_KEY = 'dokandari_deleted_return_ids_v1';
 const LS_CUSTOMER_UGC_KEY = 'dokandari_customer_ugc_v1';
 
 export interface HeroSlideItem {
@@ -89,6 +91,7 @@ export interface StoreContent {
   };
   heroSlides: HeroSlideItem[];
   categoryHeroes?: Record<string, CategoryHeroConfig>;
+  categoryImages?: Record<string, string>;
 }
 
 export const DEFAULT_ORGANIC_FOOD_HERO_SLIDES: HeroSlideItem[] = [
@@ -239,93 +242,93 @@ export const DEFAULT_CATEGORY_HEROES: Record<string, CategoryHeroConfig> = {
 export const READYMADE_BRIGHT_HERO_SLIDES: HeroSlideItem[] = [
   {
     id: 'slide-1',
-    title: 'প্রিমিয়াম হোম ডেকোর ও খিলান আকৃতির আনব্রেকেবল মিরর',
+    title: 'প্রিমিয়াম হোম ডেকোর ও আনব্রেকেবল মিরর কালেকশন',
     subtitle: 'ভাঙার ভয় ছাড়া আপনার বেডরুম ও ড্রয়িং রুমের সৌন্দর্য নিমিষেই দ্বিগুণ করুন — ক্যাশ অন ডেলিভারি',
-    image: '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg',
-    tag: '✨ হোম ডেকোর বেস্টসেলার',
+    image: 'https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?auto=format&fit=crop&w=1920&q=85',
+    tag: '✨ হোম ডেকোর কালেকশন',
     ctaText: 'হোম ডেকোর দেখুন',
-    ctaLink: '/catalog/home_decor',
+    ctaLink: '/?catalog=home_decor',
   },
   {
     id: 'slide-2',
     title: 'ট্রেন্ডি ফ্যাশন মডেল ও প্রিমিয়াম ক্লোদিং কালেকশন',
     subtitle: 'আন্তর্জাতিক মানের ফেব্রিক, আধুনিক ডিজাইন ও আরামদায়ক ফ্যাশন আউটফিট এখন বিশেষ ছাড়ে',
-    image: 'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=1600&q=85',
-    tag: '👗 ফ্যাশন ও ক্লোদিং শোকেস',
+    image: 'https://images.unsplash.com/photo-1490481651871-ab68de25d43d?auto=format&fit=crop&w=1920&q=85',
+    tag: '👗 ফ্যাশন ও ক্লোদিং',
     ctaText: 'ফ্যাশন কালেকশন',
-    ctaLink: '#products-section',
+    ctaLink: '/?catalog=lifestyle',
   },
   {
     id: 'slide-3',
-    title: 'কেকিওয়্যার KW77 ম্যাক্স ৭+১ মাল্টি-ফাংশন স্মার্ট ওয়াচ সেট',
-    subtitle: '৭টি আকর্ষণীয় স্ট্র্যাপ ও ফুল টাচ ব্লুটুথ কলিং স্মার্টওয়াচ — প্রযুক্তির সেরা অভিজ্ঞতা আপনার হাতে',
-    image: '/uploads/product/1777788826-1776932024-smart-watch-1.webp',
-    tag: '⌚ স্মার্ট গ্যাজেটস হট ডিল',
-    ctaText: 'গ্যাজেটস অর্ডার করুন',
-    ctaLink: '/catalog/gadgets_electronics',
+    title: 'প্রিমিয়াম স্মার্টওয়াচ, টিডব্লিউএস বাডস ও টেক গ্যাজেটস',
+    subtitle: 'অরিজিনাল স্মার্টওয়াচ, পোর্টেবল টার্বো ফ্যান ও আধুনিক গ্যাজেটস — ডেলিভারি ম্যানের সামনে দেখে নিন',
+    image: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=1920&q=85',
+    tag: '⌚ স্মার্ট গ্যাজেটস',
+    ctaText: 'গ্যাজেটস দেখুন',
+    ctaLink: '/?catalog=gadgets_electronics',
   },
   {
     id: 'slide-4',
     title: 'সুন্দরবনের ১০০% খাঁটি চাকের মধু ও অর্গানিক সুপারফুড',
     subtitle: 'কেমিক্যালমুক্ত খাঁটি মধু, পাবনার দেশি গাওয়া ঘি ও সৌদি আজওয়া খেজুর সরাসরি প্রাকৃতিক উৎস থেকে',
-    image: '/uploads/product/organic-sundarban-honey.jpg',
+    image: 'https://images.unsplash.com/photo-1587049352847-4a222e784d38?auto=format&fit=crop&w=1920&q=85',
     tag: '🌿 ১০০% খাঁটি অর্গানিক ফুড',
     ctaText: 'অর্গানিক ফুড জোন',
-    ctaLink: '/catalog/organic_food',
+    ctaLink: '/?catalog=organic_food',
   },
   {
     id: 'slide-5',
-    title: 'হার্ট শেপ ও ৩ডি বাটারফ্লাই আনব্রেকেবল ফ্লেক্সিবল মিরর',
+    title: 'লাক্সারি লিভিং রুম ইন্টেরিয়র ও ওয়াল ডেকোর কালেকশন',
     subtitle: 'ড্রিলিং বা পেরেক ছাড়াই দেয়ালে লাগান — শিশুদের জন্য ১০০% নিরাপদ ও ক্রিস্টাল ক্লিয়ার রিফ্লেকশন',
-    image: '/uploads/product/1792322414-gemini_generated_image_b9teg6b9teg6b9te.jpg',
+    image: 'https://images.unsplash.com/photo-1616486338812-3dadae4b4ace?auto=format&fit=crop&w=1920&q=85',
     tag: '🪞 মডার্ন ওয়াল ডেকোর',
     ctaText: 'মিরর কালেকশন দেখুন',
-    ctaLink: '/catalog/home_decor',
+    ctaLink: '/?catalog=home_decor',
   },
   {
     id: 'slide-6',
-    title: 'এক্সক্লুসিভ ফেস্টিভ ফ্যাশন ও লাইফস্টাইল কালেকশন',
+    title: 'এক্সক্লুসিভ ফেস্টিভ ফ্যাশন ও মডার্ন লাইফস্টাইল কালেকশন',
     subtitle: 'প্রতিদিনের স্টাইল ও উৎসবের সাজে আপনাকে অনন্য করে তুলতে বাছাইকৃত প্রিমিয়াম কালেকশন',
-    image: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=1600&q=85',
+    image: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=1920&q=85',
     tag: '🌟 লাইফস্টাইল ও ফ্যাশন',
     ctaText: 'কালেকশন দেখুন',
-    ctaLink: '#products-section',
+    ctaLink: '/?catalog=lifestyle',
   },
   {
     id: 'slide-7',
-    title: 'লিভো হাই-স্পিড টার্বো ফ্যান ও রিচার্জেবল কুলিং গ্যাজেটস',
-    subtitle: 'তীব্র গরমে ও লোডশেডিংয়ে তাৎক্ষণিক ঠান্ডা বাতাস পেতে অরিজিনাল রিচার্জেবল টার্বো ফ্যান সিরিজ',
-    image: '/uploads/product/1777787708-livo-high-speed-turbo-fan-1.webp',
-    tag: '⚡ সামার কুলিং গ্যাজেট',
-    ctaText: 'টার্বো ফ্যান দেখুন',
-    ctaLink: '/catalog/gadgets_electronics',
+    title: 'অথেনটিক বিউটি, হেয়ার টনিক ও গ্লোয়িং স্কিনকেয়ার কালেকশন',
+    subtitle: 'চুল পড়া রোধ ও ত্বকের উজ্জ্বলতায় ১০০% অরিজিনাল ডার্মাটোলজিক্যালি টেস্টেড বিউটি প্রোডাক্টস',
+    image: 'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?auto=format&fit=crop&w=1920&q=85',
+    tag: '🌸 বিউটি ও স্কিনকেয়ার',
+    ctaText: 'বিউটি জোন দেখুন',
+    ctaLink: '/?catalog=beauty_personal_care',
   },
   {
     id: 'slide-8',
-    title: 'ডিয়ার হেয়ার টনিক, ভিটামিন সিরাম ও অথেনটিক স্কিনকেয়ার',
-    subtitle: 'চুল পড়া রোধ ও ত্বকের উজ্জ্বলতায় ১০০% অরিজিনাল ডার্মাটোলজিক্যালি টেস্টেড বিউটি প্রোডাক্টস',
-    image: '/uploads/product/1776151737-untitled-design-49.webp',
-    tag: '🌸 বিউটি ও পার্সোনাল কেয়ার',
-    ctaText: 'বিউটি জোন দেখুন',
-    ctaLink: '/catalog/beauty_personal_care',
+    title: 'স্মার্ট হোম ও মডার্ন কিচেন অ্যাপ্লায়েন্স কালেকশন',
+    subtitle: 'আপনার রান্নাঘর ও প্রতিদিনের গৃহস্থালি কাজকে সহজ, দ্রুত ও পরিপাটি করার আধুনিক কিচেন টুলস',
+    image: 'https://images.unsplash.com/photo-1556911220-bff31c812dba?auto=format&fit=crop&w=1920&q=85',
+    tag: '🍳 হোম ও কিচেন',
+    ctaText: 'কিচেন কালেকশন',
+    ctaLink: '/?catalog=home_kitchen',
   },
   {
     id: 'slide-9',
-    title: 'বিড়াল আকৃতির লাক্সারি এলইডি বুকশেল্ফ ও ডেকোরেটিভ শোকেস',
-    subtitle: 'বিল্ট-ইন ওয়ার্ম এলইডি লাইটিং ও প্রিমিয়াম মিরর ফিনিশিংয়ে আপনার লিভিং রুমকে দিন নান্দনিক রূপ',
-    image: '/uploads/product/1792322524-gemini_generated_image_6tydck6tydck6tyd.jpg',
-    tag: '🏡 লাক্সারি ইন্টেরিয়র',
-    ctaText: 'শোকেস অর্ডার করুন',
-    ctaLink: '/catalog/home_decor',
+    title: 'প্রিমিয়াম অডিও, ফাস্ট চার্জিং ও মোবাইল এক্সেসরিজ',
+    subtitle: 'ক্রিস্টাল ক্লিয়ার সাউন্ড, ব্লুটুথ ৫.৩ কানেক্টিভিটি এবং ডেলিভারি ম্যানের সামনে দেখে নেওয়ার সুবিধা',
+    image: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=1920&q=85',
+    tag: '🎧 মোবাইল এক্সেসরিজ',
+    ctaText: 'এক্সেসরিজ দেখুন',
+    ctaLink: '/?catalog=mobile_accessories',
   },
   {
     id: 'slide-10',
-    title: 'হোকো EQ34 প্লাস TWS ইয়ারবাডস ও স্মার্ট হোম অ্যাপ্লায়েন্স',
-    subtitle: 'ক্রিস্টাল ক্লিয়ার সাউন্ড, ব্লুটুথ ৫.৩ কানেক্টিভিটি এবং ডেলিভারি ম্যানের সামনে দেখে নেওয়ার সুবিধা',
-    image: '/uploads/product/1777098758-eq34-plus-02-500x500.webp',
-    tag: '🎧 অরিজিনাল অডিও ও টেক',
-    ctaText: 'অফারটি লুফে নিন',
-    ctaLink: '/catalog/gadgets_electronics',
+    title: 'ট্রাভেল ব্যাগ, আউটডোর গিয়ার ও ডেইলি এসেনশিয়ালস',
+    subtitle: 'ভ্রমণ ও প্রতিদিনের ব্যবহারের জন্য ওয়াটারপ্রুফ ট্রাভেল ব্যাগ, অর্গানাইজার ও লাইফস্টাইল কালেকশন',
+    image: 'https://images.unsplash.com/photo-1469334031218-e382a71b716b?auto=format&fit=crop&w=1920&q=85',
+    tag: '🎒 ট্রাভেল ও আউটডোর',
+    ctaText: 'অফারটি দেখুন',
+    ctaLink: '/?catalog=travel_outdoor',
   },
 ];
 
@@ -333,7 +336,7 @@ export const DEFAULT_STORE_CONTENT: StoreContent = {
   whatsappNumber: OFFICIAL_WHATSAPP,
   hotlineNumber: OFFICIAL_HOTLINE,
   officialEmail: 'dokandari.shop@gmail.com',
-  carouselInterval: 3000,
+  carouselInterval: 8000,
   bestSellingInterval: 5000,
   googleFlowProjectUrl: 'https://labs.google/fx/tools/flow',
   socialLinks: {
@@ -500,18 +503,53 @@ function normalizeOfficialAddresses(content: StoreContent): StoreContent {
   const isLegacyWaLink =
     !rawSocials.whatsapp || rawSocials.whatsapp.includes('01886161426');
 
-  // If heroSlides only has the old untouched 3 default slides, seamlessly expand to the 10 bright slides while keeping any custom edits
+  // Upgrade any old default square product cutout images in heroSlides to full-display cover banners while preserving custom admin uploads
+  const LEGACY_SQUARE_SLIDE_IMAGES = new Set([
+    '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg',
+    'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=1600&q=85',
+    '/uploads/product/1777788826-1776932024-smart-watch-1.webp',
+    '/uploads/product/organic-sundarban-honey.jpg',
+    '/uploads/product/1792322414-gemini_generated_image_b9teg6b9teg6b9te.jpg',
+    '/uploads/product/1777787708-livo-high-speed-turbo-fan-1.webp',
+    '/uploads/product/1776151737-untitled-design-49.webp',
+    '/uploads/product/1792322524-gemini_generated_image_6tydck6tydck6tyd.jpg',
+    '/uploads/product/1777098758-eq34-plus-02-500x500.webp',
+  ]);
+
   const rawSlides = Array.isArray(content.heroSlides) ? content.heroSlides : [];
-  let effectiveHeroSlides = rawSlides.length > 0 ? rawSlides : READYMADE_BRIGHT_HERO_SLIDES;
+  let effectiveHeroSlides =
+    rawSlides.length > 0
+      ? rawSlides.map((slide, idx) => {
+          const fallbackSlide =
+            READYMADE_BRIGHT_HERO_SLIDES[idx % READYMADE_BRIGHT_HERO_SLIDES.length];
+          const img = String(slide?.image || '').trim();
+          if (!img || LEGACY_SQUARE_SLIDE_IMAGES.has(img)) {
+            return {
+              ...fallbackSlide,
+              ...slide,
+              id: slide?.id || fallbackSlide.id,
+              image: fallbackSlide.image,
+            };
+          }
+          return {
+            ...fallbackSlide,
+            ...slide,
+            id: slide?.id || `slide-${idx + 1}`,
+          };
+        })
+      : READYMADE_BRIGHT_HERO_SLIDES;
+
   if (
     rawSlides.length === 3 &&
     rawSlides[0]?.id === 'slide-1' &&
     rawSlides[1]?.id === 'slide-2' &&
-    rawSlides[2]?.id === 'slide-3' &&
-    rawSlides[0]?.title === 'প্রিমিয়াম হোম ডেকোর ও আনব্রেকেবল মিরর কালেকশন'
+    rawSlides[2]?.id === 'slide-3'
   ) {
     effectiveHeroSlides = READYMADE_BRIGHT_HERO_SLIDES;
   }
+
+  const rawInterval = Number(content.carouselInterval || 8000);
+  const effectiveCarouselInterval = rawInterval < 5000 ? 8000 : rawInterval;
 
   const rawCatHeroes = content.categoryHeroes || {};
   const existingOrgHero = rawCatHeroes.organic_food || DEFAULT_CATEGORY_HEROES.organic_food;
@@ -526,6 +564,7 @@ function normalizeOfficialAddresses(content: StoreContent): StoreContent {
 
   return {
     ...content,
+    carouselInterval: effectiveCarouselInterval,
     whatsappNumber: effectiveWhatsapp,
     hotlineNumber: effectiveHotline,
     heroSlides: effectiveHeroSlides,
@@ -650,6 +689,10 @@ export function mergeStoreContent(
       ...DEFAULT_CATEGORY_HEROES,
       ...(base.categoryHeroes || {}),
       ...(incoming.categoryHeroes || {}),
+    },
+    categoryImages: {
+      ...(base.categoryImages || {}),
+      ...(incoming.categoryImages || {}),
     },
   };
   return normalizeOfficialAddresses(merged);
@@ -1481,7 +1524,13 @@ export function resolveSafeProductImageUrl(
     lower.includes('lazcdn.com') ||
     lower.includes('shajgoj.com')
   ) {
-    return `https://wsrv.nl/?url=${encodeURIComponent(url)}&w=800&output=webp`;
+    return `https://wsrv.nl/?url=${encodeURIComponent(url)}&w=1200&q=90&output=webp`;
+  }
+
+  if (lower.includes('images.unsplash.com') && (url.includes('w=400') || url.includes('w=600'))) {
+    return url
+      .replace(/w=(400|600)/g, 'w=1200')
+      .replace(/q=(75|80)/g, 'q=90');
   }
 
   if (!/^https?:\/\//i.test(url)) {
@@ -1539,7 +1588,7 @@ export function handleProductImageError(
       /^(https?:\/\/)?(www\.)?dokandari\.com\/wp-content\//i,
       'https://buy.dokandari.com/wp-content/'
     );
-    imgEl.src = `https://wsrv.nl/?url=${encodeURIComponent(rewritten)}&w=800&output=webp`;
+    imgEl.src = `https://wsrv.nl/?url=${encodeURIComponent(rewritten)}&w=1200&q=90&output=webp`;
     return;
   }
 
@@ -1723,6 +1772,8 @@ function hasAuthenticCustomImage(p?: Product): boolean {
  * if an ad campaign URL points to an older slug or duplicate ID, it resolves seamlessly to the live product.
  */
 export const LEGACY_PRODUCT_ID_ALIASES: Record<string, string> = {
+  'dkd-1793442168807-962': 'dkd-flexible-unbreakable-mirror-sheet',
+  'cac8gqemgy': 'dkd-flexible-unbreakable-mirror-sheet',
   'dkd-mirror-film-wall-sticker': 'dkd-flexible-unbreakable-mirror-sheet',
   'dkd-unbreakable-flexible-mirror': 'dkd-frameless-full-length-mirror',
   'dkd-herbal-whitening-soap': 'dkd-herbal-brightening-soap',
@@ -1887,15 +1938,45 @@ function extractDecodedAppParams(): string {
 
 /**
  * Programmatic SPA Navigation Helper:
- * Updates browser URL via pushState/replaceState AND dispatches a custom 'dokandari:urlchange' event
- * so `App.tsx` transitions immediately without relying on hash changes or full page reloads.
+ * Uses Root Query URLs (`/?product=:id` and `/?catalog=:catId`) so browser refreshes or external shares
+ * ALWAYS hit the root `/` (`index.html`) and NEVER trigger HTTP 404 on any static/CDN host or in-app browser.
  */
 export function navigateToStoreRoute(
   targetUrl: string,
   options?: { replace?: boolean; scrollTop?: boolean }
 ): void {
   if (typeof window === 'undefined') return;
-  const cleanUrl = targetUrl || '/';
+  let cleanUrl = (targetUrl || '/').trim();
+
+  const [pathPart, queryPart] = cleanUrl.split('?');
+  const prodMatch = pathPart.match(/^\/?(?:products?|p|items?|shop)\/([^/?#]+)(?:\/(checkout))?/i);
+  const catMatch = pathPart.match(/^\/?(?:catalogs?|category|categories|cat|collections?)\/([^/?#]+)/i);
+
+  if (prodMatch?.[1] && prodMatch[1].toLowerCase() !== 'all') {
+    const prodId = decodeURIComponent(prodMatch[1]).trim();
+    const isCheckout =
+      prodMatch[2]?.toLowerCase() === 'checkout' ||
+      new URLSearchParams(queryPart || '').get('step') === 'checkout';
+    cleanUrl = isCheckout
+      ? `/?product=${encodeURIComponent(prodId)}&step=checkout`
+      : `/?product=${encodeURIComponent(prodId)}`;
+  } else if (catMatch?.[1]) {
+    const catId = decodeURIComponent(catMatch[1]).trim();
+    cleanUrl = `/?catalog=${encodeURIComponent(catId)}`;
+  } else if (queryPart) {
+    const qp = new URLSearchParams(queryPart);
+    const qProd = qp.get('product');
+    const qCat = qp.get('catalog') || qp.get('category');
+    if (qProd) {
+      cleanUrl =
+        qp.get('step') === 'checkout'
+          ? `/?product=${encodeURIComponent(qProd)}&step=checkout`
+          : `/?product=${encodeURIComponent(qProd)}`;
+    } else if (qCat) {
+      cleanUrl = `/?catalog=${encodeURIComponent(qCat)}`;
+    }
+  }
+
   try {
     if (options?.replace) {
       window.history.replaceState(null, '', cleanUrl);
@@ -2749,8 +2830,21 @@ export async function saveOrderPersisted(order: Order): Promise<Order> {
     // ignore
   }
 
+  let safeScreenshot = order.customerScreenshot;
+  if (typeof safeScreenshot === 'string' && safeScreenshot.startsWith('data:image/')) {
+    try {
+      safeScreenshot = await uploadBannerImageToServer(
+        safeScreenshot,
+        `order-screenshot-${order.id}`
+      );
+    } catch {
+      // keep fallback if upload fails
+    }
+  }
+
   const cleanOrder = sanitizeForFirestore({
     ...order,
+    customerScreenshot: safeScreenshot,
     items: Array.isArray(order.items)
       ? order.items.map((item) => ({
           ...item,
@@ -2776,12 +2870,15 @@ export async function saveOrderPersisted(order: Order): Promise<Order> {
     console.warn('localStorage order backup note:', e);
   }
 
-  // 2. Save to Firestore `orders` collection immediately
-  try {
-    await setDoc(doc(db, 'orders', cleanOrder.id), cleanOrder, { merge: true });
-  } catch (err) {
-    console.warn('Firestore order save note (saved in local backup):', err);
-  }
+  // 2. Save to Server Order Mirror + Server Firestore (`/api/orders`) and Client Firestore `orders` collection in parallel
+  await Promise.allSettled([
+    setDoc(doc(db, 'orders', cleanOrder.id), cleanOrder, { merge: true }),
+    fetch('/api/orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order: cleanOrder }),
+    }),
+  ]);
 
   return cleanOrder;
 }
@@ -2806,9 +2903,16 @@ export async function deleteOrderPersisted(orderId: string): Promise<void> {
     console.warn('localStorage order delete note:', e);
   }
 
-  // 2. Delete document from Firestore `orders` collection
+  // 2. Delete document from Firestore `orders` collection & Server mirror
   try {
-    await deleteDoc(doc(db, 'orders', orderId));
+    await Promise.allSettled([
+      deleteDoc(doc(db, 'orders', orderId)),
+      fetch('/api/orders/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId }),
+      }),
+    ]);
   } catch (err) {
     console.warn('Firestore order delete note:', err);
   }
@@ -3484,5 +3588,129 @@ export async function deletePurchasePersisted(purchaseId: string): Promise<void>
   }
 }
 
+/**
+ * Courier Return Management (#16 কুরিয়ার রিটার্ন ব্যবস্থাপনা) Persistence & Deletion Helpers
+ * Note: Deleting a return record ONLY removes the return entry from `courier_returns` and records
+ * the deleted ID so initial sample seeds never reappear. It NEVER modifies product stock, orders, or customers.
+ */
+export function getDeletedReturnIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(LS_DELETED_RETURN_IDS_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    return new Set(Array.isArray(parsed) ? parsed : []);
+  } catch {
+    return new Set();
+  }
+}
 
+export function addDeletedReturnIds(ids: string[]): void {
+  try {
+    const delSet = getDeletedReturnIds();
+    for (const id of ids) {
+      const clean = String(id || '').trim();
+      if (clean) delSet.add(clean);
+    }
+    localStorage.setItem(LS_DELETED_RETURN_IDS_KEY, JSON.stringify(Array.from(delSet)));
+  } catch {
+    // ignore storage warning
+  }
+}
+
+export function getPersistedCourierReturns(): CourierReturn[] {
+  try {
+    const deleted = getDeletedReturnIds();
+    const raw = localStorage.getItem(LS_COURIER_RETURNS_BACKUP_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((r) => r && r.id && !deleted.has(r.id));
+  } catch {
+    return [];
+  }
+}
+
+export function syncCourierReturnsToLocalCache(returnsList: CourierReturn[]): void {
+  try {
+    const deleted = getDeletedReturnIds();
+    const filtered = returnsList.filter((r) => r && r.id && !deleted.has(r.id));
+    localStorage.setItem(LS_COURIER_RETURNS_BACKUP_KEY, JSON.stringify(filtered));
+  } catch {
+    // ignore storage warning
+  }
+}
+
+export async function saveCourierReturnPersisted(returnItem: CourierReturn): Promise<CourierReturn> {
+  const clean = sanitizeForFirestore({
+    ...returnItem,
+    updatedAt: Date.now(),
+  });
+
+  try {
+    const delSet = getDeletedReturnIds();
+    if (delSet.has(clean.id)) {
+      delSet.delete(clean.id);
+      const idsArray = Array.from(delSet);
+      localStorage.setItem(LS_DELETED_RETURN_IDS_KEY, JSON.stringify(idsArray));
+      setDoc(
+        doc(db, 'settings', 'deleted_returns'),
+        { ids: idsArray, updatedAt: Date.now() },
+        { merge: true }
+      ).catch(() => {});
+    }
+    const existing = getPersistedCourierReturns();
+    const next = [clean, ...existing.filter((r) => r.id !== clean.id)];
+    localStorage.setItem(LS_COURIER_RETURNS_BACKUP_KEY, JSON.stringify(next));
+  } catch (e) {
+    console.warn('localStorage courier return save note:', e);
+  }
+
+  await setDoc(doc(db, 'courier_returns', clean.id), clean, { merge: true });
+  return clean;
+}
+
+export async function deleteCourierReturnPersisted(returnId: string): Promise<void> {
+  const normalizedId = String(returnId || '').trim();
+  if (!normalizedId) {
+    throw new Error('Invalid return ID');
+  }
+
+  // 1. Synchronously mark as deleted in localStorage FIRST so any active onSnapshot listener never re-adds it
+  let idsArray: string[] = [normalizedId];
+  try {
+    const delSet = getDeletedReturnIds();
+    delSet.add(normalizedId);
+    idsArray = Array.from(delSet);
+    localStorage.setItem(LS_DELETED_RETURN_IDS_KEY, JSON.stringify(idsArray));
+    localStorage.setItem('dokandari_courier_returns_seeded_v1', 'true');
+
+    const existing = getPersistedCourierReturns();
+    const next = existing.filter((r) => r.id !== normalizedId);
+    localStorage.setItem(LS_COURIER_RETURNS_BACKUP_KEY, JSON.stringify(next));
+
+    // Also remove any auto-recorded return charge expense for this return from local expense backup
+    const rawExp = localStorage.getItem('dokandari_expenses_backup_v1');
+    if (rawExp) {
+      const parsedExp = JSON.parse(rawExp);
+      if (Array.isArray(parsedExp)) {
+        const filteredExp = parsedExp.filter((e: any) => e && e.id !== `exp-ret-${normalizedId}`);
+        localStorage.setItem('dokandari_expenses_backup_v1', JSON.stringify(filteredExp));
+      }
+    }
+  } catch {
+    // ignore local cache warning
+  }
+
+  // 2. Immediately delete from Firestore `courier_returns/{returnId}`, delete linked `business_expenses/exp-ret-{returnId}`,
+  //    and persist deleted IDs in `settings/deleted_returns`
+  await Promise.allSettled([
+    deleteDoc(doc(db, 'courier_returns', normalizedId)),
+    deleteDoc(doc(db, 'business_expenses', `exp-ret-${normalizedId}`)),
+    setDoc(
+      doc(db, 'settings', 'deleted_returns'),
+      { ids: idsArray, updatedAt: Date.now() },
+      { merge: true }
+    ),
+  ]);
+}
 

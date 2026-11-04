@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="bn">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dokandari (দোকানদারি) — Redirecting...</title>
+    <script>
+      (function () {
+        try {
+          var l = window.location;
+          var pathname = l.pathname || '/';
+          var search = l.search || '';
+          var hash = l.hash || '';
+          var params = new URLSearchParams(search);
+
+          var prodMatch = pathname.match(/^\/?(?:products?|p|items?|shop|product-detail)\/([^/?#]+)(?:\/(checkout))?/i);
+          if (prodMatch && prodMatch[1]) {
+            params.set('product', decodeURIComponent(prodMatch[1]));
+            if (prodMatch[2] && prodMatch[2].toLowerCase() === 'checkout') {
+              params.set('step', 'checkout');
+            }
+            if (!params.get('brand')) params.set('brand', 'dokandari');
+            l.replace(l.origin + '/?' + params.toString() + '#/products/' + prodMatch[1]);
+            return;
+          }
+
+          var catMatch = pathname.match(/^\/?(?:catalogs?|category|categories|cat|collections?)\/([^/?#]+)/i);
+          if (catMatch && catMatch[1]) {
+            params.set('catalog', decodeURIComponent(catMatch[1]));
+            if (!params.get('brand')) params.set('brand', 'dokandari');
+            l.replace(l.origin + '/?' + params.toString() + '#/catalog/' + catMatch[1]);
+            return;
+          }
+
+          var thankMatch = pathname.match(/^\/?thank-you\/([^/?#]+)/i);
+          if (thankMatch && thankMatch[1]) {
+            params.set('thank_you', decodeURIComponent(thankMatch[1]));
+            l.replace(l.origin + '/?' + params.toString() + '#/thank-you/' + thankMatch[1]);
+            return;
+          }
+
+          l.replace(l.origin + '/?' + params.toString() + (hash || '#' + pathname));
+        } catch (e) {
+          window.location.href = '/';
+        }
+      })();
+    </script>
+  </head>
+  <body style="font-family: sans-serif; background: #fff5f7; color: #1c1917; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0;">
+    <div style="text-align: center; padding: 24px;">
+      <p style="font-weight: 700; color: #e11d48;">দোকানদারি (Dokandari.com) প্রোডাক্ট পেইজ ওপেন হচ্ছে...</p>
+    </div>
+  </body>
+</html>

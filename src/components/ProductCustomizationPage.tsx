@@ -248,7 +248,8 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
 
   const handleDeleteImage = (index: number) => {
     if (images.length <= 1) {
-      alert('ন্যূনতম একটি ছবি থাকা আবশ্যক।');
+      setToastMessage('⚠️ ন্যূনতম একটি ছবি থাকা আবশ্যক।');
+      setTimeout(() => setToastMessage(''), 3000);
       return;
     }
     setImages(images.filter((_, i) => i !== index));
@@ -381,12 +382,10 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
   };
 
   const handleDeleteProduct = async () => {
-    if (!confirm(`আপনি কি নিশ্চিতভাবে "${product.name}" প্রোডাক্টটি ডিলিট করতে চান?`)) return;
-
-    await deleteProductPersisted(product.id);
     if (onProductDeleted) {
       onProductDeleted(product.id);
     }
+    await deleteProductPersisted(product.id);
     onBack();
   };
 

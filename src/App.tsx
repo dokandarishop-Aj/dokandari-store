@@ -113,12 +113,32 @@ function StoreMain() {
     initialStore.officialEmail || DEFAULT_STORE_CONTENT.officialEmail || 'dokandari.shop@gmail.com'
   );
   const [heroSlides, setHeroSlides] = useState(initialStore.heroSlides);
+  const heroSlidesSignatureRef = useRef<string>(
+    JSON.stringify(initialStore.heroSlides || [])
+  );
+  const applyDeterministicHeroSlides = (incomingSlides: typeof initialStore.heroSlides) => {
+    if (!Array.isArray(incomingSlides) || incomingSlides.length === 0) return;
+    const normalizedSlides = incomingSlides.map((s, idx) => ({
+      ...s,
+      id: s.id || `slide-${idx + 1}`,
+    }));
+    const nextSig = JSON.stringify(normalizedSlides);
+    if (nextSig !== heroSlidesSignatureRef.current) {
+      heroSlidesSignatureRef.current = nextSig;
+      setHeroSlides(normalizedSlides);
+      setCurrentSlide((prev) => (normalizedSlides.length > 0 ? prev % normalizedSlides.length : 0));
+    }
+  };
   const [categoryHeroes, setCategoryHeroes] = useState<Record<string, CategoryHeroConfig>>(
     initialStore.categoryHeroes || DEFAULT_CATEGORY_HEROES
   );
-  const [carouselInterval, setCarouselInterval] = useState<number>(
-    initialStore.carouselInterval || 3000
+  const [categoryImages, setCategoryImages] = useState<Record<string, string>>(
+    initialStore.categoryImages || {}
   );
+  const [carouselInterval, setCarouselInterval] = useState<number>(() => {
+    const raw = Number(initialStore.carouselInterval || 8000);
+    return raw < 5000 ? 8000 : raw;
+  });
   const [bestSellingInterval, setBestSellingInterval] = useState<number>(
     initialStore.bestSellingInterval || 5000
   );
@@ -172,9 +192,14 @@ function StoreMain() {
   const bestSellingTrackRef = useRef<HTMLDivElement | null>(null);
   const { addToCart, setIsCartOpen } = useCart();
 
-  // Compute ordered categories according to Admin drag-and-drop sequence (Default: Home Decor 1st, Gadgets 2nd, Fashion 3rd...)
+  // Compute ordered categories according to Admin drag-and-drop sequence & custom categoryImages
   const orderedCategories = useMemo(() => {
-    const map = new Map(OFFICIAL_CATEGORIES.map((c) => [c.id, c]));
+    const map = new Map(
+      OFFICIAL_CATEGORIES.map((c) => [
+        c.id,
+        categoryImages[c.id] ? { ...c, image: categoryImages[c.id] } : c,
+      ])
+    );
     const result: typeof OFFICIAL_CATEGORIES = [];
     for (const id of categoryOrder) {
       const item = map.get(id as any);
@@ -187,14 +212,15 @@ function StoreMain() {
       result.push(remaining);
     }
     return result;
-  }, [categoryOrder]);
+  }, [categoryOrder, categoryImages]);
 
-  // Configurable automatic sliding interval (controlled from Admin Panel)
+  // Deterministic automatic sliding interval (5s, 8s, 10s, 15s — never < 5000ms) advancing strictly 0..9 in stored sequence
   useEffect(() => {
-    if (!heroSlides.length) return;
-    const ms = Math.max(1000, carouselInterval || 3000);
+    const slideCount = heroSlides.length;
+    if (slideCount <= 1) return;
+    const ms = Math.max(5000, Number(carouselInterval) || 8000);
     const timer = setInterval(() => {
-      setCurrentSlide((prev) => (prev + 1) % heroSlides.length);
+      setCurrentSlide((prev) => (prev + 1) % slideCount);
     }, ms);
     return () => clearInterval(timer);
   }, [heroSlides.length, carouselInterval]);
@@ -309,12 +335,15 @@ function StoreMain() {
           const mergedServer = mergeStoreContent(d.content);
           syncStoreContentToLocalCache(mergedServer);
           if (Array.isArray(mergedServer.heroSlides) && mergedServer.heroSlides.length > 0) {
-            setHeroSlides(mergedServer.heroSlides);
+            applyDeterministicHeroSlides(mergedServer.heroSlides);
           }
           if (mergedServer.categoryHeroes) {
             setCategoryHeroes(mergedServer.categoryHeroes);
           }
-          if (typeof mergedServer.carouselInterval === 'number' && mergedServer.carouselInterval >= 1000) {
+          if (mergedServer.categoryImages) {
+            setCategoryImages(mergedServer.categoryImages);
+          }
+          if (typeof mergedServer.carouselInterval === 'number' && mergedServer.carouselInterval >= 5000) {
             setCarouselInterval(mergedServer.carouselInterval);
           }
         }
@@ -397,14 +426,17 @@ function StoreMain() {
               'dokandari.shop@gmail.com'
           );
           if (Array.isArray(mergedContent.heroSlides) && mergedContent.heroSlides.length > 0) {
-            setHeroSlides(mergedContent.heroSlides);
+            applyDeterministicHeroSlides(mergedContent.heroSlides);
           }
           if (mergedContent.categoryHeroes) {
             setCategoryHeroes(mergedContent.categoryHeroes);
           }
+          if (mergedContent.categoryImages) {
+            setCategoryImages(mergedContent.categoryImages);
+          }
           if (
             typeof mergedContent.carouselInterval === 'number' &&
-            mergedContent.carouselInterval >= 1000
+            mergedContent.carouselInterval >= 5000
           ) {
             setCarouselInterval(mergedContent.carouselInterval);
           }
@@ -456,9 +488,18 @@ function StoreMain() {
       const pathname = window.location.pathname;
       const hash = window.location.hash;
 
-      // 1. Thank You Order Confirmation Route: /thank-you/:orderId
-      if (pathname.startsWith('/thank-you/')) {
-        const orderId = decodeURIComponent(pathname.replace('/thank-you/', '').split('/')[0]);
+      // 1. Thank You Order Confirmation Route: /thank-you/:orderId, ?thank_you=:orderId, or #/thank-you/:orderId
+      const sp = new URLSearchParams(window.location.search || '');
+      const thankYouOrderId =
+        pathname.startsWith('/thank-you/')
+          ? decodeURIComponent(pathname.replace('/thank-you/', '').split('/')[0])
+          : sp.get('thank_you')
+          ? decodeURIComponent(sp.get('thank_you')!.trim())
+          : hash.startsWith('#/thank-you/')
+          ? decodeURIComponent(hash.replace('#/thank-you/', '').split(/[/?]/)[0])
+          : '';
+      if (thankYouOrderId) {
+        const orderId = thankYouOrderId;
         if (orderId) {
           const localOrders = getPersistedOrders();
           const foundLocalOrder = localOrders.find((o) => o.id === orderId);
@@ -649,7 +690,12 @@ function StoreMain() {
         setIsPolicyOpen(false);
         setIsTrackingOpen(false);
         return;
-      } else if (normalizedPath === '/' && (!hash || hash === '#' || hash === '#/')) {
+      } else if (
+        normalizedPath === '/' &&
+        (!hash || hash === '#' || hash === '#/') &&
+        !prodRoute.rawProdId &&
+        !catRoute
+      ) {
         // Explicit Home Route fallback: ensure no stale detail or overlay page blocks the storefront
         setDetailedProduct(null);
         setActiveCategoryPage(null);
@@ -786,13 +832,16 @@ function StoreMain() {
     if (updated.hotlineNumber) setHotlineNumber(updated.hotlineNumber);
     if (updated.officialEmail) setOfficialEmail(updated.officialEmail);
     if (Array.isArray(updated.heroSlides) && updated.heroSlides.length > 0) {
-      setHeroSlides(updated.heroSlides);
+      applyDeterministicHeroSlides(updated.heroSlides);
     }
     if (updated.categoryHeroes) {
       setCategoryHeroes(updated.categoryHeroes);
     }
+    if (updated.categoryImages) {
+      setCategoryImages(updated.categoryImages);
+    }
     if (typeof updated.carouselInterval === 'number') {
-      setCarouselInterval(updated.carouselInterval);
+      setCarouselInterval(Math.max(5000, updated.carouselInterval));
     }
     if (typeof updated.bestSellingInterval === 'number') {
       setBestSellingInterval(updated.bestSellingInterval);
@@ -1199,14 +1248,14 @@ function StoreMain() {
           />
         ) : (
           <>
-            {/* Full-Width 100% Bright Daylight Hero Banner Carousel (Zero Dark/Black Placeholders) */}
+            {/* Full-Display Facebook-Cover Style Hero Banner Carousel (Indices 0..9 in Stored Sequence, Zero Dark Overlay, Zero Text Clutter) */}
             <section
-              className="relative w-full bg-gradient-to-r from-[#FFF5F7] via-[#FFFDF9] to-[#FFF0F3] border-b border-rose-200/80 overflow-hidden min-h-[250px] sm:min-h-[340px] md:min-h-[380px] select-none"
+              className="relative w-full h-[170px] sm:h-[250px] md:h-[310px] lg:h-[350px] bg-[#FFFDF9] border-b border-rose-200/80 overflow-hidden select-none"
               onTouchStart={(e) => {
                 touchStartX.current = e.touches[0].clientX;
               }}
               onTouchEnd={(e) => {
-                if (touchStartX.current === null) return;
+                if (touchStartX.current === null || heroSlides.length <= 1) return;
                 const deltaX = e.changedTouches[0].clientX - touchStartX.current;
                 if (Math.abs(deltaX) > 40) {
                   if (deltaX < 0) {
@@ -1218,113 +1267,115 @@ function StoreMain() {
                 touchStartX.current = null;
               }}
             >
-              {heroSlides.map((slide, idx) => (
-                <div
-                  key={slide.id || idx}
-                  className={`absolute inset-0 transition-opacity duration-500 ${
-                    currentSlide === idx ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'
-                  }`}
-                >
-                  <div className="w-full h-full max-w-7xl mx-auto grid grid-cols-12 items-center px-4 sm:px-10 md:px-14 py-4 sm:py-6 gap-3 sm:gap-6">
-                    {/* Left Copy Column: Crisp Bright Daylight Theme */}
-                    <div className="col-span-7 sm:col-span-7 flex flex-col justify-center space-y-2 sm:space-y-3.5 z-10 pr-2">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="inline-block w-fit text-[10px] sm:text-xs font-extrabold bg-[#E11D48] text-white px-3 py-1 rounded-full uppercase tracking-wider shadow-xs">
-                          {slide.tag || 'স্পেশাল কালেকশন'}
-                        </span>
-                        <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-bold text-[#BE123C] bg-white/90 border border-rose-200 px-2.5 py-0.5 rounded-full">
-                          ✓ ১০০% অরিজিনাল • ক্যাশ অন ডেলিভারি
-                        </span>
-                      </div>
-                      <h2 className="text-base sm:text-2xl md:text-3xl lg:text-4xl font-black text-stone-900 leading-tight line-clamp-2">
-                        {slide.title}
-                      </h2>
-                      <p className="text-[11px] sm:text-sm text-stone-700 font-medium line-clamp-2 max-w-xl">
-                        {slide.subtitle}
-                      </p>
-                      <div className="pt-1 flex items-center gap-2.5 flex-wrap">
-                        <button
-                          onClick={() => {
-                            const link = (slide.ctaLink || '').trim();
-                            if (link.startsWith('/catalog/')) {
-                              const catId = link.replace('/catalog/', '').split('?')[0];
-                              setActiveCategory(catId as ProductCategory);
-                              setActiveCategoryPage(catId);
-                              navigateToStoreRoute(`${link}?brand=dokandari`);
-                              return;
-                            }
-                            const elem = document.getElementById('products-section');
-                            if (elem) elem.scrollIntoView({ behavior: 'smooth' });
-                          }}
-                          className="px-4 sm:px-6 py-2 sm:py-2.5 bg-[#E11D48] hover:bg-[#BE123C] text-white text-xs sm:text-sm font-extrabold rounded-xl shadow-sm transition-all cursor-pointer"
-                        >
-                          {slide.ctaText || 'কালেকশন দেখুন'} &rarr;
-                        </button>
-                        <span className="text-[10px] sm:text-xs font-bold text-stone-500 bg-white/80 px-2.5 py-1 rounded-lg border border-rose-100">
-                          স্লাইড {idx + 1} / {heroSlides.length}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Right Product / Model Showcase Card: Pure Bright White Frame (Never Black/Dark) */}
-                    <div className="col-span-5 sm:col-span-5 h-[180px] sm:h-[260px] md:h-[310px] flex items-center justify-center">
-                      <div className="relative w-full h-full rounded-2xl bg-white border-2 border-white shadow-md overflow-hidden flex items-center justify-center">
-                        <img
-                          src={slide.image || '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg'}
-                          alt={slide.title}
-                          className="w-full h-full object-cover object-center bg-[#FFFDF9]"
-                          referrerPolicy="no-referrer"
-                          onError={(e) => {
-                            const target = e.currentTarget;
-                            if (!target.src.includes('Ha2ef56dd79ed496bafac7990404868f7u.jpg')) {
-                              target.src = '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg';
-                            }
-                          }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-
-              {/* Manual Previous / Next Controls (Bright White & Rose Buttons) */}
-              <button
-                onClick={() => setCurrentSlide((prev) => (prev - 1 + heroSlides.length) % heroSlides.length)}
-                aria-label="Previous slide"
-                className="absolute left-1.5 sm:left-3 top-1/2 -translate-y-1/2 z-20 w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-white/95 hover:bg-[#E11D48] text-stone-800 hover:text-white border border-rose-200 shadow-sm flex items-center justify-center transition-all cursor-pointer"
-              >
-                <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5" />
-              </button>
-              <button
-                onClick={() => setCurrentSlide((prev) => (prev + 1) % heroSlides.length)}
-                aria-label="Next slide"
-                className="absolute right-1.5 sm:right-3 top-1/2 -translate-y-1/2 z-20 w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-white/95 hover:bg-[#E11D48] text-stone-800 hover:text-white border border-rose-200 shadow-sm flex items-center justify-center transition-all cursor-pointer"
-              >
-                <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5" />
-              </button>
-
-              {/* Slider Dots for all 8-10 Slides */}
-              <div className="absolute bottom-2.5 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 bg-white/90 px-3 py-1 rounded-full border border-rose-200/80 shadow-2xs">
-                {heroSlides.map((_, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => setCurrentSlide(idx)}
-                    className={`h-2 rounded-full transition-all cursor-pointer ${
-                      currentSlide === idx ? 'w-6 bg-[#E11D48]' : 'w-2 bg-rose-300 hover:bg-rose-400'
+              {heroSlides.map((slide, idx) => {
+                const activeIndex = heroSlides.length > 0 ? currentSlide % heroSlides.length : 0;
+                const isSlideActive = activeIndex === idx;
+                return (
+                  <div
+                    key={slide.id || `hero-slide-${idx}`}
+                    data-slide-index={idx}
+                    onClick={() => {
+                      const link = (slide.ctaLink || '').trim();
+                      if (link.startsWith('/catalog/')) {
+                        const catId = link.replace('/catalog/', '').split('?')[0];
+                        setActiveCategory(catId as ProductCategory);
+                        setActiveCategoryPage(catId);
+                        navigateToStoreRoute(`/catalog/${encodeURIComponent(catId)}`);
+                        return;
+                      }
+                      const elem = document.getElementById('products-section');
+                      if (elem) elem.scrollIntoView({ behavior: 'smooth' });
+                    }}
+                    className={`absolute inset-0 w-full h-full cursor-pointer transition-opacity duration-700 ease-in-out ${
+                      isSlideActive ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'
                     }`}
-                  />
-                ))}
-              </div>
+                  >
+                    <img
+                      src={
+                        slide.image ||
+                        'https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?auto=format&fit=crop&w=1920&q=85'
+                      }
+                      alt={slide.title || `Dokandari Banner ${idx + 1}`}
+                      loading={idx === 0 ? 'eager' : 'lazy'}
+                      decoding="async"
+                      className="w-full h-full object-cover object-center bg-[#FFFDF9]"
+                      referrerPolicy="no-referrer"
+                      onError={(e) => {
+                        const target = e.currentTarget;
+                        if (!target.src.includes('Ha2ef56dd79ed496bafac7990404868f7u.jpg')) {
+                          target.src = '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg';
+                        }
+                      }}
+                    />
+                  </div>
+                );
+              })}
 
-              {/* Admin-Only Quick AI Hero Banner Edit Button (Bright Theme) */}
+              {/* Manual Previous / Next Controls */}
+              {heroSlides.length > 1 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setCurrentSlide((prev) => (prev - 1 + heroSlides.length) % heroSlides.length);
+                    }}
+                    aria-label="Previous slide"
+                    className="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 z-20 w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-white/90 hover:bg-[#E11D48] text-stone-800 hover:text-white border border-rose-200 shadow-sm flex items-center justify-center transition-all cursor-pointer"
+                  >
+                    <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setCurrentSlide((prev) => (prev + 1) % heroSlides.length);
+                    }}
+                    aria-label="Next slide"
+                    className="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 z-20 w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-white/90 hover:bg-[#E11D48] text-stone-800 hover:text-white border border-rose-200 shadow-sm flex items-center justify-center transition-all cursor-pointer"
+                  >
+                    <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5" />
+                  </button>
+                </>
+              )}
+
+              {/* Slider Dots for Persisted Slides (Indices 0..9) */}
+              {heroSlides.length > 1 && (
+                <div className="absolute bottom-2.5 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 bg-white/90 px-3 py-1 rounded-full border border-rose-200/80 shadow-2xs">
+                  {heroSlides.map((slide, idx) => {
+                    const activeIndex = heroSlides.length > 0 ? currentSlide % heroSlides.length : 0;
+                    return (
+                      <button
+                        key={slide.id || idx}
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCurrentSlide(idx);
+                        }}
+                        aria-label={`Go to slide ${idx + 1}`}
+                        className={`h-2 rounded-full transition-all cursor-pointer ${
+                          activeIndex === idx
+                            ? 'w-6 bg-[#E11D48]'
+                            : 'w-2 bg-rose-300 hover:bg-rose-400'
+                        }`}
+                      />
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Admin-Only Quick Hero Banner Upload/Edit Button */}
               {isAdminAuthenticated && (
                 <button
                   type="button"
-                  onClick={() => setIsHeroAiModalOpen(true)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsHeroAiModalOpen(true);
+                  }}
                   className="absolute top-2.5 right-2.5 z-20 px-3 py-1.5 rounded-xl bg-white/95 hover:bg-[#E11D48] text-[#E11D48] hover:text-white text-[11px] font-extrabold border border-rose-300 shadow-xs flex items-center gap-1.5 cursor-pointer transition-all"
                 >
                   <Sparkles className="w-3.5 h-3.5" />
-                  <span>✨ ব্যানার ছবি/লেখা এডিট</span>
+                  <span>✨ ব্যানার ছবি এডিট</span>
                 </button>
               )}
             </section>
@@ -1885,6 +1936,13 @@ function StoreMain() {
       <CheckoutModal
         isOpen={isCheckoutOpen}
         onClose={() => setIsCheckoutOpen(false)}
+        allProducts={publishedProducts}
+        onSelectProduct={(p) => {
+          setDetailedProductStep('product');
+          setDetailedProduct(p);
+          setActiveCategoryPage(null);
+          navigateToStoreRoute(`/products/${encodeURIComponent(p.id)}?brand=dokandari`);
+        }}
         onOrderSuccess={(orderId) => {
           setTrackingOrderId(orderId);
           setIsTrackingOpen(true);

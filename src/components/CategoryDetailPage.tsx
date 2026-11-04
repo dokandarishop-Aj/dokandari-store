@@ -65,6 +65,13 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'popular' | 'price_asc' | 'price_desc' | 'rating'>('popular');
+  const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
+  const [availabilityFilter, setAvailabilityFilter] = useState<'all' | 'in_stock' | 'out_of_stock' | 'on_sale'>('all');
+  const [priceBracket, setPriceBracket] = useState<'all' | 'under_500' | '500_1000' | '1000_2000' | 'over_2000'>('all');
+  const [minPriceInput, setMinPriceInput] = useState('');
+  const [maxPriceInput, setMaxPriceInput] = useState('');
+  const [selectedColors, setSelectedColors] = useState<string[]>([]);
+  const [selectedSizes, setSelectedSizes] = useState<string[]>([]);
   const [catLinkCopied, setCatLinkCopied] = useState(false);
   const [organicSlideIdx, setOrganicSlideIdx] = useState(0);
   const bestSellingRef = useRef<HTMLDivElement | null>(null);
@@ -103,7 +110,7 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({
     if (!isOrganic || organicSlides.length <= 1) return;
     const timer = setInterval(() => {
       setOrganicSlideIdx((prev) => (prev + 1) % organicSlides.length);
-    }, 3500);
+    }, 8000);
     return () => clearInterval(timer);
   }, [isOrganic, organicSlides.length]);
 
@@ -231,16 +238,112 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({
     );
   }, [products, effectiveCategoryId, isOrganic]);
 
-  // Apply search & sorting
+  // Extract unique available variant attributes (colors & sizes) from this catalog's products
+  const { availableColors, availableSizes } = useMemo(() => {
+    const colorSet = new Set<string>();
+    const sizeSet = new Set<string>();
+    categoryProducts.forEach((p) => {
+      p.variants?.colors?.forEach((c) => {
+        const clean = c?.trim();
+        if (clean) colorSet.add(clean);
+      });
+      p.variants?.sizes?.forEach((s) => {
+        const clean = s?.trim();
+        if (clean) sizeSet.add(clean);
+      });
+    });
+    return {
+      availableColors: Array.from(colorSet).slice(0, 18),
+      availableSizes: Array.from(sizeSet).slice(0, 18),
+    };
+  }, [categoryProducts]);
+
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (sortBy !== 'popular') count++;
+    if (availabilityFilter !== 'all') count++;
+    if (priceBracket !== 'all' || minPriceInput.trim() !== '' || maxPriceInput.trim() !== '') count++;
+    count += selectedColors.length;
+    count += selectedSizes.length;
+    return count;
+  }, [sortBy, availabilityFilter, priceBracket, minPriceInput, maxPriceInput, selectedColors, selectedSizes]);
+
+  const resetAllCatalogFilters = () => {
+    setSortBy('popular');
+    setAvailabilityFilter('all');
+    setPriceBracket('all');
+    setMinPriceInput('');
+    setMaxPriceInput('');
+    setSelectedColors([]);
+    setSelectedSizes([]);
+    setSearchQuery('');
+  };
+
+  const toggleColorFilter = (color: string) => {
+    setSelectedColors((prev) =>
+      prev.includes(color) ? prev.filter((c) => c !== color) : [...prev, color]
+    );
+  };
+
+  const toggleSizeFilter = (size: string) => {
+    setSelectedSizes((prev) =>
+      prev.includes(size) ? prev.filter((s) => s !== size) : [...prev, size]
+    );
+  };
+
+  // Apply search, availability, price, variant attributes & sorting
   const filteredProducts = useMemo(() => {
+    const minCustom = minPriceInput.trim() !== '' ? Number(minPriceInput) : null;
+    const maxCustom = maxPriceInput.trim() !== '' ? Number(maxPriceInput) : null;
+
     const list = categoryProducts.filter((p) => {
-      if (!searchQuery.trim()) return true;
-      const q = searchQuery.toLowerCase().trim();
-      return (
-        p.name.toLowerCase().includes(q) ||
-        (p.titleEn && p.titleEn.toLowerCase().includes(q)) ||
-        (p.description && p.description.toLowerCase().includes(q))
-      );
+      // 1. Search query
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        const matchesText =
+          p.name.toLowerCase().includes(q) ||
+          (p.titleEn && p.titleEn.toLowerCase().includes(q)) ||
+          (p.description && p.description.toLowerCase().includes(q)) ||
+          (p.sku && p.sku.toLowerCase().includes(q));
+        if (!matchesText) return false;
+      }
+
+      // 2. Availability filter
+      const isAvailable = p.inStock !== false && (typeof p.stock !== 'number' || p.stock > 0);
+      if (availabilityFilter === 'in_stock' && !isAvailable) return false;
+      if (availabilityFilter === 'out_of_stock' && isAvailable) return false;
+      if (availabilityFilter === 'on_sale' && !(p.originalPrice && p.originalPrice > p.price)) {
+        return false;
+      }
+
+      // 3. Price bracket & custom min/max
+      const price = Number(p.price) || 0;
+      if (priceBracket === 'under_500' && price >= 500) return false;
+      if (priceBracket === '500_1000' && (price < 500 || price > 1000)) return false;
+      if (priceBracket === '1000_2000' && (price < 1000 || price > 2000)) return false;
+      if (priceBracket === 'over_2000' && price <= 2000) return false;
+      if (minCustom !== null && !Number.isNaN(minCustom) && price < minCustom) return false;
+      if (maxCustom !== null && !Number.isNaN(maxCustom) && price > maxCustom) return false;
+
+      // 4. Variant Colors filter
+      if (selectedColors.length > 0) {
+        const prodColors = (p.variants?.colors || []).map((c) => c.toLowerCase().trim());
+        const hasMatchingColor = selectedColors.some((sc) =>
+          prodColors.includes(sc.toLowerCase().trim())
+        );
+        if (!hasMatchingColor) return false;
+      }
+
+      // 5. Variant Sizes filter
+      if (selectedSizes.length > 0) {
+        const prodSizes = (p.variants?.sizes || []).map((s) => s.toLowerCase().trim());
+        const hasMatchingSize = selectedSizes.some((ss) =>
+          prodSizes.includes(ss.toLowerCase().trim())
+        );
+        if (!hasMatchingSize) return false;
+      }
+
+      return true;
     });
 
     if (sortBy === 'price_asc') {
@@ -251,7 +354,17 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({
       list.sort((a, b) => (b.rating || 5) - (a.rating || 5));
     }
     return list;
-  }, [categoryProducts, searchQuery, sortBy]);
+  }, [
+    categoryProducts,
+    searchQuery,
+    availabilityFilter,
+    priceBracket,
+    minPriceInput,
+    maxPriceInput,
+    selectedColors,
+    selectedSizes,
+    sortBy,
+  ]);
 
   const bestSellingList = useMemo(() => {
     return categoryProducts.slice(0, 8);
@@ -263,18 +376,18 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({
         isOrganic ? 'bg-[#F4FBF7]' : 'bg-[#FAF9F6]'
       }`}
     >
-      {/* Top Header / Hero Area:
-          - Organic Food gets a Homepage-style Full-Width Bright Hero Banner Carousel
-          - All other Catalog Pages get a compact, ultra-slim 100% Bright Header Bar (Zero Dark/Black Placeholders) */}
+      {/* Top Header / Hero Area (Desktop Only — Hidden on Mobile so mobile catalog visitors see products directly below Header):
+          - Organic Food gets a Homepage-style Full-Width Bright Hero Banner Carousel on Desktop
+          - All other Catalog Pages get a compact, ultra-slim 100% Bright Header Bar on Desktop */}
       <div
-        className={`relative w-full overflow-hidden border-b ${
+        className={`hidden md:block relative w-full overflow-hidden border-b ${
           isOrganic
             ? 'bg-gradient-to-r from-[#ECFDF5] via-[#F9FEFB] to-[#DCFCE7] border-emerald-200 py-3 sm:py-5 text-stone-900'
             : 'bg-gradient-to-r from-[#FFF5F7] via-[#FFFDF9] to-[#FFF0F3] border-rose-200/80 py-2.5 sm:py-3.5 text-stone-900'
         }`}
       >
         <div className="w-full px-3 sm:px-6 lg:px-8 space-y-3">
-          {/* Top Bar: Breadcrumb + Share Catalog Link + Admin Edit Hero & Add Product Buttons */}
+          {/* Top Bar: Breadcrumb + Admin Edit Hero & Add Product Buttons */}
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <nav
               className={`flex items-center gap-2 text-xs font-semibold ${
@@ -296,37 +409,35 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({
               </span>
             </nav>
 
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                type="button"
-                onClick={() => {
-                  const shareUrl = getCatalogShareUrl(effectiveCategoryId);
-                  navigator.clipboard.writeText(shareUrl).catch(() => null);
-                  setCatLinkCopied(true);
-                  setTimeout(() => setCatLinkCopied(false), 2500);
-                }}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-rose-50 text-stone-800 border border-stone-200 text-xs font-extrabold shadow-2xs cursor-pointer transition-all"
-                title={getCatalogShareUrl(effectiveCategoryId)}
-              >
-                {catLinkCopied ? (
-                  <>
-                    <Check className="w-3.5 h-3.5 text-emerald-600" />
-                    <span className="text-emerald-700">ক্যাটালগ লিংক কপি হয়েছে!</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-3.5 h-3.5 text-[#E11D48]" />
-                    <span>🔗 ক্যাটালগ লিংক কপি করুন</span>
-                  </>
-                )}
-              </button>
-
-              {isAdmin && (
-                <>
-                  {onAddNewCategoryProduct && (
-                    <button
-                      type="button"
-                      onClick={() => onAddNewCategoryProduct(effectiveCategoryId)}
+            {isAdmin && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const shareUrl = getCatalogShareUrl(effectiveCategoryId);
+                    navigator.clipboard.writeText(shareUrl).catch(() => null);
+                    setCatLinkCopied(true);
+                    setTimeout(() => setCatLinkCopied(false), 2500);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-rose-50 text-stone-800 border border-stone-200 text-xs font-extrabold shadow-2xs cursor-pointer transition-all"
+                  title={getCatalogShareUrl(effectiveCategoryId)}
+                >
+                  {catLinkCopied ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-600" />
+                      <span className="text-emerald-700">ক্যাটালগ লিংক কপি হয়েছে!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5 text-[#E11D48]" />
+                      <span>🔗 ক্যাটালগ লিংক কপি</span>
+                    </>
+                  )}
+                </button>
+                {onAddNewCategoryProduct && (
+                  <button
+                    type="button"
+                    onClick={() => onAddNewCategoryProduct(effectiveCategoryId)}
                       className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-white text-xs font-extrabold shadow-xs cursor-pointer transition-all ${
                         isOrganic
                           ? 'bg-[#16A34A] hover:bg-[#15803D]'
@@ -337,102 +448,69 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({
                       <span>এই ক্যাটাগরিতে নতুন প্রোডাক্ট যোগ করুন</span>
                     </button>
                   )}
-                  {onSaveCategoryHero && (
-                    <button
-                      type="button"
-                      onClick={openHeroEditor}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-stone-950 text-xs font-extrabold shadow-xs cursor-pointer transition-all"
-                    >
-                      <Edit3 className="w-3.5 h-3.5" />
-                      <span>
-                        {isOrganic
-                          ? `✎ অর্গানিক স্লাইড #${organicSlideIdx + 1} এডিট`
-                          : '✎ ক্যাটাগরি হেডার এডিট'}
-                      </span>
-                    </button>
-                  )}
-                </>
-              )}
-            </div>
+                {onSaveCategoryHero && (
+                  <button
+                    type="button"
+                    onClick={openHeroEditor}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-stone-950 text-xs font-extrabold shadow-xs cursor-pointer transition-all"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                    <span>
+                      {isOrganic
+                        ? `✎ অর্গানিক স্লাইড #${organicSlideIdx + 1} এডিট`
+                        : '✎ ক্যাটাগরি হেডার এডিট'}
+                    </span>
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
-          {/* Organic Food: Homepage-Style Full-Width Bright Hero Banner Carousel */}
+          {/* Organic Food: Full-Display Facebook-Cover Style Bright Hero Banner Carousel */}
           {isOrganic ? (
-            <div className="relative w-full rounded-2xl bg-gradient-to-r from-[#ECFDF5] via-[#FFFFFF] to-[#E6F9EE] border border-emerald-200 shadow-xs overflow-hidden min-h-[240px] sm:min-h-[320px] select-none">
-              {organicSlides.map((slide, idx) => (
-                <div
-                  key={slide.id || idx}
-                  className={`absolute inset-0 transition-opacity duration-500 ${
-                    organicSlideIdx === idx ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'
-                  }`}
-                >
-                  <div className="w-full h-full max-w-7xl mx-auto grid grid-cols-12 items-center px-4 sm:px-10 py-4 sm:py-6 gap-3 sm:gap-6">
-                    {/* Left Copy Column */}
-                    <div className="col-span-7 sm:col-span-7 flex flex-col justify-center space-y-2 sm:space-y-3 z-10 pr-2">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="inline-block w-fit text-[10px] sm:text-xs font-extrabold bg-[#16A34A] text-white px-3 py-1 rounded-full uppercase tracking-wider shadow-2xs">
-                          {slide.tag || '🌿 ১০০% অর্গানিক ফুড'}
-                        </span>
-                        <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-bold text-[#15803D] bg-white border border-emerald-200 px-2.5 py-0.5 rounded-full">
-                          ✓ ল্যাব টেস্টেড ও কেমিক্যালমুক্ত
-                        </span>
-                      </div>
-
-                      <h1 className="text-base sm:text-2xl md:text-3xl font-black text-stone-900 leading-tight line-clamp-2">
-                        {slide.title}
-                      </h1>
-
-                      <p className="text-[11px] sm:text-sm text-stone-700 font-medium line-clamp-2 max-w-xl">
-                        {slide.subtitle}
-                      </p>
-
-                      <div className="pt-1 flex items-center gap-2.5 flex-wrap">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const gridEl = document.getElementById('category-products-grid');
-                            if (gridEl) gridEl.scrollIntoView({ behavior: 'smooth' });
-                          }}
-                          className="px-4 sm:px-5 py-2 bg-[#16A34A] hover:bg-[#15803D] text-white rounded-xl text-xs sm:text-sm font-extrabold shadow-xs cursor-pointer transition-all"
-                        >
-                          {slide.ctaText || 'অর্গানিক ফুড দেখুন'} &rarr;
-                        </button>
-                        <span className="px-3 py-1.5 rounded-xl bg-white border border-emerald-200 text-[11px] font-extrabold text-[#15803D]">
-                          মোট {categoryProducts.length}টি অর্গানিক ফুড
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Right Image Card: Pure Bright White Frame (Never Black/Dark) */}
-                    <div className="col-span-5 sm:col-span-5 h-[175px] sm:h-[250px] md:h-[280px] flex items-center justify-center">
-                      <div className="relative w-full h-full rounded-2xl bg-white border-2 border-white shadow-md overflow-hidden flex items-center justify-center">
-                        <img
-                          src={resolveSafeProductImageUrl(slide.image, categoryProducts[idx % Math.max(1, categoryProducts.length)], 0)}
-                          alt={slide.title}
-                          onError={(e) => handleProductImageError(e, categoryProducts[0], 0)}
-                          loading="eager"
-                          decoding="async"
-                          className="w-full h-full object-cover object-center bg-white"
-                          referrerPolicy="no-referrer"
-                        />
-                      </div>
-                    </div>
+            <div className="relative w-full h-[165px] sm:h-[235px] md:h-[285px] rounded-2xl bg-[#ECFDF5] border border-emerald-200 shadow-xs overflow-hidden select-none">
+              {organicSlides.map((slide, idx) => {
+                const activeIdx = organicSlides.length > 0 ? organicSlideIdx % organicSlides.length : 0;
+                return (
+                  <div
+                    key={slide.id || idx}
+                    onClick={() => {
+                      const gridEl = document.getElementById('category-products-grid');
+                      if (gridEl) gridEl.scrollIntoView({ behavior: 'smooth' });
+                    }}
+                    className={`absolute inset-0 w-full h-full cursor-pointer transition-opacity duration-700 ${
+                      activeIdx === idx ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'
+                    }`}
+                  >
+                    <img
+                      src={resolveSafeProductImageUrl(
+                        slide.image,
+                        categoryProducts[idx % Math.max(1, categoryProducts.length)],
+                        0
+                      )}
+                      alt={slide.title}
+                      onError={(e) => handleProductImageError(e, categoryProducts[0], 0)}
+                      loading="eager"
+                      decoding="async"
+                      className="w-full h-full object-cover object-center bg-white"
+                      referrerPolicy="no-referrer"
+                    />
                   </div>
-                </div>
-              ))}
+                );
+              })}
 
               {/* Prev / Next Controls */}
               <button
                 type="button"
                 onClick={() => setOrganicSlideIdx((prev) => (prev - 1 + organicSlides.length) % organicSlides.length)}
-                className="absolute left-1.5 sm:left-3 top-1/2 -translate-y-1/2 z-20 w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-white/95 hover:bg-[#16A34A] text-stone-800 hover:text-white border border-emerald-200 shadow-xs flex items-center justify-center cursor-pointer transition-all"
+                className="absolute left-2 sm:left-3 top-1/2 -translate-y-1/2 z-20 w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-white/95 hover:bg-[#16A34A] text-stone-800 hover:text-white border border-emerald-200 shadow-xs flex items-center justify-center cursor-pointer transition-all"
               >
                 <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
               <button
                 type="button"
                 onClick={() => setOrganicSlideIdx((prev) => (prev + 1) % organicSlides.length)}
-                className="absolute right-1.5 sm:right-3 top-1/2 -translate-y-1/2 z-20 w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-white/95 hover:bg-[#16A34A] text-stone-800 hover:text-white border border-emerald-200 shadow-xs flex items-center justify-center cursor-pointer transition-all"
+                className="absolute right-2 sm:right-3 top-1/2 -translate-y-1/2 z-20 w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-white/95 hover:bg-[#16A34A] text-stone-800 hover:text-white border border-emerald-200 shadow-xs flex items-center justify-center cursor-pointer transition-all"
               >
                 <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
@@ -636,9 +714,9 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({
         </div>
       )}
 
-      <div className="w-full px-3 sm:px-6 lg:px-8 mt-6 space-y-7">
-        {/* Quick Category Switcher Pills */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
+      <div className="w-full px-2.5 sm:px-6 lg:px-8 pt-2.5 md:pt-0 md:mt-6 space-y-3 md:space-y-7">
+        {/* Quick Category Switcher Pills (Desktop Only — Mobile shows products directly under Header) */}
+        <div className="hidden md:flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
           <button
             onClick={() => onSelectCategory('all')}
             className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
@@ -678,10 +756,10 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({
           })}
         </div>
 
-        {/* Standalone Website Section 1: Best-Selling Spotlight Carousel for this Category */}
+        {/* Standalone Website Section 1: Best-Selling Spotlight Carousel for this Category (Desktop Only) */}
         {bestSellingList.length > 0 && !searchQuery.trim() && (
           <section
-            className={`bg-white rounded-2xl border p-3.5 sm:p-5 shadow-2xs space-y-3.5 ${
+            className={`hidden md:block bg-white rounded-2xl border p-3.5 sm:p-5 shadow-2xs space-y-3.5 ${
               isOrganic ? 'border-emerald-200' : 'border-rose-200/80'
             }`}
           >
@@ -778,10 +856,60 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({
           </section>
         )}
 
-        {/* Filter & Sorting Bar */}
+        {/* Compact Mobile Filter & Sort Strip (No Hero Image on Mobile — Direct Product Access + Filter Drawer Trigger) */}
+        <div className="flex md:hidden items-center justify-between gap-2 bg-white px-3 py-2 rounded-xl border border-stone-200 shadow-2xs">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <button
+              type="button"
+              onClick={onBackToHome}
+              className="p-1.5 rounded-lg bg-stone-100 text-stone-700 shrink-0 cursor-pointer"
+              aria-label="হোমপেজে ফিরে যান"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+            </button>
+            <span className="text-xs font-extrabold text-stone-900 truncate">
+              {foundCategory?.nameBn || 'সকল প্রোডাক্ট'} ({filteredProducts.length})
+            </span>
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as any)}
+              className="px-2 py-1.5 bg-stone-50 border border-stone-200 rounded-lg text-[11px] font-bold text-stone-700 focus:outline-none"
+            >
+              <option value="popular">জনপ্রিয়</option>
+              <option value="price_asc">দাম: কম → বেশি</option>
+              <option value="price_desc">দাম: বেশি → কম</option>
+              <option value="rating">সেরা রেটিং ★</option>
+            </select>
+
+            <button
+              type="button"
+              onClick={() => setIsFilterDrawerOpen(true)}
+              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-extrabold flex items-center gap-1 cursor-pointer border transition-colors ${
+                activeFilterCount > 0
+                  ? isOrganic
+                    ? 'bg-[#16A34A] text-white border-[#16A34A]'
+                    : 'bg-[#E11D48] text-white border-[#E11D48]'
+                  : 'bg-stone-900 text-white border-stone-900'
+              }`}
+            >
+              <SlidersHorizontal className="w-3 h-3" />
+              <span>ফিল্টার</span>
+              {activeFilterCount > 0 && (
+                <span className="px-1.5 py-0.2 bg-white text-stone-900 rounded-full text-[9.5px] font-black">
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Filter & Sorting Bar (Desktop) */}
         <div
           id="category-products-grid"
-          className={`bg-white rounded-2xl border p-3.5 sm:p-4 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+          className={`hidden md:flex bg-white rounded-2xl border p-3.5 sm:p-4 shadow-2xs flex-col sm:flex-row sm:items-center justify-between gap-3 ${
             isOrganic ? 'border-emerald-200' : 'border-rose-200/80'
           }`}
         >
@@ -807,9 +935,9 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({
             )}
           </div>
 
-          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
             {/* Search Input */}
-            <div className="relative w-full sm:w-64">
+            <div className="relative w-full sm:w-60">
               <Search className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
@@ -835,8 +963,128 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({
               <option value="price_desc">দাম: বেশি থেকে কম (High &rarr; Low)</option>
               <option value="rating">সর্বোচ্চ রেটিং (Top Rated ★)</option>
             </select>
+
+            {/* Open Filter Drawer Button */}
+            <button
+              type="button"
+              onClick={() => setIsFilterDrawerOpen(true)}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold flex items-center gap-1.5 cursor-pointer border transition-all shadow-2xs ${
+                activeFilterCount > 0
+                  ? isOrganic
+                    ? 'bg-[#16A34A] hover:bg-[#15803D] text-white border-[#16A34A]'
+                    : 'bg-[#E11D48] hover:bg-[#BE123C] text-white border-[#E11D48]'
+                  : 'bg-stone-900 hover:bg-stone-800 text-white border-stone-900'
+              }`}
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              <span>ফিল্টার ও ভ্যারিয়েন্ট</span>
+              {activeFilterCount > 0 && (
+                <span className="px-1.5 py-0.2 bg-white text-stone-900 rounded-full text-[10px] font-black">
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
           </div>
         </div>
+
+        {/* Active Filter Chips Bar (when filters are active) */}
+        {activeFilterCount > 0 && (
+          <div className="flex items-center gap-2 flex-wrap bg-white px-3.5 py-2 rounded-xl border border-stone-200 text-xs">
+            <span className="font-bold text-stone-500 text-[11px]">সক্রিয় ফিল্টার:</span>
+            {availabilityFilter !== 'all' && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-rose-50 text-[#E11D48] border border-rose-200 text-[11px] font-bold">
+                <span>
+                  {availabilityFilter === 'in_stock'
+                    ? 'স্টকে আছে (In Stock)'
+                    : availabilityFilter === 'out_of_stock'
+                    ? 'স্টক আউট'
+                    : 'ডিসকাউন্ট অফার'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setAvailabilityFilter('all')}
+                  className="hover:text-rose-900 cursor-pointer"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+            {priceBracket !== 'all' && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-50 text-amber-900 border border-amber-200 text-[11px] font-bold">
+                <span>
+                  {priceBracket === 'under_500'
+                    ? '৳৫০০ এর নিচে'
+                    : priceBracket === '500_1000'
+                    ? '৳৫০০ - ৳১,০০০'
+                    : priceBracket === '1000_2000'
+                    ? '৳১,০০০ - ৳২,০০০'
+                    : '৳২,০০০+'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPriceBracket('all')}
+                  className="hover:text-amber-950 cursor-pointer"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+            {(minPriceInput || maxPriceInput) && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-50 text-amber-900 border border-amber-200 text-[11px] font-bold">
+                <span>
+                  দাম: ৳{minPriceInput || '0'} - ৳{maxPriceInput || '∞'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMinPriceInput('');
+                    setMaxPriceInput('');
+                  }}
+                  className="hover:text-amber-950 cursor-pointer"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+            {selectedColors.map((col) => (
+              <span
+                key={`chip-col-${col}`}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-900 border border-indigo-200 text-[11px] font-bold"
+              >
+                <span>রঙ: {col}</span>
+                <button
+                  type="button"
+                  onClick={() => toggleColorFilter(col)}
+                  className="hover:text-indigo-950 cursor-pointer"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            ))}
+            {selectedSizes.map((sz) => (
+              <span
+                key={`chip-sz-${sz}`}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-teal-50 text-teal-900 border border-teal-200 text-[11px] font-bold"
+              >
+                <span>সাইজ: {sz}</span>
+                <button
+                  type="button"
+                  onClick={() => toggleSizeFilter(sz)}
+                  className="hover:text-teal-950 cursor-pointer"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            ))}
+            <button
+              type="button"
+              onClick={resetAllCatalogFilters}
+              className="ml-auto text-[11px] font-extrabold text-[#E11D48] hover:underline cursor-pointer"
+            >
+              সব ফিল্টার মুছুন
+            </button>
+          </div>
+        )}
 
         {/* Full Product Grid */}
         {filteredProducts.length === 0 ? (
@@ -922,6 +1170,278 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({
           </section>
         )}
       </div>
+
+      {/* SLIDE-OVER CATALOG FILTER & SORT DRAWER */}
+      {isFilterDrawerOpen && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-stone-950/60 backdrop-blur-xs animate-in fade-in">
+          <div
+            className="fixed inset-0"
+            onClick={() => setIsFilterDrawerOpen(false)}
+            aria-hidden="true"
+          />
+          <div className="relative z-10 w-full max-w-sm bg-white h-full shadow-2xl border-l border-stone-200 flex flex-col justify-between overflow-hidden">
+            {/* Drawer Header */}
+            <div
+              className={`p-4 border-b flex items-center justify-between ${
+                isOrganic
+                  ? 'bg-emerald-50/70 border-emerald-200'
+                  : 'bg-rose-50/70 border-rose-200'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <span
+                  className={`p-2 rounded-xl text-white ${
+                    isOrganic ? 'bg-[#16A34A]' : 'bg-[#E11D48]'
+                  }`}
+                >
+                  <SlidersHorizontal className="w-4 h-4" />
+                </span>
+                <div>
+                  <h3 className="text-sm font-black text-stone-900">
+                    প্রোডাক্ট ফিল্টার ও সর্টিং
+                  </h3>
+                  <p className="text-[11px] text-stone-500">
+                    দাম, স্টক এবং ভ্যারিয়েন্ট অনুযায়ী পছন্দসই পণ্য খুঁজুন
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsFilterDrawerOpen(false)}
+                className="p-1.5 rounded-xl bg-white hover:bg-stone-100 text-stone-600 border border-stone-200 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Drawer Scrollable Body */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-5 text-xs">
+              {/* 1. Sort By (Price Low/High, Popularity, Rating) */}
+              <div className="space-y-2">
+                <label className="block font-extrabold text-stone-900 text-xs">
+                  ১. সাজানোর ক্রম (Sort By Price & Rating)
+                </label>
+                <div className="grid grid-cols-1 gap-1.5">
+                  {[
+                    { id: 'popular', label: '🔥 জনপ্রিয় পণ্য (Default Popular)' },
+                    { id: 'price_asc', label: '⬆️ দাম: কম থেকে বেশি (Price: Low to High)' },
+                    { id: 'price_desc', label: '⬇️ দাম: বেশি থেকে কম (Price: High to Low)' },
+                    { id: 'rating', label: '⭐ সর্বোচ্চ কাস্টমার রেটিং (Top Rated)' },
+                  ].map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setSortBy(opt.id as any)}
+                      className={`w-full px-3 py-2.5 rounded-xl border text-left font-bold flex items-center justify-between cursor-pointer transition-all ${
+                        sortBy === opt.id
+                          ? isOrganic
+                            ? 'bg-emerald-50 border-[#16A34A] text-[#15803D]'
+                            : 'bg-rose-50 border-[#E11D48] text-[#E11D48]'
+                          : 'bg-stone-50 border-stone-200 text-stone-700 hover:bg-stone-100'
+                      }`}
+                    >
+                      <span>{opt.label}</span>
+                      {sortBy === opt.id && <CheckCircle2 className="w-4 h-4 shrink-0" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 2. Availability Filter */}
+              <div className="space-y-2 pt-3 border-t border-stone-100">
+                <label className="block font-extrabold text-stone-900 text-xs">
+                  ২. প্রাপ্যতা ও অফার (Availability)
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { id: 'all', label: 'সব পণ্য (All)' },
+                    { id: 'in_stock', label: '✓ স্টকে আছে (In Stock)' },
+                    { id: 'on_sale', label: '🏷️ ডিসকাউন্ট অফার' },
+                    { id: 'out_of_stock', label: 'স্টক আউট' },
+                  ].map((av) => (
+                    <button
+                      key={av.id}
+                      type="button"
+                      onClick={() => setAvailabilityFilter(av.id as any)}
+                      className={`px-3 py-2 rounded-xl border text-center font-bold cursor-pointer transition-all ${
+                        availabilityFilter === av.id
+                          ? isOrganic
+                            ? 'bg-[#16A34A] text-white border-[#16A34A]'
+                            : 'bg-[#E11D48] text-white border-[#E11D48]'
+                          : 'bg-white border-stone-200 text-stone-700 hover:bg-stone-50'
+                      }`}
+                    >
+                      {av.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 3. Price Range Filter */}
+              <div className="space-y-2.5 pt-3 border-t border-stone-100">
+                <label className="block font-extrabold text-stone-900 text-xs">
+                  ৩. মূল্যের সীমা (Price Range)
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { id: 'all', label: 'যেকোনো দাম' },
+                    { id: 'under_500', label: '৳৫০০ এর নিচে' },
+                    { id: '500_1000', label: '৳৫০০ - ৳১,০০০' },
+                    { id: '1000_2000', label: '৳১,০০০ - ৳২,০০০' },
+                    { id: 'over_2000', label: '৳২,০০০ এর উপরে' },
+                  ].map((br) => (
+                    <button
+                      key={br.id}
+                      type="button"
+                      onClick={() => setPriceBracket(br.id as any)}
+                      className={`px-2.5 py-2 rounded-xl border text-center font-bold cursor-pointer transition-all ${
+                        priceBracket === br.id
+                          ? 'bg-stone-900 text-white border-stone-900'
+                          : 'bg-stone-50 border-stone-200 text-stone-700 hover:bg-stone-100'
+                      }`}
+                    >
+                      {br.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <div>
+                    <span className="text-[10px] font-bold text-stone-500 block mb-1">
+                      সর্বনিম্ন দাম (৳)
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      placeholder="যেমন: ৩০০"
+                      value={minPriceInput}
+                      onChange={(e) => setMinPriceInput(e.target.value)}
+                      className="w-full px-3 py-1.5 bg-stone-50 border border-stone-200 rounded-xl font-mono text-xs"
+                    />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold text-stone-500 block mb-1">
+                      সর্বোচ্চ দাম (৳)
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      placeholder="যেমন: ২৫০০"
+                      value={maxPriceInput}
+                      onChange={(e) => setMaxPriceInput(e.target.value)}
+                      className="w-full px-3 py-1.5 bg-stone-50 border border-stone-200 rounded-xl font-mono text-xs"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 4. Variant Attributes: Colors */}
+              {availableColors.length > 0 && (
+                <div className="space-y-2 pt-3 border-t border-stone-100">
+                  <div className="flex items-center justify-between">
+                    <label className="block font-extrabold text-stone-900 text-xs">
+                      ৪. কালার ভ্যারিয়েন্ট (Color Attributes)
+                    </label>
+                    {selectedColors.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedColors([])}
+                        className="text-[10.5px] font-bold text-[#E11D48] hover:underline cursor-pointer"
+                      >
+                        রিসেট
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {availableColors.map((color) => {
+                      const active = selectedColors.includes(color);
+                      return (
+                        <button
+                          key={`filter-color-${color}`}
+                          type="button"
+                          onClick={() => toggleColorFilter(color)}
+                          className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-bold cursor-pointer transition-all ${
+                            active
+                              ? isOrganic
+                                ? 'bg-[#16A34A] text-white border-[#16A34A]'
+                                : 'bg-[#E11D48] text-white border-[#E11D48]'
+                              : 'bg-white border-stone-200 text-stone-700 hover:bg-stone-50'
+                          }`}
+                        >
+                          {color}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* 5. Variant Attributes: Sizes */}
+              {availableSizes.length > 0 && (
+                <div className="space-y-2 pt-3 border-t border-stone-100">
+                  <div className="flex items-center justify-between">
+                    <label className="block font-extrabold text-stone-900 text-xs">
+                      ৫. সাইজ / প্যাক ভ্যারিয়েন্ট (Size Attributes)
+                    </label>
+                    {selectedSizes.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedSizes([])}
+                        className="text-[10.5px] font-bold text-[#E11D48] hover:underline cursor-pointer"
+                      >
+                        রিসেট
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {availableSizes.map((size) => {
+                      const active = selectedSizes.includes(size);
+                      return (
+                        <button
+                          key={`filter-size-${size}`}
+                          type="button"
+                          onClick={() => toggleSizeFilter(size)}
+                          className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-bold cursor-pointer transition-all ${
+                            active
+                              ? isOrganic
+                                ? 'bg-[#16A34A] text-white border-[#16A34A]'
+                                : 'bg-[#E11D48] text-white border-[#E11D48]'
+                              : 'bg-white border-stone-200 text-stone-700 hover:bg-stone-50'
+                          }`}
+                        >
+                          {size}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Drawer Footer Actions */}
+            <div className="p-4 border-t border-stone-200 bg-stone-50 flex items-center gap-2.5">
+              <button
+                type="button"
+                onClick={resetAllCatalogFilters}
+                className="px-4 py-2.5 rounded-xl border border-stone-300 bg-white hover:bg-stone-100 text-stone-700 text-xs font-extrabold cursor-pointer transition-colors"
+              >
+                সব রিসেট করুন
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsFilterDrawerOpen(false)}
+                className={`flex-1 py-2.5 px-4 rounded-xl text-white text-xs font-extrabold cursor-pointer shadow-sm transition-colors ${
+                  isOrganic
+                    ? 'bg-[#16A34A] hover:bg-[#15803D]'
+                    : 'bg-[#E11D48] hover:bg-[#BE123C]'
+                }`}
+              >
+                ফলাফল দেখুন ({filteredProducts.length} টি পণ্য)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

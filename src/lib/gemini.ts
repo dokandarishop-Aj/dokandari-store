@@ -225,36 +225,54 @@ export function cleanProductTitle(rawTitle: string): string {
 
 /**
  * Returns the public, externally accessible origin for sharing links across mobile and external browsers.
- * Automatically converts private AI Studio developer preview origins (`https://ais-dev-...`)
- * into the public shared origin (`https://ais-pre-...`), while preserving custom domains (e.g. `https://dokandari.com`).
+ * When copying links from inside the AI Studio preview (`ais-dev-...` or `ais-pre-...`), always returns
+ * `https://www.dokandari.com` so ad campaigns and external browsers never hit a Google login wall or 404.
  */
 export function getPublicShareOrigin(): string {
   if (typeof window === 'undefined' || !window.location?.origin) {
-    return 'https://dokandari.com';
+    return 'https://www.dokandari.com';
   }
-  const rawOrigin = window.location.origin.trim().replace(/\/+$/, '');
-  if (rawOrigin.includes('://ais-dev-')) {
-    return rawOrigin.replace('://ais-dev-', '://ais-pre-');
+  const host = (window.location.hostname || '').toLowerCase();
+  if (
+    host.includes('.run.app') ||
+    host.includes('localhost') ||
+    host.includes('127.0.0.1')
+  ) {
+    return 'https://www.dokandari.com';
   }
-  return rawOrigin;
+  return window.location.origin.trim().replace(/\/+$/, '');
 }
 
 /**
- * Returns a clean, unique shareable product URL after the main domain (e.g. https://dokandari.com/products/<id>?brand=dokandari)
+ * Returns a 100% cross-browser compatible Root Query product URL
+ * (e.g. https://www.dokandari.com/?product=<id>) that never triggers 404 on any static/CDN host or in-app browser.
  */
 export function getProductShareUrl(productId: string): string {
-  const cleanId = String(productId || '').trim();
+  const cleanId = String(productId || '')
+    .trim()
+    .split(/[?#&]/)[0]
+    .replace(/^\/+|\/+$/g, '')
+    .trim();
   const origin = getPublicShareOrigin();
-  return `${origin}/products/${encodeURIComponent(cleanId)}?brand=dokandari`;
+  if (!cleanId) return `${origin}/?catalog=all`;
+  return `${origin}/?product=${encodeURIComponent(cleanId)}`;
 }
 
 /**
- * Returns a clean, unique catalog/category URL after the main domain (e.g. https://dokandari.com/catalog/<catId>?brand=dokandari)
+ * Returns a 100% cross-browser compatible Root Query catalog/category URL
+ * (e.g. https://www.dokandari.com/?catalog=<catId>) that never triggers 404 on any external browser.
  */
 export function getCatalogShareUrl(categoryId: string): string {
-  const cleanCat = String(categoryId || '').trim();
+  const cleanCat = String(categoryId || 'all')
+    .trim()
+    .split(/[?#&]/)[0]
+    .replace(/^\/+|\/+$/g, '')
+    .trim();
   const origin = getPublicShareOrigin();
-  return `${origin}/catalog/${encodeURIComponent(cleanCat)}?brand=dokandari`;
+  if (!cleanCat || cleanCat === 'all') {
+    return `${origin}/?catalog=all`;
+  }
+  return `${origin}/?catalog=${encodeURIComponent(cleanCat)}`;
 }
 
 /**

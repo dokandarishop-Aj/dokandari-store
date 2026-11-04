@@ -8,9 +8,9 @@ import { X, CheckCircle2, ShieldCheck, Truck, ArrowRight, Zap, Trash2, Plus, Min
 import confetti from 'canvas-confetti';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
-import { CustomerInfo, Order } from '../types';
+import { CustomerInfo, Order, Product } from '../types';
 import { trackPixelPageView, trackPixelInitiateCheckout, trackPixelPurchase } from '../lib/pixelManager';
-import { captureAbandonedLeadDebounced, markLeadConverted } from '../lib/leadRecovery';
+import { captureAbandonedLeadDebounced, markLeadConverted, normalizePhone } from '../lib/leadRecovery';
 import {
   resolveSafeProductImageUrl,
   handleProductImageError,
@@ -22,12 +22,16 @@ interface CheckoutModalProps {
   isOpen: boolean;
   onClose: () => void;
   onOrderSuccess: (orderId: string) => void;
+  allProducts?: Product[];
+  onSelectProduct?: (product: Product) => void;
 }
 
 export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   isOpen,
   onClose,
   onOrderSuccess,
+  allProducts = [],
+  onSelectProduct,
 }) => {
   const { items, subtotal, updateQuantity, removeFromCart, clearCart, deliveryZone, setDeliveryZone } = useCart();
   const { firebaseUser, userProfile } = useAuth();
@@ -76,9 +80,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
   // Real-time Lead Recovery mechanism: automatically captures phone & basic info
   useEffect(() => {
-    if (isOpen && customerPhone && customerPhone.replace(/\D/g, '').length >= 6) {
+    if (isOpen && customerPhone && normalizePhone(customerPhone).length >= 6) {
       captureAbandonedLeadDebounced({
-        customerPhone,
+        customerPhone: normalizePhone(customerPhone),
         customerName,
         customerAddress,
         deliveryArea: deliveryZone,
@@ -103,7 +107,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       setErrorMsg('অনুগ্রহ করে আপনার সম্পূর্ণ নাম লিখুন।');
       return;
     }
-    if (!customerPhone.trim() || customerPhone.replace(/\D/g, '').length < 10) {
+    const cleanPhoneDigits = normalizePhone(customerPhone);
+    if (!cleanPhoneDigits || cleanPhoneDigits.length < 10) {
       setErrorMsg('অনুগ্রহ করে সঠিক ১১ ডিজিটের মোবাইল নম্বর দিন (যেমন: 017XXXXXXXX)।');
       return;
     }
@@ -120,7 +125,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
       const customer: CustomerInfo = {
         name: customerName.trim(),
-        phone: customerPhone.trim(),
+        phone: cleanPhoneDigits,
         address: customerAddress.trim(),
         city: deliveryZone === 'dhaka' ? 'Dhaka' : 'Outside Dhaka',
         district: deliveryZone === 'dhaka' ? 'Dhaka' : 'Bangladesh',
@@ -155,10 +160,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       await saveOrderPersisted(newOrder);
 
       // Mark abandoned lead as successfully converted
-      markLeadConverted(customerPhone, orderId);
+      markLeadConverted(cleanPhoneDigits, orderId);
 
       try {
-        window.history.pushState(null, '', `/thank-you/${encodeURIComponent(orderId)}?brand=dokandari`);
+        window.history.pushState(null, '', `/?thank_you=${encodeURIComponent(orderId)}&brand=dokandari`);
       } catch {
         // ignore
       }
@@ -300,6 +305,71 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 আরো কেনাকাটা করুন
               </button>
             </div>
+
+            {/* Same-Category Suggested Products on Thank You View */}
+            {(() => {
+              const orderedCategory = completedOrder.items?.[0]?.category;
+              const orderedIds = new Set((completedOrder.items || []).map((i) => i.productId));
+              const sameCatProducts = allProducts.filter(
+                (p) => !orderedIds.has(p.id) && (!orderedCategory || p.category === orderedCategory)
+              );
+              const suggested = (
+                sameCatProducts.length > 0
+                  ? sameCatProducts
+                  : allProducts.filter((p) => !orderedIds.has(p.id))
+              ).slice(0, 4);
+
+              if (suggested.length === 0) return null;
+
+              return (
+                <div className="pt-4 border-t border-stone-200 text-left space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs sm:text-sm font-extrabold text-stone-900">
+                      ✨ এই ক্যাটাগরির আরও জনপ্রিয় প্রোডাক্ট (Suggested Products)
+                    </h4>
+                    <span className="text-[10px] font-bold text-[#E11D48] bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200">
+                      ১-ক্লিকে দেখুন ও অর্ডার করুন
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                    {suggested.map((sp) => (
+                      <div
+                        key={sp.id}
+                        onClick={() => {
+                          setCompletedOrder(null);
+                          onClose();
+                          if (onSelectProduct) onSelectProduct(sp);
+                        }}
+                        className="group bg-stone-50 hover:bg-rose-50/50 border border-stone-200 hover:border-rose-300 rounded-xl p-2 cursor-pointer transition-all flex flex-col justify-between"
+                      >
+                        <div>
+                          <div className="aspect-square rounded-lg overflow-hidden bg-white border border-stone-200 mb-1.5">
+                            <img
+                              src={resolveSafeProductImageUrl(sp.images[0], sp, 0)}
+                              alt={sp.name}
+                              onError={(e) => handleProductImageError(e, sp, 0)}
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                              referrerPolicy="no-referrer"
+                            />
+                          </div>
+                          <p className="text-[11px] font-bold text-stone-900 line-clamp-2 leading-tight">
+                            {sp.name}
+                          </p>
+                        </div>
+                        <div className="mt-1.5 pt-1 border-t border-stone-200/70 flex items-center justify-between">
+                          <span className="text-xs font-extrabold font-mono text-[#E11D48]">
+                            ৳{sp.price.toLocaleString()}
+                          </span>
+                          <span className="text-[10px] font-bold text-white bg-[#E11D48] px-2 py-0.5 rounded-md">
+                            অর্ডার
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         ) : (
           /* Compact & Attractive Order Form */

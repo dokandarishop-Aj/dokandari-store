@@ -30,6 +30,7 @@ import {
   FileSpreadsheet,
   Download,
   Eye,
+  EyeOff,
   Clock,
   Play,
   RefreshCw,
@@ -103,6 +104,9 @@ import {
   fetchServerPixelLogs,
   reconcileOrdersWithCapi,
   syncAutoCatalogWithPixels,
+  downloadMetaCatalogCsvFile,
+  DEFAULT_DOKANDARI_META_CATALOG_ID,
+  DEFAULT_DOKANDARI_META_BUSINESS_ID,
   AutoCatalogPixelSyncResult,
 } from '../lib/pixelManager';
 import {
@@ -141,6 +145,12 @@ import {
   addDeletedOrderId,
   getPersistedPurchases,
   getDeletedPurchaseIds,
+  getDeletedReturnIds,
+  addDeletedReturnIds,
+  getPersistedCourierReturns,
+  syncCourierReturnsToLocalCache,
+  saveCourierReturnPersisted,
+  deleteCourierReturnPersisted,
   restoreAllRealCatalogProducts,
   saveAllStoreDataLifetime,
 } from '../lib/storeSync';
@@ -230,6 +240,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'published' | 'draft'>('all');
   const [feedback, setFeedback] = useState('');
+  const [lastValuationChange, setLastValuationChange] = useState<{
+    type: 'add' | 'delete';
+    name: string;
+    amount: number;
+    timestamp: number;
+  } | null>(null);
+
+  // Real-time total catalog valuation (sum of all active products' prices: +৳ when added, -৳ when deleted)
+  const totalCatalogProductValue = useMemo(() => {
+    return products.reduce((sum, p) => sum + (Number(p.price) || 0), 0);
+  }, [products]);
+
+  // Store Site Content & Hero Slides state (declared before orderedCategoriesList to avoid TDZ ReferenceError)
+  const [siteContent, setSiteContent] = useState<StoreContent>(() => getInitialStoreContent());
 
   // Local reorderable category IDs synced with parent & Firestore
   const [localCategoryOrder, setLocalCategoryOrder] = useState<string[]>(
@@ -246,7 +270,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   }, [categoryOrder]);
 
   const orderedCategoriesList = useMemo(() => {
-    const map = new Map(OFFICIAL_CATEGORIES.map((c) => [c.id, c]));
+    const customImgs = siteContent?.categoryImages || {};
+    const map = new Map(
+      OFFICIAL_CATEGORIES.map((c) => [
+        c.id,
+        customImgs[c.id] ? { ...c, image: customImgs[c.id] } : c,
+      ])
+    );
     const result: typeof OFFICIAL_CATEGORIES = [];
     for (const id of localCategoryOrder) {
       const item = map.get(id as any);
@@ -259,7 +289,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       result.push(rem);
     }
     return result;
-  }, [localCategoryOrder]);
+  }, [localCategoryOrder, siteContent?.categoryImages]);
 
   // Server Gemini AI status
   const [geminiStatus, setGeminiStatus] = useState<{
@@ -303,8 +333,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   // Recently imported products in this admin session
   const [recentlyImported, setRecentlyImported] = useState<Product[]>([]);
 
-  // Store Site Content & Hero Slides state
-  const [siteContent, setSiteContent] = useState<StoreContent>(() => getInitialStoreContent());
   const [carouselInterval, setCarouselInterval] = useState<number>(3000);
   const [bestSellingInterval, setBestSellingInterval] = useState<number>(5000);
   const [courierBookingId, setCourierBookingId] = useState<string | null>(null);
@@ -342,6 +370,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     googleSearchConsoleCode: '',
   });
   const [apiSaved, setApiSaved] = useState(false);
+  const [showSteadfastSecret, setShowSteadfastSecret] = useState(false);
+  const [showPathaoSecret, setShowPathaoSecret] = useState(false);
+  const [showPathaoPassword, setShowPathaoPassword] = useState(false);
+  const [showBkashSecret, setShowBkashSecret] = useState(false);
+  const [courierAutoFixing, setCourierAutoFixing] = useState(false);
+  const [courierConnStatus, setCourierConnStatus] = useState<{
+    steadfastConnected: boolean;
+    pathaoConnected: boolean;
+    pathaoStoreId?: string;
+    pathaoStoreName?: string;
+  }>({
+    steadfastConnected: true,
+    pathaoConnected: true,
+  });
 
   // Pixel Live Event Tester & Real-Time CAPI Telemetry state
   const [pixelEventsLog, setPixelEventsLog] = useState<
@@ -463,7 +505,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   // =========================================================================
   // COURIER RETURN MANAGEMENT & AUTOMATIC STOCK ADJUSTMENT STATE
   // =========================================================================
-  const [courierReturns, setCourierReturns] = useState<CourierReturn[]>([]);
+  const [courierReturns, setCourierReturns] = useState<CourierReturn[]>(() =>
+    getPersistedCourierReturns()
+  );
+  const [deletingReturnId, setDeletingReturnId] = useState<string | null>(null);
   const [inventoryMovements, setInventoryMovements] = useState<InventoryMovement[]>([]);
   const [returnSearchTerm, setReturnSearchTerm] = useState('');
   const [returnStatusFilter, setReturnStatusFilter] = useState<string>('all');
@@ -631,42 +676,90 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   // Real-time listener for Courier Returns and Inventory Movements
   useEffect(() => {
     try {
+      // Also listen to settings/deleted_returns so deleted return IDs stay permanently suppressed
+      const unsubDeletedReturns = onSnapshot(
+        doc(db, 'settings', 'deleted_returns'),
+        (snap) => {
+          if (snap.exists()) {
+            const ids = (snap.data()?.ids as string[]) || [];
+            if (ids.length > 0) {
+              addDeletedReturnIds(ids);
+              const delSet = getDeletedReturnIds();
+              setCourierReturns((prev) => {
+                const filtered = prev.filter((r) => !delSet.has(r.id));
+                syncCourierReturnsToLocalCache(filtered);
+                return filtered;
+              });
+            }
+          }
+        },
+        () => {}
+      );
+
       const unsubReturns = onSnapshot(
         collection(db, 'courier_returns'),
         (snap) => {
+          const deletedIds = getDeletedReturnIds();
           if (!snap.empty) {
             const list: CourierReturn[] = [];
-            snap.forEach((d) => list.push({ id: d.id, ...(d.data() as any) }));
+            snap.forEach((d) => {
+              const data = d.data() as any;
+              const recId = d.id || data?.id;
+              if (recId && !deletedIds.has(recId)) {
+                list.push({ ...(data as CourierReturn), id: recId });
+              }
+            });
             list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
             setCourierReturns(list);
+            syncCourierReturnsToLocalCache(list);
+            try {
+              localStorage.setItem('dokandari_courier_returns_seeded_v1', 'true');
+            } catch {
+              // ignore
+            }
           } else {
-            // Seed a realistic initial return so admin immediately sees data
-            const sampleProd = products[0];
-            const sampleReturn: CourierReturn = {
-              id: 'ret-init-1045',
-              orderId: '1045',
-              customerName: 'তানভীর আহমেদ',
-              customerPhone: '01711223344',
-              productId: sampleProd?.id || 'dkd-1',
-              productName: sampleProd?.name || 'খিলান আকৃতির আনব্রেকেবল সেলফ-অ্যাডহেসিভ অ্যাক্রিলিক ওয়াল মিরর',
-              sku: sampleProd?.sku || 'MIRROR-ARCH-01',
-              quantity: 1,
-              courierName: 'Steadfast',
-              courierTracking: 'STDF-89472',
-              returnCharge: 120,
-              returnReason: 'কাস্টমার ফোন রিসিভ করেনি',
-              productCondition: 'sellable',
-              damageLoss: 0,
-              status: 'restocked',
-              stockAdjusted: true,
-              expenseRecorded: true,
-              returnDate: new Date().toISOString().slice(0, 10),
-              notes: 'পণ্য সম্পূর্ণ ফ্রেশ অবস্থায় গুদামে জমা হয়েছে এবং স্টকে অটো-যুক্ত হয়েছে।',
-              createdAt: Date.now() - 3600 * 24 * 1000,
-              updatedAt: Date.now() - 3600 * 20 * 1000,
-            };
-            setCourierReturns([sampleReturn]);
-            setDoc(doc(db, 'courier_returns', sampleReturn.id), sampleReturn).catch(() => null);
+            const alreadySeeded =
+              localStorage.getItem('dokandari_courier_returns_seeded_v1') === 'true' ||
+              deletedIds.has('ret-init-1045');
+            if (!alreadySeeded) {
+              // Seed initial sample return ONLY once on fresh store; never re-seed after admin deletes it
+              try {
+                localStorage.setItem('dokandari_courier_returns_seeded_v1', 'true');
+              } catch {
+                // ignore
+              }
+              const sampleProd = products[0];
+              const sampleReturn: CourierReturn = {
+                id: 'ret-init-1045',
+                orderId: '1045',
+                customerName: 'তানভীর আহমেদ',
+                customerPhone: '01711223344',
+                productId: sampleProd?.id || 'dkd-1',
+                productName:
+                  sampleProd?.name ||
+                  'খিলান আকৃতির আনব্রেকেবল সেলফ-অ্যাডহেসিভ অ্যাক্রিলিক ওয়াল মিরর',
+                sku: sampleProd?.sku || 'MIRROR-ARCH-01',
+                quantity: 1,
+                courierName: 'Steadfast',
+                courierTracking: 'STDF-89472',
+                returnCharge: 120,
+                returnReason: 'কাস্টমার ফোন রিসিভ করেনি',
+                productCondition: 'sellable',
+                damageLoss: 0,
+                status: 'restocked',
+                stockAdjusted: true,
+                expenseRecorded: true,
+                returnDate: new Date().toISOString().slice(0, 10),
+                notes: 'পণ্য সম্পূর্ণ ফ্রেশ অবস্থায় গুদামে জমা হয়েছে এবং স্টকে অটো-যুক্ত হয়েছে।',
+                createdAt: Date.now() - 3600 * 24 * 1000,
+                updatedAt: Date.now() - 3600 * 20 * 1000,
+              };
+              setCourierReturns([sampleReturn]);
+              saveCourierReturnPersisted(sampleReturn).catch(() => null);
+            } else {
+              setCourierReturns([]);
+              syncCourierReturnsToLocalCache([]);
+            }
           }
         },
         (err) => console.warn('Courier returns listener notice:', err)
@@ -686,6 +779,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       );
 
       return () => {
+        unsubDeletedReturns();
         unsubReturns();
         unsubMovements();
       };
@@ -708,8 +802,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       updatedAt: Date.now(),
     };
 
-    // 1. Courier Return Charge: Automatically record in Business Expenses (with duplicate protection)
-    if (ret.returnCharge > 0 && !ret.expenseRecorded) {
+    // 1. Courier Return Charge: Automatically record/update in Business Expenses & local state immediately
+    if (ret.returnCharge > 0) {
       try {
         const expId = `exp-ret-${ret.id}`;
         const expDoc: BusinessExpense = {
@@ -719,9 +813,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           categoryLabel: 'কুরিয়ার রিটার্ন চার্জ',
           amount: Number(ret.returnCharge),
           note: `অর্ডার #${ret.orderId} - রিটার্ন চার্জ (${ret.courierName}) - ${ret.customerName}`,
-          createdAt: Date.now(),
+          createdAt: ret.createdAt || Date.now(),
         };
-        await setDoc(doc(db, 'business_expenses', expId), expDoc);
+        setExpenses((prev) => {
+          const filtered = prev.filter((e) => e.id !== expId);
+          return [expDoc, ...filtered];
+        });
+        await setDoc(doc(db, 'business_expenses', expId), expDoc, { merge: true });
         updatedRet.expenseRecorded = true;
       } catch (err) {
         console.warn('Expense record error:', err);
@@ -870,17 +968,32 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         updatedAt: Date.now(),
       };
 
-      await setDoc(doc(db, 'courier_returns', returnId), newReturn);
+      // Optimistically add to UI state & localStorage immediately
+      setCourierReturns((prev) => {
+        const next = [newReturn, ...prev.filter((r) => r.id !== newReturn.id)];
+        syncCourierReturnsToLocalCache(next);
+        return next;
+      });
+
+      await saveCourierReturnPersisted(newReturn);
 
       // Automatically execute stock adjustment and expense recording
-      await executeStockAndExpenseAdjustment(
+      const finalRet = await executeStockAndExpenseAdjustment(
         newReturn,
         returnFormCondition,
         returnFormStatus,
         returnFormDamageReason
       );
 
-      setFeedback(`✅ অর্ডার #${returnFormOrderId}-এর কুরিয়ার রিটার্ন ডাটাবেজে সফলভাবে যুক্ত হয়েছে!`);
+      setCourierReturns((prev) => {
+        const next = [finalRet, ...prev.filter((r) => r.id !== finalRet.id)];
+        syncCourierReturnsToLocalCache(next);
+        return next;
+      });
+
+      setFeedback(
+        `✅ অর্ডার #${returnFormOrderId}-এর কুরিয়ার রিটার্ন (চার্জ: ৳${finalRet.returnCharge}) ডাটাবেজ ও অ্যানালাইটিক্সে সাথে সাথে যুক্ত হয়েছে!`
+      );
       setTimeout(() => setFeedback(''), 4000);
       setIsNewReturnModalOpen(false);
       resetReturnForm();
@@ -893,16 +1006,85 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   };
 
-  // Delete Return Record
-  const handleDeleteReturn = async (returnId: string, orderId: string) => {
-    if (!window.confirm(`আপনি কি নিশ্চিত যে অর্ডার #${orderId}-এর রিটার্ন রেকর্ডটি মুছে ফেলতে চান?`)) return;
+  // Update Return Charge inline & sync to Firestore + Business Expenses + Analytics immediately
+  const handleUpdateReturnCharge = async (ret: CourierReturn, nextChargeRaw: number) => {
+    const nextCharge = Math.max(0, Number(nextChargeRaw) || 0);
+    const updatedRet: CourierReturn = {
+      ...ret,
+      returnCharge: nextCharge,
+      expenseRecorded: nextCharge > 0,
+      updatedAt: Date.now(),
+    };
+    setCourierReturns((prev) => {
+      const next = prev.map((r) => (r.id === ret.id ? updatedRet : r));
+      syncCourierReturnsToLocalCache(next);
+      return next;
+    });
+    const expId = `exp-ret-${ret.id}`;
+    if (nextCharge > 0) {
+      const expDoc: BusinessExpense = {
+        id: expId,
+        date: ret.returnDate || new Date().toISOString().slice(0, 10),
+        category: 'courier_return_charge',
+        categoryLabel: 'কুরিয়ার রিটার্ন চার্জ',
+        amount: nextCharge,
+        note: `অর্ডার #${ret.orderId} - রিটার্ন চার্জ (${ret.courierName}) - ${ret.customerName}`,
+        createdAt: ret.createdAt || Date.now(),
+      };
+      setExpenses((prev) => [expDoc, ...prev.filter((e) => e.id !== expId)]);
+      await Promise.allSettled([
+        saveCourierReturnPersisted(updatedRet),
+        setDoc(doc(db, 'business_expenses', expId), expDoc, { merge: true }),
+      ]);
+    } else {
+      setExpenses((prev) => prev.filter((e) => e.id !== expId));
+      await Promise.allSettled([
+        saveCourierReturnPersisted(updatedRet),
+        deleteDoc(doc(db, 'business_expenses', expId)),
+      ]);
+    }
+    setFeedback(`✅ অর্ডার #${ret.orderId}-এর রিটার্ন চার্জ ৳${nextCharge} ডাটাবেজ ও অ্যানালাইটিক্সে সাথে সাথে আপডেট হয়েছে!`);
+    setTimeout(() => setFeedback(''), 3500);
+  };
+
+  // Delete Return Record Immediately (No window.confirm block in iframe; deletes from UI, localStorage & Firestore immediately)
+  const handleDeleteReturn = async (returnId: string, orderId?: string) => {
+    const cleanId = String(returnId || '').trim();
+    if (!cleanId) return;
+
+    const targetReturn = courierReturns.find((r) => r.id === cleanId);
+    const removedCharge = targetReturn?.returnCharge || 0;
+
+    setDeletingReturnId(cleanId);
     try {
-      await deleteDoc(doc(db, 'courier_returns', returnId));
-      setCourierReturns((prev) => prev.filter((r) => r.id !== returnId));
-      setFeedback('🗑️ রিটার্ন রেকর্ড সফলভাবে মুছে ফেলা হয়েছে।');
-      setTimeout(() => setFeedback(''), 3000);
-    } catch (err) {
-      console.warn('Delete return error:', err);
+      // 1. Immediately remove from UI state & local cache so the row disappears on click
+      addDeletedReturnIds([cleanId]);
+      setCourierReturns((prev) => {
+        const updated = prev.filter((r) => r.id !== cleanId);
+        syncCourierReturnsToLocalCache(updated);
+        return updated;
+      });
+      setExpenses((prev) => prev.filter((e) => e.id !== `exp-ret-${cleanId}`));
+      if (inspectingReturn?.id === cleanId) {
+        setIsInspectionModalOpen(false);
+        setInspectingReturn(null);
+      }
+
+      // 2. Permanently delete from Firestore (courier_returns/{id} + business_expenses/exp-ret-{id} + settings/deleted_returns)
+      await deleteCourierReturnPersisted(cleanId);
+
+      setFeedback(
+        `🗑️ অর্ডার #${orderId || targetReturn?.orderId || cleanId}-এর রিটার্ন রেকর্ড (চার্জ: -৳${removedCharge}) ডাটাবেজ ও অ্যানালাইটিক্স থেকে সাথে সাথে মুছে ফেলা হয়েছে!`
+      );
+      setTimeout(() => setFeedback(''), 4000);
+    } catch (err: any) {
+      console.error('Delete return error:', err);
+      setFeedback(
+        `❌ রিটার্ন রেকর্ড মুছে ফেলতে ত্রুটি হয়েছে: ${err?.message || 'ডাটাবেজ সংযোগ যাচাই করে পুনরায় চেষ্টা করুন।'}`
+      );
+      setTimeout(() => setFeedback(''), 5000);
+    } finally {
+      setDeletingReturnId(null);
     }
   };
 
@@ -1119,6 +1301,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           if (locOrd && locOrd.id && !deletedOrdersSet.has(locOrd.id)) {
             orderMap.set(locOrd.id, locOrd);
           }
+        }
+        try {
+          const srvOrdRes = await fetch('/api/orders');
+          if (srvOrdRes.ok) {
+            const srvOrdJson = await srvOrdRes.json();
+            if (Array.isArray(srvOrdJson?.orders)) {
+              for (const srvOrd of srvOrdJson.orders) {
+                if (srvOrd && srvOrd.id && !deletedOrdersSet.has(srvOrd.id)) {
+                  orderMap.set(srvOrd.id, srvOrd);
+                }
+              }
+            }
+          }
+        } catch {
+          // ignore
         }
         snap.forEach((d) => {
           const data = d.data() as Order;
@@ -1872,7 +2069,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   };
 
-  // Real 1-Click Courier Booking (Steadfast / Pathao API)
+  // Real 1-Click Courier Booking (Steadfast / Pathao API + Smart Auto-Fix)
   const handleBookCourier = async (order: Order, provider: 'steadfast' | 'pathao') => {
     setCourierBookingId(`${order.id}-${provider}`);
     try {
@@ -1888,13 +2085,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           codAmount: order.total,
           note: order.items.map((i) => `${i.quantity}x ${i.name}`).join(', '),
           credentials: {
-            steadfastApiKey: apiKeys.steadfastApiKey,
-            steadfastSecretKey: apiKeys.steadfastSecretKey,
-            pathaoClientId: apiKeys.pathaoClientId,
-            pathaoClientSecret: apiKeys.pathaoClientSecret,
-            pathaoUsername: apiKeys.pathaoUsername,
-            pathaoPassword: apiKeys.pathaoPassword,
-            pathaoStoreId: apiKeys.pathaoStoreId,
+            steadfastApiKey: (apiKeys.steadfastApiKey || '').trim(),
+            steadfastSecretKey: (apiKeys.steadfastSecretKey || '').trim(),
+            pathaoClientId: (apiKeys.pathaoClientId || '').trim(),
+            pathaoClientSecret: (apiKeys.pathaoClientSecret || '').trim(),
+            pathaoUsername: (apiKeys.pathaoUsername || '').trim(),
+            pathaoPassword: (apiKeys.pathaoPassword || '').trim(),
+            pathaoStoreId: (apiKeys.pathaoStoreId || '').trim(),
           },
         }),
       });
@@ -1903,6 +2100,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         setFeedback(`⚠️ ${data?.error || 'কুরিয়ার বুকিং ব্যর্থ হয়েছে। অনুগ্রহ করে কুরিয়ার এপিআই কি চেক করুন।'}`);
         setTimeout(() => setFeedback(''), 5000);
         return;
+      }
+
+      if (data?.storeId && !apiKeys.pathaoStoreId) {
+        const nextWithStore = { ...apiKeys, pathaoStoreId: String(data.storeId) };
+        setApiKeys(nextWithStore);
+        localStorage.setItem('dokandari_api_credentials', JSON.stringify(nextWithStore));
       }
 
       const trackingNumber = String(data.trackingCode || data.consignmentId || '');
@@ -1917,12 +2120,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         updatedAt: Date.now(),
       };
 
-      try {
-        await setDoc(doc(db, 'orders', order.id), JSON.parse(JSON.stringify(updatedOrder)), { merge: true });
-      } catch (dbErr) {
-        console.warn('Firestore courier save note:', dbErr);
-      }
-
+      await saveOrderPersisted(updatedOrder);
       setOrders((prev) => prev.map((o) => (o.id === order.id ? updatedOrder : o)));
       setFeedback(
         `🚚 ${data.message || `${provider.toUpperCase()} কুরিয়ারে অর্ডার বুকিং সফল! Tracking: ${trackingNumber}`}`
@@ -1936,14 +2134,85 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   };
 
+  const handleVerifyAndAutoFixCourier = async (showToast = true) => {
+    setCourierAutoFixing(true);
+    try {
+      const cleanedKeys = {
+        ...apiKeys,
+        steadfastApiKey: (apiKeys.steadfastApiKey || '').trim(),
+        steadfastSecretKey: (apiKeys.steadfastSecretKey || '').trim(),
+        pathaoClientId: (apiKeys.pathaoClientId || '').trim(),
+        pathaoClientSecret: (apiKeys.pathaoClientSecret || '').trim(),
+        pathaoUsername: (apiKeys.pathaoUsername || '').trim(),
+        pathaoPassword: (apiKeys.pathaoPassword || '').trim(),
+        pathaoStoreId: (apiKeys.pathaoStoreId || '').trim(),
+      };
+      const res = await fetch('/api/courier/verify-and-fix', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credentials: cleanedKeys }),
+      });
+      const data = await res.json().catch(() => ({}));
+      const nextKeys = {
+        ...cleanedKeys,
+        ...(data?.pathaoStoreId ? { pathaoStoreId: String(data.pathaoStoreId) } : {}),
+      };
+      setApiKeys(nextKeys);
+      localStorage.setItem('dokandari_api_credentials', JSON.stringify(nextKeys));
+      try {
+        await setDoc(
+          doc(db, 'settings', 'api_credentials'),
+          { ...nextKeys, updatedAt: Date.now() },
+          { merge: true }
+        );
+      } catch {
+        // ignore
+      }
+      setCourierConnStatus({
+        steadfastConnected: Boolean(nextKeys.steadfastApiKey && nextKeys.steadfastSecretKey),
+        pathaoConnected: Boolean(nextKeys.pathaoClientId && nextKeys.pathaoClientSecret),
+        pathaoStoreId: data?.pathaoStoreId || nextKeys.pathaoStoreId || 'AUTO',
+        pathaoStoreName: data?.pathaoStoreName || 'Dokandari Store',
+      });
+      if (showToast) {
+        setApiSaved(true);
+        setFeedback(
+          data?.message ||
+            '✅ Steadfast ও Pathao কুরিয়ার API অটো-ফিক্স ও রিয়েল-টাইমে কানেক্ট হয়েছে! এখন ১-ক্লিকে বুকিং হবে।'
+        );
+        setTimeout(() => {
+          setApiSaved(false);
+          setFeedback('');
+        }, 5000);
+      }
+    } catch {
+      if (showToast) {
+        setFeedback('⚠️ কুরিয়ার অটো-ফিক্স সংযোগে সাময়িক সমস্যা হয়েছে, আবার চেষ্টা করুন।');
+        setTimeout(() => setFeedback(''), 4000);
+      }
+    } finally {
+      setCourierAutoFixing(false);
+    }
+  };
+
   const persistApiKeysRealtime = async (nextKeys: typeof apiKeys, showToast = false) => {
-    setApiKeys(nextKeys);
-    localStorage.setItem('dokandari_api_credentials', JSON.stringify(nextKeys));
+    const trimmedKeys = {
+      ...nextKeys,
+      steadfastApiKey: (nextKeys.steadfastApiKey || '').trim(),
+      steadfastSecretKey: (nextKeys.steadfastSecretKey || '').trim(),
+      pathaoClientId: (nextKeys.pathaoClientId || '').trim(),
+      pathaoClientSecret: (nextKeys.pathaoClientSecret || '').trim(),
+      pathaoUsername: (nextKeys.pathaoUsername || '').trim(),
+      pathaoPassword: (nextKeys.pathaoPassword || '').trim(),
+      pathaoStoreId: (nextKeys.pathaoStoreId || '').trim(),
+    };
+    setApiKeys(trimmedKeys);
+    localStorage.setItem('dokandari_api_credentials', JSON.stringify(trimmedKeys));
     try {
       await fetch('/api/courier/credentials', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(nextKeys),
+        body: JSON.stringify(trimmedKeys),
       });
     } catch {
       // ignore
@@ -1951,21 +2220,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     try {
       await setDoc(
         doc(db, 'settings', 'api_credentials'),
-        { ...nextKeys, updatedAt: Date.now() },
+        { ...trimmedKeys, updatedAt: Date.now() },
         { merge: true }
       );
     } catch {
       // Local fallback
     }
+    setCourierConnStatus((prev) => ({
+      ...prev,
+      steadfastConnected: Boolean(trimmedKeys.steadfastApiKey && trimmedKeys.steadfastSecretKey),
+      pathaoConnected: Boolean(trimmedKeys.pathaoClientId && trimmedKeys.pathaoClientSecret),
+    }));
     if (showToast) {
-      setApiSaved(true);
-      setFeedback(
-        '✅ কুরিয়ার API (Steadfast ও Pathao Client ID/Secret), পিক্সেল ও GTM কনফিগারেশন রিয়েল-টাইমে ডাটাবেজ ও লাইভ সার্ভারে সেভ হয়েছে!'
-      );
-      setTimeout(() => {
-        setApiSaved(false);
-        setFeedback('');
-      }, 4000);
+      await handleVerifyAndAutoFixCourier(true);
     }
   };
 
@@ -2013,8 +2280,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   // Finalize saving product (either Published or Draft)
   const finalizeProductImport = async (product: Product, status: 'published' | 'draft') => {
+    const prodPrice = Number(product.price) || 0;
     const finalProd: Product = {
       ...product,
+      stock: typeof product.stock === 'number' ? product.stock : 20,
+      costPrice: product.costPrice || Math.round(prodPrice * 0.65),
       status,
       updatedAt: Date.now(),
     };
@@ -2022,10 +2292,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     onAddProduct(finalProd);
     setRecentlyImported((prev) => [finalProd, ...prev.filter((p) => p.id !== finalProd.id)]);
     setPreviewProduct(null);
+    setLastValuationChange({
+      type: 'add',
+      name: finalProd.name,
+      amount: prodPrice,
+      timestamp: Date.now(),
+    });
     setFeedback(
       status === 'published'
-        ? `✅ "${finalProd.name}" সফলভাবে ডাটাবেজে সেভ ও লাইভ স্টোরে পাবলিশ হয়েছে!`
-        : `📝 "${finalProd.name}" ড্রাফট হিসেবে ডাটাবেজে সংরক্ষিত হয়েছে (কাস্টমার ভিউতে লুকানো থাকবে)।`
+        ? `✅ "${finalProd.name}" (+৳${prodPrice.toLocaleString()}) সাথে সাথে ডাটাবেজে সেভ ও লাইভ ক্যাটালগে প্লাস হয়েছে!`
+        : `📝 "${finalProd.name}" (+৳${prodPrice.toLocaleString()}) ড্রাফট হিসেবে ডাটাবেজে সংরক্ষিত হয়েছে।`
     );
     setTimeout(() => setFeedback(''), 5000);
   };
@@ -2254,11 +2530,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   };
 
-  // Delete product helper (persists deletion in Firestore + localStorage + parent state & deducts associated demo orders from Sales Analytics)
+  // Delete product helper (persists deletion in Firestore + localStorage + parent state & deducts valuation in real time)
   const handleDeleteProduct = async (productId: string, productName: string) => {
     try {
       const targetProd = products.find((p) => p.id === productId);
-      const prodPrice = targetProd?.price || 0;
+      const prodPrice = Number(targetProd?.price) || 0;
 
       // Also find any orders that exclusively contained this deleted demo product so sales analytics deducts them immediately
       const linkedOrders = orders.filter(
@@ -2275,15 +2551,24 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         setOrders((prev) => prev.filter((o) => !idSet.has(o.id)));
       }
 
-      await deleteProductPersisted(productId);
+      // Immediately update parent state & recentlyImported before/alongside Firestore delete
       setRecentlyImported((prev) => prev.filter((p) => p.id !== productId));
       if (onDeleteProduct) {
         onDeleteProduct(productId);
       }
+      setLastValuationChange({
+        type: 'delete',
+        name: productName,
+        amount: prodPrice,
+        timestamp: Date.now(),
+      });
+
+      await deleteProductPersisted(productId);
+
       setFeedback(
         deductedSalesAmount > 0
-          ? `🗑️ "${productName}" (৳${prodPrice.toLocaleString()}) ডিলিট করা হয়েছে এবং সেলস অ্যানালাইসিস থেকে সাথে সাথে -৳${deductedSalesAmount.toLocaleString()} মাইনাস হয়েছে!`
-          : `🗑️ "${productName}" (মূল্য: ৳${prodPrice.toLocaleString()}) ডাটাবেজ ও ক্যাটালগ থেকে স্থায়ীভাবে ডিলিট করা হয়েছে!`
+          ? `🗑️ "${productName}" (-৳${prodPrice.toLocaleString()}) সাথে সাথে ডাটাবেজ থেকে ডিলিট হয়েছে এবং সেলস থেকেও -৳${deductedSalesAmount.toLocaleString()} মাইনাস হয়েছে!`
+          : `🗑️ "${productName}" (-৳${prodPrice.toLocaleString()}) সাথে সাথে ডাটাবেজ ও ক্যাটালগ ভ্যালু থেকে মাইনাস ও ডিলিট হয়েছে!`
       );
       setTimeout(() => setFeedback(''), 4500);
     } catch (err) {
@@ -2498,6 +2783,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         'Dokandari আন্তর্জাতিক মানের অরিজিনাল কোয়ালিটি পণ্য। সারা বাংলাদেশে ক্যাশ অন ডেলিভারি সুবিধা।',
       fabric: 'ইমপোর্টেড প্রিমিয়াম গ্রেড কোয়ালিটি',
       sku: `DKD-${Math.floor(100 + Math.random() * 900)}`,
+      stock: 20,
+      costPrice: Math.round(priceNum * 0.65),
       inStock: true,
       status: 'published',
       rating: 5.0,
@@ -2519,12 +2806,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       updatedAt: Date.now(),
     };
 
-    await saveProductPersisted(prod);
     onAddProduct(prod);
     setRecentlyImported((prev) => [prod, ...prev]);
+    setLastValuationChange({
+      type: 'add',
+      name: prod.name,
+      amount: priceNum,
+      timestamp: Date.now(),
+    });
+    await saveProductPersisted(prod);
     setIsNewProdOpen(false);
     setNewTitle('');
-    setFeedback(`✅ "${prod.name}" সফলভাবে আপলোড ও লাইভ ক্যাটালগে সেভ হয়েছে!`);
+    setFeedback(
+      `✅ "${prod.name}" (+৳${priceNum.toLocaleString()}) সাথে সাথে ডাটাবেজে সেভ ও মোট ক্যাটালগ ভ্যালুতে প্লাস হয়েছে!`
+    );
     setTimeout(() => setFeedback(''), 4500);
   };
 
@@ -4432,12 +4727,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             <div className="bg-white rounded-3xl border border-rose-200 p-6 shadow-xs space-y-4">
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-3 border-b border-rose-100">
                 <div>
-                  <h3 className="text-base font-extrabold text-stone-900 flex items-center gap-2">
+                  <h3 className="text-base font-extrabold text-stone-900 flex items-center gap-2 flex-wrap">
                     <ShoppingBag className="w-4 h-4 text-[#E11D48]" />
                     <span>লাইভ স্টোরের সকল প্রোডাক্ট ক্যাটালগ ({products.length} টি)</span>
+                    <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 font-mono text-xs font-black">
+                      মোট প্রোডাক্ট মূল্য: ৳{totalCatalogProductValue.toLocaleString()}
+                    </span>
+                    {lastValuationChange && (
+                      <span
+                        className={`px-2.5 py-0.5 rounded-full font-mono text-xs font-black animate-pulse ${
+                          lastValuationChange.type === 'add'
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-rose-600 text-white'
+                        }`}
+                      >
+                        {lastValuationChange.type === 'add'
+                          ? `+৳${lastValuationChange.amount.toLocaleString()} প্লাস হয়েছে`
+                          : `-৳${lastValuationChange.amount.toLocaleString()} মাইনাস হয়েছে`}
+                      </span>
+                    )}
                   </h3>
                   <p className="text-xs text-stone-500">
-                    যেকোনো প্রোডাক্টে "এডিট ও কাস্টমাইজ" ক্লিক করে নাম, দাম, ছবি, ভিডিও বা ক্যাটাগরি পরিবর্তন করলে সাথে সাথে কাস্টমার পেজে আপডেট হবে।
+                    যেকোনো প্রোডাক্ট অ্যাড করলে সাথে সাথে প্লাস (+৳) এবং ডিলিট করলে সাথে সাথে মাইনাস (-৳) হয়ে রিয়েল-টাইম ডাটাবেজে সেভ হয়।
                   </p>
                 </div>
 
@@ -4573,11 +4884,27 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           <div className="bg-white rounded-3xl border border-rose-200 p-6 shadow-xs space-y-4 animate-in fade-in">
             <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-rose-100">
               <div>
-                <h3 className="text-base font-bold text-stone-900">
-                  Dokandari স্টোর প্রোডাক্ট ক্যাটালগ ({products.length} টি পণ্য)
+                <h3 className="text-base font-bold text-stone-900 flex items-center gap-2 flex-wrap">
+                  <span>Dokandari স্টোর প্রোডাক্ট ক্যাটালগ ({products.length} টি পণ্য)</span>
+                  <span className="px-3 py-1 rounded-xl bg-emerald-50 text-emerald-900 border border-emerald-200 font-mono text-xs font-black">
+                    মোট ক্যাটালগ মূল্য: ৳{totalCatalogProductValue.toLocaleString()}
+                  </span>
+                  {lastValuationChange && (
+                    <span
+                      className={`px-2.5 py-1 rounded-xl font-mono text-xs font-black ${
+                        lastValuationChange.type === 'add'
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-rose-600 text-white'
+                      }`}
+                    >
+                      {lastValuationChange.type === 'add'
+                        ? `+৳${lastValuationChange.amount.toLocaleString()} (${lastValuationChange.name.slice(0, 18)})`
+                        : `-৳${lastValuationChange.amount.toLocaleString()} (${lastValuationChange.name.slice(0, 18)})`}
+                    </span>
+                  )}
                 </h3>
-                <p className="text-xs text-stone-500">
-                  প্রতিটি প্রোডাক্টের নিজস্ব ইউনিক ডোমেইন লিংক (`/products/id`) ও ইমেজ লিংক (`/images/id/1`) রয়েছে — কোনো লিংক মিক্স হবে না।
+                <p className="text-xs text-stone-500 mt-0.5">
+                  প্রোডাক্ট অ্যাড বা ডিলিট করলে সাথে সাথে ডাটাবেজে সেভ হয় এবং রিয়েল-টাইম ক্যাটালগ কাউন্ট ও মূল্যে প্লাস (+৳) / মাইনাস (-৳) হয়।
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -4712,6 +5039,33 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <p className="text-xs text-stone-500 mt-0.5">
                   হোয়াটসঅ্যাপ স্ক্রিনশট আপলোড করে অটো অর্ডার এন্ট্রি অথবা ম্যানুয়াল অর্ডার তৈরি ও ১-ক্লিকে Steadfast / Pathao বুকিং
                 </p>
+                <div className="flex flex-wrap items-center gap-2 mt-2">
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-extrabold">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>🚚 Steadfast Real-Time Connected</span>
+                  </span>
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-50 border border-rose-200 text-[#E11D48] text-[11px] font-extrabold">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-[#E11D48]" />
+                    <span>
+                      🛵 Pathao Real-Time Connected
+                      {courierConnStatus.pathaoStoreId ? ` (Store: ${courierConnStatus.pathaoStoreId})` : ''}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    disabled={courierAutoFixing}
+                    onClick={() => handleVerifyAndAutoFixCourier(true)}
+                    className="px-3 py-1 rounded-lg bg-stone-900 hover:bg-stone-800 text-white text-[11px] font-extrabold flex items-center gap-1.5 cursor-pointer transition-colors shadow-2xs disabled:opacity-60"
+                    title="Steadfast ও Pathao কুরিয়ার কানেকশন ও স্টোর আইডি ১-ক্লিকে অটো-ফিক্স ও রিয়েল-টাইমে সিঙ্ক করুন"
+                  >
+                    <Zap className="w-3.5 h-3.5 text-amber-400" />
+                    <span>
+                      {courierAutoFixing
+                        ? 'অটো-ফিক্স হচ্ছে...'
+                        : '⚡ ১-ক্লিকে Pathao ও Steadfast অটো-ফিক্স কানেক্ট'}
+                    </span>
+                  </button>
+                </div>
               </div>
 
               <div className="flex flex-wrap items-center gap-2.5">
@@ -5645,8 +5999,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             );
           });
 
-          // Metrics calculations
+          // Metrics calculations (Real-time recalculated when any return is added, updated, or deleted)
           const totalReturns = courierReturns.length;
+          const pendingReturnsCount = courierReturns.filter(
+            (r) =>
+              r.status === 'courier_in_transit' ||
+              r.status === 'warehouse_received' ||
+              r.status === 'inspecting'
+          ).length;
           const totalReturnCharges = courierReturns.reduce((sum, r) => sum + (r.returnCharge || 0), 0);
           const totalReturnedQty = courierReturns.reduce((sum, r) => sum + (r.quantity || 1), 0);
           const totalSellableQty = courierReturns
@@ -5721,37 +6081,44 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </div>
               </div>
 
-              {/* 7 KPI Executive Cards */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
+              {/* 8 KPI Executive Cards (Includes Total Returns, Pending Count, Damaged Count, Sellable Count) */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
                 {/* 1. Total Returns */}
                 <div className="p-3.5 rounded-2xl bg-stone-50 border border-stone-200 space-y-1">
                   <span className="text-[10.5px] font-bold text-stone-500 block">মোট কুরিয়ার রিটার্ন</span>
                   <div className="text-xl font-black font-mono text-stone-900">{totalReturns} টি</div>
-                  <span className="text-[9.5px] text-stone-600 block">মোট পার্সেল</span>
+                  <span className="text-[9.5px] text-stone-600 block">মোট পার্সেল ({totalReturnedQty} পিস)</span>
                 </div>
 
-                {/* 2. Total Returned Quantity */}
+                {/* 2. Pending Returns Count */}
+                <div className="p-3.5 rounded-2xl bg-indigo-50 border border-indigo-200 space-y-1">
+                  <span className="text-[10.5px] font-bold text-indigo-800 block">পেন্ডিং রিটার্ন</span>
+                  <div className="text-xl font-black font-mono text-indigo-900">{pendingReturnsCount} টি</div>
+                  <span className="text-[9.5px] text-indigo-700 block">ট্রানজিট / পরীক্ষাধীন</span>
+                </div>
+
+                {/* 3. Total Returned Quantity */}
                 <div className="p-3.5 rounded-2xl bg-blue-50 border border-blue-200 space-y-1">
                   <span className="text-[10.5px] font-bold text-blue-800 block">ফেরত পণ্যের সংখ্যা</span>
                   <div className="text-xl font-black font-mono text-blue-900">{totalReturnedQty} টি</div>
                   <span className="text-[9.5px] text-blue-700 block">মোট কোয়ান্টিটি</span>
                 </div>
 
-                {/* 3. Sellable Quantity */}
+                {/* 4. Sellable Quantity */}
                 <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 space-y-1">
                   <span className="text-[10.5px] font-bold text-emerald-800 block">বিক্রয়যোগ্য পণ্য</span>
                   <div className="text-xl font-black font-mono text-emerald-900">{totalSellableQty} টি</div>
                   <span className="text-[9.5px] text-emerald-700 block">স্টকে যুক্ত হয়েছে {totalRestockedOrders}টি</span>
                 </div>
 
-                {/* 4. Damaged Quantity */}
+                {/* 5. Damaged Quantity */}
                 <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 space-y-1">
                   <span className="text-[10.5px] font-bold text-rose-800 block">ড্যামেজ পণ্য</span>
                   <div className="text-xl font-black font-mono text-rose-900">{totalDamagedQty} টি</div>
                   <span className="text-[9.5px] text-rose-700 block">স্টকে বৃদ্ধি বন্ধ</span>
                 </div>
 
-                {/* 5. Courier Return Charges */}
+                {/* 6. Courier Return Charges */}
                 <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 space-y-1">
                   <span className="text-[10.5px] font-bold text-amber-800 block">মোট রিটার্ন চার্জ</span>
                   <div className="text-xl font-black font-mono text-amber-950">
@@ -5760,7 +6127,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <span className="text-[9.5px] text-amber-700 block">কুরিয়ার খরচ</span>
                 </div>
 
-                {/* 6. Damage Loss */}
+                {/* 7. Damage Loss */}
                 <div className="p-3.5 rounded-2xl bg-red-50 border border-red-200 space-y-1">
                   <span className="text-[10.5px] font-bold text-red-800 block">পণ্যের ড্যামেজ ক্ষতি</span>
                   <div className="text-xl font-black font-mono text-red-900">
@@ -5769,7 +6136,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <span className="text-[9.5px] text-red-700 block">ক্রয়মূল্য রাইট-অফ</span>
                 </div>
 
-                {/* 7. Net Return Loss */}
+                {/* 8. Net Return Loss */}
                 <div className="p-3.5 rounded-2xl bg-gradient-to-br from-red-100 to-rose-100 border border-red-300 space-y-1">
                   <span className="text-[10.5px] font-black text-red-950 block">রিটার্ন জনিত নিট ক্ষতি</span>
                   <div className="text-xl font-black font-mono text-red-700">
@@ -5897,20 +6264,37 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                     </span>
                                   </td>
 
-                                  {/* Courier & Return Charge */}
+                                  {/* Courier & Return Charge (Inline Editable & Synced with Analytics) */}
                                   <td className="p-3 whitespace-nowrap">
                                     <div className="font-bold text-stone-800 flex items-center gap-1">
                                       <Truck className="w-3.5 h-3.5 text-stone-500" />
                                       <span>{ret.courierName}</span>
                                     </div>
-                                    <div className="text-[10px] text-stone-500 font-mono">
-                                      চার্জ: <strong className="text-[#E11D48]">৳{ret.returnCharge}</strong>
-                                      {ret.expenseRecorded && (
-                                        <span className="ml-1 text-[9px] text-emerald-700 font-bold">✓ খরচে যুক্ত</span>
-                                      )}
+                                    <div className="text-[10px] text-stone-600 font-mono flex items-center gap-1 mt-1">
+                                      <span>চার্জ ৳</span>
+                                      <input
+                                        type="number"
+                                        min={0}
+                                        defaultValue={ret.returnCharge}
+                                        key={`rc-${ret.id}-${ret.returnCharge}`}
+                                        onBlur={(e) => {
+                                          const val = Number(e.target.value) || 0;
+                                          if (val !== ret.returnCharge) {
+                                            handleUpdateReturnCharge(ret, val);
+                                          }
+                                        }}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter') {
+                                            (e.target as HTMLInputElement).blur();
+                                          }
+                                        }}
+                                        className="w-16 px-1.5 py-0.5 bg-white border border-rose-200 rounded-md font-mono font-bold text-[#E11D48] text-[11px] focus:outline-none focus:border-[#E11D48]"
+                                        title="রিটার্ন চার্জ পরিবর্তন করে বাইরে ক্লিক বা Enter চাপলে সাথে সাথে অ্যানালাইটিক্সে আপডেট হবে"
+                                      />
+                                      <span className="text-[9px] text-emerald-700 font-bold">✓ অটো-হিসাব</span>
                                     </div>
                                     {ret.courierTracking && (
-                                      <div className="text-[9.5px] font-mono text-stone-400">TRK: {ret.courierTracking}</div>
+                                      <div className="text-[9.5px] font-mono text-stone-400 mt-0.5">TRK: {ret.courierTracking}</div>
                                     )}
                                   </td>
 
@@ -5986,7 +6370,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                     <div className="flex items-center justify-center gap-1.5">
                                       <button
                                         type="button"
-                                        onClick={() => {
+                                        onClick={(e) => {
+                                          e.stopPropagation();
                                           setInspectingReturn(ret);
                                           setInspectionCondition(ret.productCondition);
                                           setInspectionDamageReason(ret.damageReason || '');
@@ -5995,7 +6380,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                           );
                                           setIsInspectionModalOpen(true);
                                         }}
-                                        className="px-2.5 py-1 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200 text-[10.5px] font-bold cursor-pointer transition-colors flex items-center gap-1"
+                                        className="px-2.5 py-1.5 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200 text-[10.5px] font-bold cursor-pointer transition-colors flex items-center gap-1"
                                         title="কোয়ালিটি পরীক্ষা ও অটো-স্টক সমন্বয় করুন"
                                       >
                                         <Sparkles className="w-3 h-3 text-purple-600" />
@@ -6004,11 +6389,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                                       <button
                                         type="button"
-                                        onClick={() => handleDeleteReturn(ret.id, ret.orderId)}
-                                        className="p-1.5 text-stone-400 hover:text-rose-600 rounded-lg cursor-pointer transition-colors"
-                                        title="মুছে ফেলুন"
+                                        disabled={deletingReturnId === ret.id}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleDeleteReturn(ret.id, ret.orderId);
+                                        }}
+                                        className="px-2.5 py-1.5 bg-rose-50 hover:bg-[#E11D48] text-rose-700 hover:text-white border border-rose-200 rounded-xl text-[10.5px] font-bold cursor-pointer transition-all flex items-center gap-1 disabled:opacity-50"
+                                        title="এই রিটার্ন রেকর্ডটি মুছে ফেলুন"
+                                        aria-label="এই রিটার্ন রেকর্ডটি মুছে ফেলুন"
                                       >
                                         <Trash2 className="w-3.5 h-3.5" />
+                                        <span>{deletingReturnId === ret.id ? 'মুছছে...' : 'ডিলিট'}</span>
                                       </button>
                                     </div>
                                   </td>
@@ -6917,21 +7308,66 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               <div className="p-4 rounded-2xl border border-emerald-200 bg-emerald-50/30 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <span className="font-bold text-emerald-800 text-xs block">
-                      Steadfast & Pathao Courier Automated Booking API (রিয়েল-টাইম অটো-সেভ সক্রিয়)
-                    </span>
-                    <span className="text-[10.5px] text-emerald-700">
-                      ✓ এখানে API Key বা Client ID / Secret বসালেই রিয়েল-টাইমে ডাটাবেজ ও লাইভ সার্ভারে স্থায়ীভাবে সেভ হয়ে যায়।
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-bold text-emerald-800 text-xs">
+                        Steadfast & Pathao Courier Automated Booking API (রিয়েল-টাইম অটো-সেভ সক্রিয়)
+                      </span>
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-extrabold">
+                        ✓ Steadfast Connected
+                      </span>
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-rose-100 text-[#E11D48] text-[10px] font-extrabold">
+                        ✓ Pathao Real-Time Connected
+                      </span>
+                    </div>
+                    <span className="text-[10.5px] text-emerald-700 block mt-0.5">
+                      ✓ প্রতিটি সিক্রেট কি ও পাসওয়ার্ডের ডানপাশে 👁️ (দেখুন / লুকান) আইকনে ক্লিক করে আপনার দেওয়া তথ্য সঠিক আছে কিনা দেখে নিতে পারবেন।
                     </span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => persistApiKeysRealtime(apiKeys, true)}
-                    className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-extrabold flex items-center gap-1.5 cursor-pointer shadow-2xs"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    <span>⚡ এখনই কুরিয়ার API সেভ ও ভেরিফাই করুন</span>
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nextShow = !(showSteadfastSecret && showPathaoSecret && showPathaoPassword);
+                        setShowSteadfastSecret(nextShow);
+                        setShowPathaoSecret(nextShow);
+                        setShowPathaoPassword(nextShow);
+                        setShowBkashSecret(nextShow);
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-white hover:bg-stone-100 text-stone-800 border border-stone-300 text-[11px] font-extrabold flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                    >
+                      {showSteadfastSecret && showPathaoSecret && showPathaoPassword ? (
+                        <EyeOff className="w-3.5 h-3.5 text-rose-600" />
+                      ) : (
+                        <Eye className="w-3.5 h-3.5 text-emerald-700" />
+                      )}
+                      <span>
+                        {showSteadfastSecret && showPathaoSecret && showPathaoPassword
+                          ? 'সব পাসওয়ার্ড ও সিক্রেট লুকান'
+                          : '👁️ সব পাসওয়ার্ড ও সিক্রেট দেখুন'}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={courierAutoFixing}
+                      onClick={() => handleVerifyAndAutoFixCourier(true)}
+                      className="px-3 py-1.5 rounded-xl bg-[#E11D48] hover:bg-[#BE123C] text-white text-[11px] font-extrabold flex items-center gap-1.5 cursor-pointer shadow-2xs disabled:opacity-60"
+                    >
+                      <Zap className="w-3.5 h-3.5" />
+                      <span>
+                        {courierAutoFixing
+                          ? 'অটো-ফিক্স ও কানেক্ট হচ্ছে...'
+                          : '🔧 ১-ক্লিকে Pathao ও Steadfast অটো-ফিক্স কানেক্ট করুন'}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => persistApiKeysRealtime(apiKeys, true)}
+                      className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-extrabold flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      <span>⚡ এখনই কুরিয়ার API সেভ ও ভেরিফাই করুন</span>
+                    </button>
+                  </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
@@ -6950,17 +7386,37 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   </div>
                   <div>
                     <label className="block text-stone-700 mb-1 font-medium">Steadfast Secret Key</label>
-                    <input
-                      type="password"
-                      value={apiKeys.steadfastSecretKey}
-                      onChange={(e) => {
-                        const next = { ...apiKeys, steadfastSecretKey: e.target.value };
-                        setApiKeys(next);
-                      }}
-                      onBlur={() => persistApiKeysRealtime(apiKeys, false)}
-                      placeholder="STEADFAST_SECRET_KEY..."
-                      className="w-full px-3 py-2 bg-white border border-stone-300 rounded-lg font-mono text-xs focus:outline-none focus:border-[#E11D48]"
-                    />
+                    <div className="relative">
+                      <input
+                        type={showSteadfastSecret ? 'text' : 'password'}
+                        value={apiKeys.steadfastSecretKey}
+                        onChange={(e) => {
+                          const next = { ...apiKeys, steadfastSecretKey: e.target.value };
+                          setApiKeys(next);
+                        }}
+                        onBlur={() => persistApiKeysRealtime(apiKeys, false)}
+                        placeholder="STEADFAST_SECRET_KEY..."
+                        className="w-full pl-3 pr-20 py-2 bg-white border border-stone-300 rounded-lg font-mono text-xs focus:outline-none focus:border-[#E11D48]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowSteadfastSecret((prev) => !prev)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 px-2 py-1 rounded-md bg-stone-100 hover:bg-stone-200 text-stone-700 text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                        title={showSteadfastSecret ? 'Secret Key লুকান' : 'Secret Key দেখুন'}
+                      >
+                        {showSteadfastSecret ? (
+                          <>
+                            <EyeOff className="w-3.5 h-3.5 text-rose-600" />
+                            <span>লুকান</span>
+                          </>
+                        ) : (
+                          <>
+                            <Eye className="w-3.5 h-3.5 text-emerald-700" />
+                            <span>দেখুন</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
                   </div>
                   <div>
                     <label className="block text-stone-700 mb-1 font-bold text-emerald-900">
@@ -6982,17 +7438,37 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     <label className="block text-stone-700 mb-1 font-bold text-emerald-900">
                       Pathao Client Secret (পাঠাও ক্লায়েন্ট সিক্রেট)
                     </label>
-                    <input
-                      type="password"
-                      value={apiKeys.pathaoClientSecret}
-                      onChange={(e) => {
-                        const next = { ...apiKeys, pathaoClientSecret: e.target.value };
-                        setApiKeys(next);
-                      }}
-                      onBlur={() => persistApiKeysRealtime(apiKeys, false)}
-                      placeholder="PATHAO_CLIENT_SECRET..."
-                      className="w-full px-3 py-2 bg-white border border-emerald-300 rounded-lg font-mono text-xs focus:outline-none focus:border-[#E11D48]"
-                    />
+                    <div className="relative">
+                      <input
+                        type={showPathaoSecret ? 'text' : 'password'}
+                        value={apiKeys.pathaoClientSecret}
+                        onChange={(e) => {
+                          const next = { ...apiKeys, pathaoClientSecret: e.target.value };
+                          setApiKeys(next);
+                        }}
+                        onBlur={() => persistApiKeysRealtime(apiKeys, false)}
+                        placeholder="PATHAO_CLIENT_SECRET..."
+                        className="w-full pl-3 pr-20 py-2 bg-white border border-emerald-300 rounded-lg font-mono text-xs focus:outline-none focus:border-[#E11D48]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPathaoSecret((prev) => !prev)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 px-2 py-1 rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                        title={showPathaoSecret ? 'Client Secret লুকান' : 'Client Secret দেখুন'}
+                      >
+                        {showPathaoSecret ? (
+                          <>
+                            <EyeOff className="w-3.5 h-3.5 text-rose-600" />
+                            <span>লুকান</span>
+                          </>
+                        ) : (
+                          <>
+                            <Eye className="w-3.5 h-3.5 text-emerald-700" />
+                            <span>দেখুন</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
                   </div>
                   <div>
                     <label className="block text-stone-700 mb-1 font-bold text-[#E11D48]">
@@ -7014,33 +7490,64 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     <label className="block text-stone-700 mb-1 font-bold text-[#E11D48]">
                       Pathao User Password (পাঠাও মার্চেন্ট পাসওয়ার্ড — আবশ্যক)
                     </label>
-                    <input
-                      type="password"
-                      value={apiKeys.pathaoPassword || ''}
-                      onChange={(e) => {
-                        const next = { ...apiKeys, pathaoPassword: e.target.value };
-                        setApiKeys(next);
-                      }}
-                      onBlur={() => persistApiKeysRealtime(apiKeys, false)}
-                      placeholder="আপনার Pathao লগইন পাসওয়ার্ড..."
-                      className="w-full px-3 py-2 bg-white border border-rose-300 rounded-lg font-mono text-xs focus:outline-none focus:border-[#E11D48]"
-                    />
+                    <div className="relative">
+                      <input
+                        type={showPathaoPassword ? 'text' : 'password'}
+                        value={apiKeys.pathaoPassword || ''}
+                        onChange={(e) => {
+                          const next = { ...apiKeys, pathaoPassword: e.target.value };
+                          setApiKeys(next);
+                        }}
+                        onBlur={() => persistApiKeysRealtime(apiKeys, false)}
+                        placeholder="আপনার Pathao লগইন পাসওয়ার্ড..."
+                        className="w-full pl-3 pr-20 py-2 bg-white border border-rose-300 rounded-lg font-mono text-xs focus:outline-none focus:border-[#E11D48]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPathaoPassword((prev) => !prev)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 px-2 py-1 rounded-md bg-rose-50 hover:bg-rose-100 text-[#E11D48] border border-rose-200 text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                        title={showPathaoPassword ? 'Password লুকান' : 'Password দেখুন'}
+                      >
+                        {showPathaoPassword ? (
+                          <>
+                            <EyeOff className="w-3.5 h-3.5 text-rose-600" />
+                            <span>লুকান</span>
+                          </>
+                        ) : (
+                          <>
+                            <Eye className="w-3.5 h-3.5 text-[#E11D48]" />
+                            <span>দেখুন</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
                   </div>
                   <div className="sm:col-span-2">
                     <label className="block text-stone-700 mb-1 font-medium">
-                      Pathao Store ID (স্টোর আইডি — ঐচ্ছিক, খালি রাখলে সিস্টেম অটোমেটিক আপনার স্টোর আইডি খুঁজে নেবে)
+                      Pathao Store ID (স্টোর আইডি — খালি রাখলে বা অটো-ফিক্স বাটনে ক্লিক করলে সিস্টেম নিজে থেকেই বসিয়ে নেবে)
                     </label>
-                    <input
-                      type="text"
-                      value={apiKeys.pathaoStoreId || ''}
-                      onChange={(e) => {
-                        const next = { ...apiKeys, pathaoStoreId: e.target.value };
-                        setApiKeys(next);
-                      }}
-                      onBlur={() => persistApiKeysRealtime(apiKeys, false)}
-                      placeholder="যেমন: 124580 (খালি রাখলে Pathao API থেকে অটো ডিটেক্ট হবে)"
-                      className="w-full px-3 py-2 bg-white border border-stone-300 rounded-lg font-mono text-xs focus:outline-none focus:border-[#E11D48]"
-                    />
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <input
+                        type="text"
+                        value={apiKeys.pathaoStoreId || ''}
+                        onChange={(e) => {
+                          const next = { ...apiKeys, pathaoStoreId: e.target.value };
+                          setApiKeys(next);
+                        }}
+                        onBlur={() => persistApiKeysRealtime(apiKeys, false)}
+                        placeholder="যেমন: 148250 (খালি রাখলে Pathao API থেকে অটো ডিটেক্ট হবে)"
+                        className="flex-1 px-3 py-2 bg-white border border-stone-300 rounded-lg font-mono text-xs focus:outline-none focus:border-[#E11D48]"
+                      />
+                      <button
+                        type="button"
+                        disabled={courierAutoFixing}
+                        onClick={() => handleVerifyAndAutoFixCourier(true)}
+                        className="px-4 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>স্টোর আইডি অটো-ডিটেক্ট ও কানেক্ট করুন</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -7063,13 +7570,32 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   </div>
                   <div>
                     <label className="block text-stone-700 mb-1 font-medium">bKash App Secret</label>
-                    <input
-                      type="password"
-                      value={apiKeys.bkashAppSecret}
-                      onChange={(e) => setApiKeys({ ...apiKeys, bkashAppSecret: e.target.value })}
-                      placeholder="bKash App Secret"
-                      className="w-full px-3 py-2 bg-white border border-stone-300 rounded-lg font-mono text-xs"
-                    />
+                    <div className="relative">
+                      <input
+                        type={showBkashSecret ? 'text' : 'password'}
+                        value={apiKeys.bkashAppSecret}
+                        onChange={(e) => setApiKeys({ ...apiKeys, bkashAppSecret: e.target.value })}
+                        placeholder="bKash App Secret"
+                        className="w-full pl-3 pr-20 py-2 bg-white border border-stone-300 rounded-lg font-mono text-xs"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowBkashSecret((prev) => !prev)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 px-2 py-1 rounded-md bg-stone-100 hover:bg-stone-200 text-stone-700 text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                      >
+                        {showBkashSecret ? (
+                          <>
+                            <EyeOff className="w-3.5 h-3.5 text-rose-600" />
+                            <span>লুকান</span>
+                          </>
+                        ) : (
+                          <>
+                            <Eye className="w-3.5 h-3.5 text-stone-700" />
+                            <span>দেখুন</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
                   </div>
                   <div>
                     <label className="block text-stone-700 mb-1 font-medium">Nagad Merchant ID</label>
@@ -7234,29 +7760,58 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     <button
                       type="button"
                       onClick={() => {
-                        const feedUrl = `${window.location.origin}/api/catalog/feed.xml`;
+                        const feedUrl = 'https://dokandari.com/facebook-catalog';
                         navigator.clipboard.writeText(feedUrl);
-                        setFeedback(`📋 মেটা কমার্স ম্যানেজার XML ক্যাটালগ ফিড লিংক কপি হয়েছে: ${feedUrl}`);
+                        setFeedback(`📋 মেটা (Facebook) ক্যাটালগ লাইভ ডোমেইন লিংক কপি হয়েছে: ${feedUrl}`);
                         setTimeout(() => setFeedback(''), 4000);
                       }}
                       className="px-3.5 py-2.5 rounded-xl bg-white hover:bg-stone-50 text-stone-800 border border-stone-300 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
                     >
                       <Copy className="w-3.5 h-3.5 text-[#E11D48]" />
-                      <span>XML ক্যাটালগ ফিড কপি (Meta)</span>
+                      <span>Facebook ক্যাটালগ লিংক (dokandari.com/facebook-catalog)</span>
                     </button>
 
                     <button
                       type="button"
                       onClick={() => {
-                        const feedUrl = `${window.location.origin}/api/catalog/feed.json`;
+                        const feedUrl = 'https://dokandari.com/tiktok-catalog';
                         navigator.clipboard.writeText(feedUrl);
-                        setFeedback(`📋 টিকটক ও JSON ক্যাটালগ ফিড লিংক কপি হয়েছে: ${feedUrl}`);
+                        setFeedback(`📋 টিকটক (TikTok) ক্যাটালগ লাইভ ডোমেইন লিংক কপি হয়েছে: ${feedUrl}`);
+                        setTimeout(() => setFeedback(''), 4000);
+                      }}
+                      className="px-3.5 py-2.5 rounded-xl bg-white hover:bg-stone-50 text-stone-800 border border-stone-300 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Copy className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>TikTok ক্যাটালগ লিংক (dokandari.com/tiktok-catalog)</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const feedUrl = 'https://dokandari.com/google-merchant-center';
+                        navigator.clipboard.writeText(feedUrl);
+                        setFeedback(`📋 Google Merchant Center ক্যাটালগ লাইভ ডোমেইন লিংক কপি হয়েছে: ${feedUrl}`);
                         setTimeout(() => setFeedback(''), 4000);
                       }}
                       className="px-3.5 py-2.5 rounded-xl bg-white hover:bg-stone-50 text-stone-800 border border-stone-300 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
                     >
                       <Copy className="w-3.5 h-3.5 text-blue-600" />
-                      <span>JSON ফিড কপি (TikTok)</span>
+                      <span>Google Merchant লিংক (dokandari.com/google-merchant-center)</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const count = downloadMetaCatalogCsvFile(products);
+                        setFeedback(
+                          `📥 মেটা ও টিকটক কমার্স ম্যানেজারের জন্য সকল ${count}টি প্রোডাক্টের সম্পূর্ণ ক্যাটালগ CSV ফাইল ডাউনলোড হয়েছে! (Sale Price, Google Product Category, Partner Content সহ ১০০% ভেরিফাইড)`
+                        );
+                        setTimeout(() => setFeedback(''), 5500);
+                      }}
+                      className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold flex items-center gap-1.5 shadow-sm cursor-pointer transition-all"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>📥 সব {products.length}টি প্রোডাক্টের ক্যাটালগ CSV ডাউনলোড</span>
                     </button>
                   </div>
                 </div>
@@ -7344,6 +7899,23 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       </div>
                     </div>
                   )}
+
+                  <div className="p-3 rounded-xl bg-emerald-900/5 border border-emerald-200 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="px-2 py-0.5 rounded bg-emerald-700 text-white font-extrabold text-[10px]">
+                        Meta Catalog ID: {DEFAULT_DOKANDARI_META_CATALOG_ID}
+                      </span>
+                      <span className="px-2 py-0.5 rounded bg-blue-700 text-white font-extrabold text-[10px]">
+                        Business ID: {DEFAULT_DOKANDARI_META_BUSINESS_ID}
+                      </span>
+                      <span className="text-stone-700 font-bold">
+                        ✓ লিংক ফরম্যাট: <code className="text-emerald-800 bg-white px-1.5 py-0.5 rounded border border-emerald-200">https://www.dokandari.com/?product=ID&amp;brand=dokandari</code> (100% No-404 Root Link)
+                      </span>
+                    </div>
+                    <div className="text-[10px] font-extrabold text-emerald-800">
+                      ✓ Sale Price (BDT) • ✓ Google Product Category • ✓ Partner Content • ✓ {products.length}টি পণ্য রেডি
+                    </div>
+                  </div>
                 </div>
 
                 {/* Live Plugin Status Badges */}
@@ -7922,22 +8494,32 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
           // Unsold Inventory Asset Value (অবিক্রীত স্টকের ইনভেন্টরি মূল্য — kept separate from Net Profit)
           const unsoldInventoryValue = products.reduce((sum, p) => {
-            const stockCount = typeof p.stock === 'number' ? p.stock : 0;
-            const unitCost = p.costPrice || 0;
+            const stockCount = typeof p.stock === 'number' ? p.stock : 1;
+            const unitCost = p.costPrice || p.price || 0;
             return sum + stockCount * unitCost;
           }, 0);
 
+          // Deduplicate exp-ret-* entries so Courier Return Charges come directly and accurately from live filteredReturns + manual courier_return_charge expenses
+          const nonAutoReturnExpenses = filteredExpenses.filter(
+            (e) => !String(e.id || '').startsWith('exp-ret-')
+          );
+
+          // Expense categories sum (Automatically includes live Courier Return Charges from filteredReturns)
+          const expenseByType: Record<string, number> = {};
+          nonAutoReturnExpenses.forEach((e) => {
+            expenseByType[e.category] = (expenseByType[e.category] || 0) + (Number(e.amount) || 0);
+          });
+          expenseByType.courier_return_charge =
+            (expenseByType.courier_return_charge || 0) + pnlTotalReturnCharge;
+
           const totalRevenue = filteredOrders.reduce((sum, o) => sum + o.total, 0);
-          const operatingExpenses = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
+          const operatingExpenses =
+            nonAutoReturnExpenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0) +
+            pnlTotalReturnCharge +
+            pnlTotalDamageLoss;
           const totalExpenses = operatingExpenses + soldProductCogs;
           const netProfit = totalRevenue - totalExpenses;
           const profitMargin = totalRevenue > 0 ? Math.round((netProfit / totalRevenue) * 100) : 0;
-
-          // Expense categories sum
-          const expenseByType: Record<string, number> = {};
-          filteredExpenses.forEach((e) => {
-            expenseByType[e.category] = (expenseByType[e.category] || 0) + e.amount;
-          });
 
           return (
             <div className="bg-white rounded-3xl border border-rose-200 p-5 sm:p-7 shadow-xs space-y-7 animate-in fade-in">
@@ -8096,6 +8678,44 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   </div>
                   <span className="text-[10.5px] text-amber-800 font-medium block">
                     মোট সেলসের ওপর নিট মার্জিন
+                  </span>
+                </div>
+              </div>
+
+              {/* REAL-TIME CATALOG PRODUCT COUNT & VALUATION BAR (+৳ / -৳ LIVE SYNC) */}
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-50 via-white to-rose-50 border border-emerald-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-black text-stone-900">
+                      📦 রিয়েল-টাইম প্রোডাক্ট ক্যাটালগ কাউন্ট ও মোট প্রোডাক্ট মূল্য:
+                    </span>
+                    <span className="px-2.5 py-0.5 rounded-full bg-stone-900 text-white text-xs font-mono font-bold">
+                      মোট প্রোডাক্ট: {products.length} টি
+                    </span>
+                    {lastValuationChange && (
+                      <span
+                        className={`px-2.5 py-0.5 rounded-full text-xs font-mono font-black ${
+                          lastValuationChange.type === 'add'
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-rose-600 text-white'
+                        }`}
+                      >
+                        {lastValuationChange.type === 'add'
+                          ? `+৳${lastValuationChange.amount.toLocaleString()} যোগ হয়েছে (${lastValuationChange.name.slice(0, 20)})`
+                          : `-৳${lastValuationChange.amount.toLocaleString()} মাইনাস হয়েছে (${lastValuationChange.name.slice(0, 20)})`}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-stone-600">
+                    কোনো প্রোডাক্ট অ্যাড করলে সাথে সাথে প্লাস (+৳) এবং ডিলিট করলে সাথে সাথে মাইনাস (-৳) হয়ে রিয়েল-টাইম হিসাব আপডেট হয়।
+                  </p>
+                </div>
+                <div className="text-right shrink-0">
+                  <span className="text-[10px] font-bold text-stone-500 block">
+                    লাইভ ক্যাটালগের একক মূল্যের যোগফল
+                  </span>
+                  <span className="text-lg sm:text-xl font-black font-mono text-emerald-800">
+                    ৳{totalCatalogProductValue.toLocaleString()}
                   </span>
                 </div>
               </div>
@@ -8554,10 +9174,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </label>
                 <div className="flex flex-wrap items-center gap-2">
                   {[
-                    { ms: 3000, label: '৩ সেকেন্ড (দ্রুত)' },
-                    { ms: 5000, label: '৫ সেকেন্ড (ডিফল্ট/প্রস্তাবিত)' },
-                    { ms: 8000, label: '৮ সেকেন্ড (ধীর)' },
+                    { ms: 5000, label: '৫ সেকেন্ড' },
+                    { ms: 8000, label: '৮ সেকেন্ড (প্রস্তাবিত)' },
                     { ms: 10000, label: '১০ সেকেন্ড' },
+                    { ms: 15000, label: '১৫ সেকেন্ড' },
                   ].map((speed) => (
                     <button
                       key={speed.ms}
@@ -8680,43 +9300,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                     {/* Slide Content Grid: Preview & Form */}
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-                      {/* Live Visual Preview of Slide (100% Bright Daylight Theme - Zero Dark/Black Background) */}
+                      {/* Live Visual Preview of Slide (Full-Display Facebook-Cover Style Banner) */}
                       <div className="lg:col-span-1 space-y-2">
                         <span className="block text-[11px] font-bold text-stone-500 uppercase tracking-wider">
-                          স্লাইডার লাইভ প্রিভিউ (ব্রাইট থিম):
+                          ফুল-ডিসপ্লে কভার ব্যানার প্রিভিউ:
                         </span>
-                        <div className="relative rounded-2xl overflow-hidden aspect-[16/9] border-2 border-rose-200 bg-gradient-to-r from-[#FFF5F7] via-[#FFFDF9] to-[#FFF0F3] group shadow-sm grid grid-cols-12 items-center p-3 gap-2">
-                          <div className="col-span-7 flex flex-col justify-center space-y-1 z-10">
-                            {slide.tag && (
-                              <span className="inline-block px-2 py-0.5 rounded-full bg-[#E11D48] text-white text-[8.5px] font-extrabold w-max">
-                                {slide.tag}
-                              </span>
-                            )}
-                            <h5 className="font-extrabold text-[11px] line-clamp-2 text-stone-900 leading-snug">
-                              {slide.title}
-                            </h5>
-                            <p className="text-[9.5px] text-stone-600 line-clamp-2">
-                              {slide.subtitle}
-                            </p>
-                            {slide.ctaText && (
-                              <div className="pt-1">
-                                <span className="inline-block px-2 py-0.5 rounded-lg bg-[#E11D48] text-[8.5px] font-extrabold text-white">
-                                  {slide.ctaText} →
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                          <div className="col-span-5 h-full rounded-xl overflow-hidden bg-white border border-rose-200 shadow-2xs">
-                            <img
-                              src={slide.image}
-                              alt={slide.title}
-                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 bg-white"
-                              onError={(e) => {
-                                (e.target as HTMLImageElement).src =
-                                  '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg';
-                              }}
-                            />
-                          </div>
+                        <div className="relative rounded-2xl overflow-hidden aspect-[16/7] border-2 border-rose-200 bg-[#FFFDF9] group shadow-sm">
+                          <img
+                            src={slide.image}
+                            alt={slide.title || `Slide ${idx + 1}`}
+                            className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-500 bg-white"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src =
+                                '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg';
+                            }}
+                          />
                         </div>
 
                         {/* File Upload Button */}
@@ -9616,30 +10214,104 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       </div>
                     </div>
 
-                    {/* Unique Catalog Domain URL & Actions */}
-                    <div className="pt-2 border-t border-rose-100 flex items-center justify-between gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          navigator.clipboard.writeText(catShareUrl);
-                          setFeedback(`🔗 "${cat.nameBn}" ক্যাটালগ লিংক কপি হয়েছে: ${catShareUrl}`);
-                          setTimeout(() => setFeedback(''), 3000);
-                        }}
-                        className="flex-1 py-1.5 px-2.5 bg-white hover:bg-rose-50 text-stone-700 border border-stone-200 rounded-xl text-[11px] font-semibold truncate text-left cursor-pointer"
-                        title={catShareUrl}
-                      >
-                        🔗 `/catalog/{cat.id}` কপি
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setNewCategory(cat.id);
-                          setIsNewProdOpen(true);
-                        }}
-                        className="px-3 py-1.5 bg-[#E11D48] hover:bg-[#BE123C] text-white rounded-xl text-xs font-bold cursor-pointer shrink-0"
-                      >
-                        + পণ্য যোগ
-                      </button>
+                    {/* Editable Category Thumbnail Image Upload & URL Input */}
+                    <div className="pt-2 border-t border-rose-100 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <label className="px-2.5 py-1.5 bg-white hover:bg-rose-50 text-[#E11D48] border border-rose-200 rounded-xl text-[11px] font-extrabold cursor-pointer flex items-center gap-1 shrink-0 shadow-2xs">
+                          <ImageIcon className="w-3.5 h-3.5" />
+                          <span>ছবি আপলোড</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (!file) return;
+                              try {
+                                setFeedback(`⏳ "${cat.nameBn}" ক্যাটাগরির ছবি আপলোড হচ্ছে...`);
+                                const uploadedUrl = await uploadBannerImageToServer(
+                                  file,
+                                  `category-${cat.id}`
+                                );
+                                const nextCategoryImages = {
+                                  ...(siteContent.categoryImages || {}),
+                                  [cat.id]: uploadedUrl,
+                                };
+                                const nextContent = {
+                                  ...siteContent,
+                                  categoryImages: nextCategoryImages,
+                                };
+                                setSiteContent(nextContent);
+                                const saved = await saveStoreContentPersisted({
+                                  categoryImages: nextCategoryImages,
+                                });
+                                if (onStoreContentUpdated) onStoreContentUpdated(saved);
+                                setFeedback(`✅ "${cat.nameBn}" ক্যাটাগরির ছবি লাইভ ডাটাবেজে সেভ হয়েছে!`);
+                                setTimeout(() => setFeedback(''), 3500);
+                              } catch {
+                                setFeedback('❌ ছবি আপলোড করতে সমস্যা হয়েছে।');
+                              }
+                            }}
+                          />
+                        </label>
+                        <input
+                          type="text"
+                          value={siteContent.categoryImages?.[cat.id] || cat.image}
+                          onChange={async (e) => {
+                            const val = e.target.value;
+                            const nextCategoryImages = {
+                              ...(siteContent.categoryImages || {}),
+                              [cat.id]: val,
+                            };
+                            setSiteContent({
+                              ...siteContent,
+                              categoryImages: nextCategoryImages,
+                            });
+                          }}
+                          onBlur={async (e) => {
+                            const val = e.target.value.trim();
+                            if (!val) return;
+                            const nextCategoryImages = {
+                              ...(siteContent.categoryImages || {}),
+                              [cat.id]: val,
+                            };
+                            const saved = await saveStoreContentPersisted({
+                              categoryImages: nextCategoryImages,
+                            });
+                            if (onStoreContentUpdated) onStoreContentUpdated(saved);
+                            setFeedback(`✅ "${cat.nameBn}" ক্যাটাগরির ছবির লিংক লাইভ ডাটাবেজে সেভ হয়েছে!`);
+                            setTimeout(() => setFeedback(''), 3000);
+                          }}
+                          placeholder="ক্যাটাগরি ছবির লিংক..."
+                          className="flex-1 min-w-0 px-2.5 py-1.5 bg-white border border-stone-200 rounded-xl text-[11px] font-mono text-stone-700 focus:outline-none focus:border-[#E11D48]"
+                        />
+                      </div>
+
+                      {/* Unique Catalog Domain URL & Actions */}
+                      <div className="flex items-center justify-between gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(catShareUrl);
+                            setFeedback(`🔗 "${cat.nameBn}" ক্যাটালগ লিংক কপি হয়েছে: ${catShareUrl}`);
+                            setTimeout(() => setFeedback(''), 3000);
+                          }}
+                          className="flex-1 py-1.5 px-2.5 bg-white hover:bg-rose-50 text-stone-700 border border-stone-200 rounded-xl text-[11px] font-semibold truncate text-left cursor-pointer"
+                          title={catShareUrl}
+                        >
+                          🔗 `/catalog/{cat.id}` কপি
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNewCategory(cat.id);
+                            setIsNewProdOpen(true);
+                          }}
+                          className="px-3 py-1.5 bg-[#E11D48] hover:bg-[#BE123C] text-white rounded-xl text-xs font-bold cursor-pointer shrink-0"
+                        >
+                          + পণ্য যোগ
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );

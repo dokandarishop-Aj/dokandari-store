@@ -64,8 +64,8 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   // Add to Cart handler
   const handleQuickAdd = (e: React.MouseEvent) => {
     e.stopPropagation();
-    const defaultColor = product.variants.colors?.[0];
-    const defaultSize = product.variants.sizes?.[0];
+    const defaultColor = product.variants?.colors?.[0];
+    const defaultSize = product.variants?.sizes?.[0];
     addToCart(product, defaultColor, defaultSize, 1);
     trackPixelAddToCart({
       id: product.id,

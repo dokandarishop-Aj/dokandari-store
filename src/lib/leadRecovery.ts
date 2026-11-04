@@ -5,6 +5,7 @@
 
 import { doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from './firebase';
+import { sanitizeForFirestore } from './storeSync';
 import { AbandonedLead, AbandonedLeadStatus } from '../types';
 
 let leadDebounceTimer: any = null;
@@ -13,7 +14,10 @@ let leadDebounceTimer: any = null;
  * Normalizes phone numbers to standard 11-digit Bangladesh format (e.g. 01XXXXXXXXX)
  */
 export function normalizePhone(raw: string): string {
-  const digits = raw.replace(/\D/g, '');
+  const ascii = String(raw || '').replace(/[০-৯]/g, (d) =>
+    String('০১২৩৪৫৬৭৮৯'.indexOf(d))
+  );
+  const digits = ascii.replace(/\D/g, '');
   if (digits.startsWith('880') && digits.length >= 13) {
     return digits.slice(2);
   }
@@ -54,29 +58,29 @@ export function captureAbandonedLeadDebounced(
       const itemsList =
         leadData.cartItems && leadData.cartItems.length > 0
           ? leadData.cartItems.map((ci: any) => ({
-              productId: ci.product?.id || ci.id,
+              productId: ci.product?.id || ci.id || '',
               productName: ci.product?.name || ci.name || 'পণ্য',
-              productImage: ci.product?.images?.[0] || ci.image,
+              productImage: ci.product?.images?.[0] || ci.image || '',
               quantity: ci.quantity || 1,
               price: ci.product?.price || ci.price || 0,
-              selectedColor: ci.selectedColor,
-              selectedSize: ci.selectedSize,
+              selectedColor: ci.selectedColor || '',
+              selectedSize: ci.selectedSize || '',
             }))
           : leadData.productName
           ? [
               {
-                productId: leadData.productId,
+                productId: leadData.productId || '',
                 productName: leadData.productName,
-                productImage: leadData.productImage,
+                productImage: leadData.productImage || '',
                 quantity: leadData.quantity || 1,
                 price: leadData.productPrice || leadData.estimatedTotal || 0,
-                selectedColor: leadData.productVariant,
+                selectedColor: leadData.productVariant || '',
               },
             ]
           : [];
 
       const docId = `lead_${cleanPhone}`;
-      const record: AbandonedLead = {
+      const record: AbandonedLead = sanitizeForFirestore({
         id: docId,
         customerName: leadData.customerName?.trim() || 'সম্মানিত ক্রেতা',
         customerPhone: cleanPhone,
@@ -96,7 +100,7 @@ export function captureAbandonedLeadDebounced(
         status: 'pending',
         createdAt: Date.now(),
         updatedAt: Date.now(),
-      };
+      });
 
       await setDoc(doc(db, 'abandoned_leads', docId), record, { merge: true });
     } catch (err) {

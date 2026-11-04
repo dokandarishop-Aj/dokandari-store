@@ -1,0 +1,81 @@
+{
+  "headers": [
+    {
+      "source": "/(tiktok-catalog|facebook-catalog|google-merchant-center|catalog\\.xml|tiktok-catalog\\.xml|facebook-catalog\\.xml|google-merchant-center\\.xml)",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/xml; charset=utf-8"
+        },
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        }
+      ]
+    },
+    {
+      "source": "/(catalog\\.csv|tiktok-catalog\\.csv|facebook-catalog\\.csv|google-merchant-center\\.csv)",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "text/csv; charset=utf-8"
+        },
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        }
+      ]
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/tiktok-catalog",
+      "destination": "/tiktok-catalog.xml"
+    },
+    {
+      "source": "/facebook-catalog",
+      "destination": "/facebook-catalog.xml"
+    },
+    {
+      "source": "/google-merchant-center",
+      "destination": "/google-merchant-center.xml"
+    },
+    {
+      "source": "/catalog/feed.xml",
+      "destination": "/catalog.xml"
+    },
+    {
+      "source": "/api/catalog/feed.xml",
+      "destination": "/catalog.xml"
+    },
+    {
+      "source": "/catalog/feed.csv",
+      "destination": "/catalog.csv"
+    },
+    {
+      "source": "/api/catalog/feed.csv",
+      "destination": "/catalog.csv"
+    },
+    {
+      "source": "/catalog/feed.json",
+      "destination": "/catalog.json"
+    },
+    {
+      "source": "/api/catalog/feed.json",
+      "destination": "/catalog.json"
+    },
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/$1"
+    },
+    {
+      "source": "/uploads/(.*)",
+      "destination": "/uploads/$1"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
+
