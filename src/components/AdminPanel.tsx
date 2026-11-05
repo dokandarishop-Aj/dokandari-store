@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Globe,
   Palette,
@@ -111,6 +111,7 @@ import {
 } from '../lib/pixelManager';
 import {
   smartImportOrAnalyzeProduct,
+  analyzeUploadedProductImagesWithAI,
   convertAnalysisToProduct,
   parseCSVProductImport,
   generateCampaignWithAI,
@@ -143,6 +144,8 @@ import {
   deleteOrdersBulkPersisted,
   getDeletedOrderIds,
   addDeletedOrderId,
+  removeDeletedOrderIds,
+  mergeAndPersistAllOrders,
   getPersistedPurchases,
   getDeletedPurchaseIds,
   getDeletedReturnIds,
@@ -442,19 +445,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [adminSecretKeyInput, setAdminSecretKeyInput] = useState('');
   const [securitySaved, setSecuritySaved] = useState(false);
 
-  // New product form modal
+  // New product form modal (supports 4-5+ multi-image uploads + 1-click AI Vision auto-analysis & instant live publish)
   const [isNewProdOpen, setIsNewProdOpen] = useState(false);
   const [newTitle, setNewTitle] = useState('');
+  const [newTitleEn, setNewTitleEn] = useState('');
   const [newCategory, setNewCategory] = useState<string>('home_decor');
   const [newPrice, setNewPrice] = useState(1450);
   const [newOriginalPrice, setNewOriginalPrice] = useState(1990);
-  const [newDescription, setNewDescription] = useState(
-    'Dokandari আন্তর্জাতিক মানের অরিজিনাল কোয়ালিটি পণ্য। সারা বাংলাদেশে ক্যাশ অন ডেলিভারি সুবিধা।'
-  );
-  const [newImage, setNewImage] = useState(
-    'https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?auto=format&fit=crop&w=900&q=80'
-  );
+  const [newDescription, setNewDescription] = useState('');
+  const [newFeatures, setNewFeatures] = useState<string[]>([]);
+  const [newImage, setNewImage] = useState('');
+  const [newImages, setNewImages] = useState<string[]>([]);
+  const [newVideoUrl, setNewVideoUrl] = useState('');
   const [newUploadingImg, setNewUploadingImg] = useState(false);
+  const [newAiAnalyzing, setNewAiAnalyzing] = useState(false);
+  const serverOrdersRef = useRef<Order[]>([]);
 
   // Manual Order Entry & WhatsApp Screenshot Auto-Order Extractor state
   const [isManualOrderOpen, setIsManualOrderOpen] = useState(false);
@@ -1281,49 +1286,57 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       try {
         checkGeminiServerStatus().then((st) => setGeminiStatus(st));
 
-        // Sync deleted order IDs first so deleted demo/fake orders never reappear
-        try {
-          const delOrdDoc = await getDoc(doc(db, 'settings', 'deleted_orders'));
-          if (delOrdDoc.exists() && Array.isArray(delOrdDoc.data()?.ids)) {
-            delOrdDoc.data()!.ids.forEach((id: string) => addDeletedOrderId(id));
-          }
-        } catch {
-          // ignore
-        }
-
-        const deletedOrdersSet = getDeletedOrderIds();
-        const t0 = performance.now();
-        const snap = await getDocs(collection(db, 'orders'));
-        setPingLatencyMs(Math.round(performance.now() - t0));
-
-        const orderMap = new Map<string, Order>();
-        for (const locOrd of getPersistedOrders()) {
-          if (locOrd && locOrd.id && !deletedOrdersSet.has(locOrd.id)) {
-            orderMap.set(locOrd.id, locOrd);
-          }
-        }
+        // 1. Fetch authoritative server mirror orders first (/api/orders -> data/orders_mirror.json)
+        let serverMirrorOrders: Order[] = [];
         try {
           const srvOrdRes = await fetch('/api/orders');
           if (srvOrdRes.ok) {
             const srvOrdJson = await srvOrdRes.json();
             if (Array.isArray(srvOrdJson?.orders)) {
-              for (const srvOrd of srvOrdJson.orders) {
-                if (srvOrd && srvOrd.id && !deletedOrdersSet.has(srvOrd.id)) {
-                  orderMap.set(srvOrd.id, srvOrd);
-                }
-              }
+              serverMirrorOrders = srvOrdJson.orders.filter((o: any) => o && o.id);
+              serverOrdersRef.current = serverMirrorOrders;
             }
           }
         } catch {
           // ignore
         }
+
+        const activeMirrorIdSet = new Set(serverMirrorOrders.map((o) => o.id));
+        if (activeMirrorIdSet.size > 0) {
+          removeDeletedOrderIds(Array.from(activeMirrorIdSet));
+        }
+
+        // Sync deleted order IDs (excluding any active order present in the authoritative server mirror)
+        try {
+          const delOrdDoc = await getDoc(doc(db, 'settings', 'deleted_orders'));
+          if (delOrdDoc.exists() && Array.isArray(delOrdDoc.data()?.ids)) {
+            delOrdDoc.data()!.ids.forEach((id: string) => {
+              if (!activeMirrorIdSet.has(id)) {
+                addDeletedOrderId(id);
+              }
+            });
+          }
+        } catch {
+          // ignore
+        }
+
+        const t0 = performance.now();
+        const snap = await getDocs(collection(db, 'orders'));
+        setPingLatencyMs(Math.round(performance.now() - t0));
+
+        const firestoreOrders: Order[] = [];
         snap.forEach((d) => {
           const data = d.data() as Order;
-          if (data && data.id && !deletedOrdersSet.has(data.id)) {
-            orderMap.set(data.id, data);
+          if (data && data.id) {
+            firestoreOrders.push(data);
           }
         });
-        const list = Array.from(orderMap.values()).sort((a, b) => b.createdAt - a.createdAt);
+
+        const list = mergeAndPersistAllOrders({
+          localOrders: getPersistedOrders(),
+          serverMirrorOrders,
+          firestoreOrders,
+        });
         setOrders(list);
 
         // Load Purchases (#17 ক্রয় ব্যবস্থাপনা)
@@ -1458,24 +1471,22 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     };
     loadData();
 
-    // Realtime live listener for customer orders (excludes deleted orders)
+    // Realtime live listener for customer orders (merges localStorage + serverMirrorOrders + Firestore orders)
     const unsubOrders = onSnapshot(
       collection(db, 'orders'),
       (snap) => {
-        const deletedOrdersSet = getDeletedOrderIds();
-        const orderMap = new Map<string, Order>();
-        for (const locOrd of getPersistedOrders()) {
-          if (locOrd && locOrd.id && !deletedOrdersSet.has(locOrd.id)) {
-            orderMap.set(locOrd.id, locOrd);
-          }
-        }
+        const firestoreOrders: Order[] = [];
         snap.forEach((d) => {
           const data = d.data() as Order;
-          if (data && data.id && !deletedOrdersSet.has(data.id)) {
-            orderMap.set(data.id, data);
+          if (data && data.id) {
+            firestoreOrders.push(data);
           }
         });
-        const list = Array.from(orderMap.values()).sort((a, b) => b.createdAt - a.createdAt);
+        const list = mergeAndPersistAllOrders({
+          localOrders: getPersistedOrders(),
+          serverMirrorOrders: serverOrdersRef.current,
+          firestoreOrders,
+        });
         setOrders(list);
       },
       (err) => {
@@ -2530,26 +2541,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   };
 
-  // Delete product helper (persists deletion in Firestore + localStorage + parent state & deducts valuation in real time)
+  // Delete product helper (persists deletion in Firestore + localStorage + parent state & deducts catalog valuation in real time; NEVER deletes customer orders)
   const handleDeleteProduct = async (productId: string, productName: string) => {
     try {
       const targetProd = products.find((p) => p.id === productId);
       const prodPrice = Number(targetProd?.price) || 0;
-
-      // Also find any orders that exclusively contained this deleted demo product so sales analytics deducts them immediately
-      const linkedOrders = orders.filter(
-        (o) =>
-          o.items.length > 0 &&
-          o.items.every((it) => it.productId === productId || it.id === productId || it.name === productName)
-      );
-      let deductedSalesAmount = 0;
-      if (linkedOrders.length > 0) {
-        deductedSalesAmount = linkedOrders.reduce((sum, o) => sum + (Number(o.total) || 0), 0);
-        const linkedOrderIds = linkedOrders.map((o) => o.id);
-        await deleteOrdersBulkPersisted(linkedOrderIds);
-        const idSet = new Set(linkedOrderIds);
-        setOrders((prev) => prev.filter((o) => !idSet.has(o.id)));
-      }
 
       // Immediately update parent state & recentlyImported before/alongside Firestore delete
       setRecentlyImported((prev) => prev.filter((p) => p.id !== productId));
@@ -2566,9 +2562,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       await deleteProductPersisted(productId);
 
       setFeedback(
-        deductedSalesAmount > 0
-          ? `🗑️ "${productName}" (-৳${prodPrice.toLocaleString()}) সাথে সাথে ডাটাবেজ থেকে ডিলিট হয়েছে এবং সেলস থেকেও -৳${deductedSalesAmount.toLocaleString()} মাইনাস হয়েছে!`
-          : `🗑️ "${productName}" (-৳${prodPrice.toLocaleString()}) সাথে সাথে ডাটাবেজ ও ক্যাটালগ ভ্যালু থেকে মাইনাস ও ডিলিট হয়েছে!`
+        `🗑️ "${productName}" (-৳${prodPrice.toLocaleString()}) সাথে সাথে ক্যাটালগ থেকে ডিলিট হয়েছে! (কাস্টমার অর্ডার হিস্ট্রি ১০০% অক্ষুণ্ণ রয়েছে)`
       );
       setTimeout(() => setFeedback(''), 4500);
     } catch (err) {
@@ -2748,79 +2742,256 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     onBackToStore();
   };
 
-  // Direct file upload handler for New Product modal
+  // Direct multi-file upload handler for New Product modal (supports 4-5+ photos at once)
   const handleNewProductFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) return;
     setNewUploadingImg(true);
     try {
-      const compressed = await compressImageFileToDataUrl(file, 950, 0.82);
-      setNewImage(compressed);
-      setFeedback('📸 কম্পিউটার/মোবাইল থেকে প্রোডাক্টের ছবি লোড হয়েছে! এখন "প্রকাশ করুন" বাটনে ক্লিক করুন।');
-      setTimeout(() => setFeedback(''), 3500);
+      const files: File[] = Array.from(fileList);
+      const compressedList = await Promise.all(
+        files.map((file: File) => compressImageFileToDataUrl(file, 950, 0.82))
+      );
+      const validCompressed = compressedList.filter(Boolean);
+      if (validCompressed.length > 0) {
+        const merged = Array.from(new Set([...newImages, ...validCompressed]));
+        setNewImages(merged);
+        if (!newImage) {
+          setNewImage(merged[0]);
+        }
+        setFeedback(
+          `📸 ${validCompressed.length}টি প্রোডাক্ট ছবি লোড হয়েছে (মোট ${merged.length}টি ছবি)! এখন "✨ AI দিয়ে অটো-তৈরি" অথবা "প্রকাশ করুন" বাটনে ক্লিক করুন।`
+        );
+        setTimeout(() => setFeedback(''), 4000);
+      }
     } catch (err) {
-      console.warn('New product image upload error:', err);
+      console.warn('New product multi-image upload error:', err);
     } finally {
       setNewUploadingImg(false);
       e.target.value = '';
     }
   };
 
-  // Manual new product creator (persists to Firestore + localStorage + live state immediately)
+  // 1-Click AI Vision Analysis for uploaded product photos (generates Bengali title, description, category, features & price)
+  const handleAnalyzeNewProductImagesWithAI = async (autoPublishAfterAnalyze = false) => {
+    const allImgs = Array.from(
+      new Set([...newImages, ...(newImage.trim() ? [newImage.trim()] : [])])
+    ).filter(Boolean);
+
+    if (allImgs.length === 0 && !newTitle.trim()) {
+      setFeedback('⚠️ অনুগ্রহ করে আগে অন্তত ১ থেকে ৫টি প্রোডাক্টের ছবি সিলেক্ট করুন অথবা নাম লিখুন।');
+      setTimeout(() => setFeedback(''), 3500);
+      return;
+    }
+
+    setNewAiAnalyzing(true);
+    setFeedback('✨ Gemini 3.8 Flash Vision আপনার আপলোডকৃত প্রোডাক্টের ছবি বিশ্লেষণ করে বাংলা টাইটেল ও ডেসক্রিপশন তৈরি করছে...');
+    try {
+      const analysis = await analyzeUploadedProductImagesWithAI({
+        images: allImgs,
+        hintText: newTitle.trim(),
+        priceHint: String(newPrice || ''),
+      });
+
+      setNewTitle(analysis.titleBn);
+      setNewTitleEn(analysis.titleEn);
+      setNewCategory(analysis.category);
+      setNewPrice(analysis.price);
+      setNewOriginalPrice(analysis.originalPrice);
+      setNewDescription(analysis.description);
+      setNewFeatures(analysis.features || []);
+
+      if (autoPublishAfterAnalyze) {
+        const prodId = `dkd-custom-${Date.now()}`;
+        let finalImages = allImgs;
+        try {
+          const upRes = await fetch('/api/upload-product-images', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ productId: prodId, images: allImgs }),
+          });
+          if (upRes.ok) {
+            const upData = await upRes.json();
+            if (Array.isArray(upData?.images) && upData.images.length > 0) {
+              finalImages = upData.images;
+            }
+          }
+        } catch {
+          // keep data URLs if upload route fails
+        }
+
+        const prod: Product = {
+          id: prodId,
+          name: analysis.titleBn,
+          titleEn: analysis.titleEn,
+          category: analysis.category,
+          price: analysis.price,
+          originalPrice: analysis.originalPrice,
+          description: analysis.description,
+          fabric: analysis.fabric || '১০০% অরিজিনাল প্রিমিয়াম কোয়ালিটি',
+          sku: `DKD-${Math.floor(1000 + Math.random() * 9000)}`,
+          stock: 25,
+          costPrice: Math.round(analysis.price * 0.65),
+          inStock: true,
+          status: 'published',
+          rating: 5.0,
+          reviewCount: 12,
+          tag: 'নতুন কালেকশন',
+          features:
+            analysis.features && analysis.features.length > 0
+              ? analysis.features
+              : [
+                  '১০০% অরিজিনাল কোয়ালিটি',
+                  'ক্যাশ অন ডেলিভারি সুবিধা',
+                  'ডেলিভারি ম্যানের সামনে চেক করার সুবিধা',
+                ],
+          variants: {
+            colors: analysis.colors?.length ? analysis.colors : ['ছবির অরিজিনাল কালার'],
+            sizes: analysis.sizes?.length ? analysis.sizes : ['স্ট্যান্ডার্ড সাইজ'],
+          },
+          images: finalImages,
+          videos: newVideoUrl.trim() ? [newVideoUrl.trim()] : [],
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+
+        onAddProduct(prod);
+        setRecentlyImported((prev) => [prod, ...prev]);
+        setLastValuationChange({
+          type: 'add',
+          name: prod.name,
+          amount: prod.price,
+          timestamp: Date.now(),
+        });
+        await saveProductPersisted(prod);
+        setIsNewProdOpen(false);
+        setNewTitle('');
+        setNewTitleEn('');
+        setNewDescription('');
+        setNewFeatures([]);
+        setNewImage('');
+        setNewImages([]);
+        setNewVideoUrl('');
+        setFeedback(
+          `🎉 "${prod.name}" (${finalImages.length}টি আসল ছবি সহ) এআই বিশ্লেষণের মাধ্যমে সাথে সাথে লাইভ ওয়েবসাইটে পাবলিশ হয়েছে!`
+        );
+      } else {
+        setFeedback(
+          `✅ এআই আপনার ${allImgs.length}টি ছবি বিশ্লেষণ করে প্রোডাক্টের নাম, ক্যাটাগরি ও ডেসক্রিপশন তৈরি করেছে! এখন "সেভ ও লাইভ প্রকাশ করুন" বাটনে ক্লিক করুন।`
+        );
+      }
+      setTimeout(() => setFeedback(''), 5000);
+    } catch (err: any) {
+      console.warn('AI vision product analyze error:', err);
+      setFeedback(`⚠️ এআই বিশ্লেষণ নোট: ${err?.message || 'ম্যানুয়ালি সেভ করুন'}`);
+      setTimeout(() => setFeedback(''), 4000);
+    } finally {
+      setNewAiAnalyzing(false);
+    }
+  };
+
+  // Manual / AI-Assisted new product creator (persists all uploaded photos to Firestore + Server Mirror + localStorage + live state immediately)
   const handleCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTitle.trim()) return;
-    const priceNum = Math.max(1, Number(newPrice) || 1450);
-    const origNum = Math.max(priceNum, Number(newOriginalPrice) || priceNum + 550);
-    const prod: Product = {
-      id: `dkd-custom-${Date.now()}`,
-      name: newTitle.trim(),
-      category: newCategory,
-      price: priceNum,
-      originalPrice: origNum,
-      description:
-        newDescription.trim() ||
-        'Dokandari আন্তর্জাতিক মানের অরিজিনাল কোয়ালিটি পণ্য। সারা বাংলাদেশে ক্যাশ অন ডেলিভারি সুবিধা।',
-      fabric: 'ইমপোর্টেড প্রিমিয়াম গ্রেড কোয়ালিটি',
-      sku: `DKD-${Math.floor(100 + Math.random() * 900)}`,
-      stock: 20,
-      costPrice: Math.round(priceNum * 0.65),
-      inStock: true,
-      status: 'published',
-      rating: 5.0,
-      reviewCount: 12,
-      tag: 'নতুন কালেকশন',
-      features: [
-        '১০০% অরিজিনাল কোয়ালিটি',
-        'ক্যাশ অন ডেলিভারি সুবিধা',
-        'ডেলিভারি ম্যানের সামনে চেক করার সুবিধা',
-      ],
-      variants: {
-        colors: ['Standard Original Color', 'Black / Gold'],
-        sizes: ['Standard Size'],
-      },
-      images: [
-        newImage.trim() ||
-          'https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?auto=format&fit=crop&w=900&q=80',
-      ],
-      updatedAt: Date.now(),
-    };
+    const allImgs = Array.from(
+      new Set([...newImages, ...(newImage.trim() ? [newImage.trim()] : [])])
+    ).filter(Boolean);
 
-    onAddProduct(prod);
-    setRecentlyImported((prev) => [prod, ...prev]);
-    setLastValuationChange({
-      type: 'add',
-      name: prod.name,
-      amount: priceNum,
-      timestamp: Date.now(),
-    });
-    await saveProductPersisted(prod);
-    setIsNewProdOpen(false);
-    setNewTitle('');
-    setFeedback(
-      `✅ "${prod.name}" (+৳${priceNum.toLocaleString()}) সাথে সাথে ডাটাবেজে সেভ ও মোট ক্যাটালগ ভ্যালুতে প্লাস হয়েছে!`
-    );
-    setTimeout(() => setFeedback(''), 4500);
+    if (allImgs.length === 0) {
+      setFeedback('⚠️ অনুগ্রহ করে অন্তত ১টি প্রোডাক্টের ছবি আপলোড করুন অথবা ছবির লিংক দিন।');
+      setTimeout(() => setFeedback(''), 3500);
+      return;
+    }
+
+    // If title or description is empty, automatically run AI Vision Analysis & Publish!
+    if (!newTitle.trim() || !newDescription.trim()) {
+      await handleAnalyzeNewProductImagesWithAI(true);
+      return;
+    }
+
+    setNewUploadingImg(true);
+    try {
+      const prodId = `dkd-custom-${Date.now()}`;
+      let finalImages = allImgs;
+      try {
+        const upRes = await fetch('/api/upload-product-images', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ productId: prodId, images: allImgs }),
+        });
+        if (upRes.ok) {
+          const upData = await upRes.json();
+          if (Array.isArray(upData?.images) && upData.images.length > 0) {
+            finalImages = upData.images;
+          }
+        }
+      } catch {
+        // fallback to data URLs
+      }
+
+      const priceNum = Math.max(1, Number(newPrice) || 1450);
+      const origNum = Math.max(priceNum, Number(newOriginalPrice) || priceNum + 550);
+      const prod: Product = {
+        id: prodId,
+        name: newTitle.trim(),
+        titleEn: newTitleEn.trim() || newTitle.trim(),
+        category: newCategory,
+        price: priceNum,
+        originalPrice: origNum,
+        description:
+          newDescription.trim() ||
+          `${newTitle.trim()} — Dokandari আন্তর্জাতিক মানের ১০০% অরিজিনাল কোয়ালিটি পণ্য। সারা বাংলাদেশে ক্যাশ অন ডেলিভারি সুবিধা।`,
+        fabric: '১০০% অরিজিনাল প্রিমিয়াম গ্রেড কোয়ালিটি',
+        sku: `DKD-${Math.floor(1000 + Math.random() * 9000)}`,
+        stock: 25,
+        costPrice: Math.round(priceNum * 0.65),
+        inStock: true,
+        status: 'published',
+        rating: 5.0,
+        reviewCount: 12,
+        tag: 'নতুন কালেকশন',
+        features:
+          newFeatures.length > 0
+            ? newFeatures
+            : [
+                '১০০% অরিজিনাল কোয়ালিটি',
+                'ক্যাশ অন ডেলিভারি সুবিধা',
+                'ডেলিভারি ম্যানের সামনে চেক করার সুবিধা',
+              ],
+        variants: {
+          colors: ['ছবির অরিজিনাল কালার'],
+          sizes: ['স্ট্যান্ডার্ড সাইজ'],
+        },
+        images: finalImages,
+        videos: newVideoUrl.trim() ? [newVideoUrl.trim()] : [],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+
+      onAddProduct(prod);
+      setRecentlyImported((prev) => [prod, ...prev]);
+      setLastValuationChange({
+        type: 'add',
+        name: prod.name,
+        amount: priceNum,
+        timestamp: Date.now(),
+      });
+      await saveProductPersisted(prod);
+      setIsNewProdOpen(false);
+      setNewTitle('');
+      setNewTitleEn('');
+      setNewDescription('');
+      setNewFeatures([]);
+      setNewImage('');
+      setNewImages([]);
+      setNewVideoUrl('');
+      setFeedback(
+        `✅ "${prod.name}" (${finalImages.length}টি ছবি সহ, +৳${priceNum.toLocaleString()}) সাথে সাথে ডাটাবেজে সেভ ও লাইভ ওয়েবসাইটে প্রকাশিত হয়েছে!`
+      );
+      setTimeout(() => setFeedback(''), 4500);
+    } finally {
+      setNewUploadingImg(false);
+    }
   };
 
   // Save Carousel Speed & Hero Slides to Firestore + localStorage
@@ -3111,7 +3282,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   // Delete abandoned lead from Firestore
   const handleDeleteLead = async (leadId: string) => {
-    if (!window.confirm('আপনি কি নিশ্চিত যে এই ড্রপড লিডটি ডাটাবেজ থেকে মুছে ফেলতে চান?')) return;
     setLeadActionLoading(leadId);
     try {
       await deleteAbandonedLead(leadId);
@@ -5069,6 +5239,48 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </div>
 
               <div className="flex flex-wrap items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setFeedback('🔄 সার্ভার মিরর, ফায়ারস্টোর ও লোকাল ক্যাশ থেকে সকল পূর্ববর্তী ও বর্তমান অর্ডার রিকভারি ও সিঙ্ক হচ্ছে...');
+                    try {
+                      const srvOrdRes = await fetch('/api/orders');
+                      if (srvOrdRes.ok) {
+                        const srvOrdJson = await srvOrdRes.json();
+                        if (Array.isArray(srvOrdJson?.orders)) {
+                          serverOrdersRef.current = srvOrdJson.orders;
+                        }
+                      }
+                      const snap = await getDocs(collection(db, 'orders'));
+                      const firestoreOrders: Order[] = [];
+                      snap.forEach((d) => {
+                        const data = d.data() as Order;
+                        if (data && data.id) firestoreOrders.push(data);
+                      });
+                      const merged = mergeAndPersistAllOrders({
+                        localOrders: getPersistedOrders(),
+                        serverMirrorOrders: serverOrdersRef.current,
+                        firestoreOrders,
+                      });
+                      setOrders(merged);
+                      setFeedback(`✅ সফলভাবে সকল ${merged.length}টি অর্ডার (গতকালের ও আজকের সব অর্ডার সহ) রিকভার ও সিঙ্ক হয়েছে!`);
+                    } catch {
+                      const merged = mergeAndPersistAllOrders({
+                        localOrders: getPersistedOrders(),
+                        serverMirrorOrders: serverOrdersRef.current,
+                      });
+                      setOrders(merged);
+                      setFeedback(`✅ লোকাল ও সার্ভার ব্যাকআপ থেকে ${merged.length}টি অর্ডার সিঙ্ক হয়েছে!`);
+                    }
+                    setTimeout(() => setFeedback(''), 4500);
+                  }}
+                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5 shadow-xs cursor-pointer transition-colors"
+                  title="সার্ভার ব্যাকআপ, ফায়ারস্টোর ও ব্রাউজার localStorage থেকে পূর্বের ও নতুন সকল অর্ডার রিকভার করুন"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>🔄 সব অর্ডার সিঙ্ক ও রিকভারি ({orders.length})</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={() => setIsManualOrderOpen((prev) => !prev)}
@@ -10473,14 +10685,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         )}
       </div>
 
-      {/* Add Product Modal (Supports Direct File Upload + Image URL + Immediate Persistence) */}
+      {/* Add Product Modal (Supports 4-5+ Multi-File Upload + 1-Click Gemini 3.8 Flash Vision Auto-Title/Description + Immediate Live Persistence) */}
       {isNewProdOpen && (
         <div className="fixed inset-0 z-50 bg-stone-950/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-xl border border-stone-200 text-xs my-auto">
+          <div className="bg-white rounded-3xl max-w-xl w-full p-6 space-y-4 shadow-xl border border-stone-200 text-xs my-auto max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-2 border-b border-rose-100">
-              <h3 className="text-sm font-extrabold text-stone-900">
-                + নতুন প্রোডাক্ট আপলোড করুন (লাইভ ক্যাটালগ)
-              </h3>
+              <div>
+                <h3 className="text-sm font-extrabold text-stone-900 flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-[#E11D48]" />
+                  <span>+ নতুন প্রোডাক্ট আপলোড করুন (৪-৫টি ছবি ও ১-ক্লিক AI অটো-ডিটেইলস)</span>
+                </h3>
+                <p className="text-[11px] text-stone-500 mt-0.5">
+                  প্রোডাক্টের ৪-৫টি ছবি একসাথে সিলেক্ট করে &ldquo;✨ ছবি দেখে AI দিয়ে অটো-তৈরি করুন&rdquo; বাটনে ক্লিক করলেই নাম ও বিবরণ অটোমেটিক তৈরি হবে!
+                </p>
+              </div>
               <button
                 onClick={() => setIsNewProdOpen(false)}
                 className="text-stone-400 hover:text-stone-700 cursor-pointer text-sm font-bold"
@@ -10489,15 +10707,148 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleCreateProduct} className="space-y-3">
+            <form onSubmit={handleCreateProduct} className="space-y-3.5">
+              {/* Step 1: Multi-Image Upload Box (4-5+ photos) */}
+              <div className="space-y-2.5 p-3.5 rounded-2xl bg-[#FFF8F9] border-2 border-dashed border-rose-300">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="block text-stone-900 font-extrabold">
+                    ১. প্রোডাক্টের ছবি আপলোড করুন (একসাথে ৪-৫টি বা তার বেশি ছবি সিলেক্ট করা যাবে) *
+                  </label>
+                  <span className="px-2 py-0.5 rounded-full bg-rose-100 text-[#E11D48] font-bold text-[10px]">
+                    মোট ছবি: {Array.from(new Set([...newImages, ...(newImage.trim() ? [newImage.trim()] : [])])).filter(Boolean).length} টি
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="px-4 py-2.5 bg-[#E11D48] hover:bg-[#BE123C] text-white rounded-xl font-extrabold cursor-pointer inline-flex items-center gap-1.5 shadow-xs transition-all">
+                    <ImageIcon className="w-4 h-4" />
+                    <span>
+                      {newUploadingImg
+                        ? 'ছবি প্রসেস হচ্ছে...'
+                        : '📁 কম্পিউটার / মোবাইল থেকে ৪-৫টি ছবি একসাথে সিলেক্ট করুন'}
+                    </span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      onChange={handleNewProductFileUpload}
+                      className="hidden"
+                    />
+                  </label>
+
+                  {(newImages.length > 0 || newImage.trim()) && (
+                    <button
+                      type="button"
+                      disabled={newAiAnalyzing}
+                      onClick={() => handleAnalyzeNewProductImagesWithAI(false)}
+                      className="px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-extrabold cursor-pointer inline-flex items-center gap-1.5 shadow-xs disabled:opacity-50 transition-all"
+                    >
+                      <Sparkles className="w-4 h-4" />
+                      <span>
+                        {newAiAnalyzing
+                          ? 'AI ছবি বিশ্লেষণ করছে...'
+                          : '✨ ছবি দেখে AI দিয়ে অটো টাইটেল ও ডেসক্রিপশন লিখুন'}
+                      </span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Multi-Image Gallery Preview Grid with Remove & Cover Reorder */}
+                {newImages.length > 0 && (
+                  <div className="grid grid-cols-4 sm:grid-cols-5 gap-2 pt-1">
+                    {newImages.map((imgSrc, idx) => (
+                      <div
+                        key={idx}
+                        className="relative group aspect-square rounded-xl overflow-hidden border-2 border-rose-200 bg-white shadow-2xs"
+                      >
+                        <img
+                          src={imgSrc}
+                          alt={`Upload ${idx + 1}`}
+                          className="w-full h-full object-cover"
+                        />
+                        {idx === 0 && (
+                          <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-[#E11D48] text-white text-[9px] font-extrabold">
+                            কভার ছবি
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const updated = newImages.filter((_, i) => i !== idx);
+                            setNewImages(updated);
+                            if (newImage === imgSrc) {
+                              setNewImage(updated[0] || '');
+                            }
+                          }}
+                          className="absolute top-1 right-1 w-5 h-5 rounded-full bg-stone-900/80 text-white text-[10px] font-bold flex items-center justify-center hover:bg-red-600 cursor-pointer"
+                          title="এই ছবিটি সরান"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                  <div>
+                    <span className="text-[10.5px] text-stone-600 font-bold block mb-1">
+                      অথবা ছবির ডিরেক্ট লিংক (Image URL) যোগ করুন:
+                    </span>
+                    <div className="flex gap-1.5">
+                      <input
+                        type="text"
+                        value={newImage}
+                        onChange={(e) => setNewImage(e.target.value)}
+                        placeholder="https://..."
+                        className="w-full px-3 py-1.5 bg-white border border-stone-300 rounded-xl focus:border-[#E11D48] focus:outline-none font-mono text-[11px]"
+                      />
+                      {newImage.trim() && !newImages.includes(newImage.trim()) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNewImages((prev) => [...prev, newImage.trim()]);
+                            setNewImage('');
+                          }}
+                          className="px-2.5 py-1.5 bg-stone-900 text-white rounded-xl font-bold text-[11px] shrink-0 cursor-pointer"
+                        >
+                          + যোগ
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <span className="text-[10.5px] text-stone-600 font-bold block mb-1">
+                      প্রোডাক্ট ভিডিও লিংক (YouTube / MP4 — ঐচ্ছিক):
+                    </span>
+                    <input
+                      type="text"
+                      value={newVideoUrl}
+                      onChange={(e) => setNewVideoUrl(e.target.value)}
+                      placeholder="https://youtube.com/... বা .mp4"
+                      className="w-full px-3 py-1.5 bg-white border border-stone-300 rounded-xl focus:border-[#E11D48] focus:outline-none font-mono text-[11px]"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Step 2: Title, Category & Price */}
               <div>
-                <label className="block text-stone-700 font-bold mb-1">প্রোডাক্টের নাম *</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-stone-700 font-bold">
+                    প্রোডাক্টের নাম (ফাঁকা রাখলে AI ছবি দেখে অটো নাম দেবে)
+                  </label>
+                  {newTitleEn && (
+                    <span className="text-[10px] font-mono text-stone-500 truncate max-w-[200px]">
+                      EN: {newTitleEn}
+                    </span>
+                  )}
+                </div>
                 <input
                   type="text"
-                  required
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
-                  placeholder="যেমন: মডার্ন অ্যাক্রিলিক ওয়াল মিরর বা স্মার্ট গ্যাজেট"
+                  placeholder="যেমন: মডার্ন অ্যাক্রিলিক ওয়াল মিরর (অথবা ছবি আপলোড করে AI বাটনে ক্লিক করুন)"
                   className="w-full px-3 py-2 border border-stone-300 rounded-xl focus:border-[#E11D48] focus:outline-none font-bold"
                 />
               </div>
@@ -10538,53 +10889,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </div>
               </div>
 
-              <div className="space-y-2 p-3 rounded-2xl bg-[#FFF8F9] border border-rose-200">
-                <label className="block text-stone-800 font-bold">
-                  প্রোডাক্টের ছবি আপলোড করুন (কম্পিউটার/মোবাইল ফাইল অথবা লিংক) *
-                </label>
-                <div className="flex flex-wrap items-center gap-2">
-                  <label className="px-3.5 py-2 bg-[#E11D48] hover:bg-[#BE123C] text-white rounded-xl font-bold cursor-pointer inline-flex items-center gap-1.5 shadow-2xs">
-                    <ImageIcon className="w-3.5 h-3.5" />
-                    <span>{newUploadingImg ? 'আপলোড হচ্ছে...' : '📁 ফাইল থেকে ছবি সিলেক্ট করুন'}</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleNewProductFileUpload}
-                      className="hidden"
-                    />
-                  </label>
-                  <span className="text-[11px] text-stone-500">অথবা নিচে ছবির লিংক দিন:</span>
-                </div>
-                <input
-                  type="text"
-                  value={newImage}
-                  onChange={(e) => setNewImage(e.target.value)}
-                  placeholder="https://..."
-                  className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl focus:border-[#E11D48] focus:outline-none font-mono text-[11px]"
-                />
-                {newImage && (
-                  <div className="flex items-center gap-3 pt-1">
-                    <img
-                      src={newImage}
-                      alt="Preview"
-                      className="w-14 h-14 rounded-xl object-cover border border-rose-200 bg-white"
-                    />
-                    <span className="text-[11px] text-emerald-700 font-bold">✓ প্রোডাক্ট ছবি প্রস্তুত</span>
-                  </div>
-                )}
-              </div>
-
               <div>
-                <label className="block text-stone-700 font-bold mb-1">প্রোডাক্টের সংক্ষিপ্ত বিবরণ</label>
+                <label className="block text-stone-700 font-bold mb-1">
+                  প্রোডাক্টের বিস্তারিত বিবরণ (ফাঁকা রাখলে AI ছবি দেখে অটো বিবরণ লিখবে)
+                </label>
                 <textarea
-                  rows={2}
+                  rows={3}
                   value={newDescription}
                   onChange={(e) => setNewDescription(e.target.value)}
+                  placeholder="প্রোডাক্টের বিবরণ লিখুন অথবা উপরের '✨ ছবি দেখে AI দিয়ে অটো টাইটেল ও ডেসক্রিপশন লিখুন' বাটনে ক্লিক করুন..."
                   className="w-full px-3 py-2 border border-stone-300 rounded-xl focus:border-[#E11D48] focus:outline-none"
                 />
               </div>
 
-              <div className="flex justify-end gap-2 pt-2">
+              <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-stone-100">
                 <button
                   type="button"
                   onClick={() => setIsNewProdOpen(false)}
@@ -10593,9 +10911,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   বাতিল
                 </button>
                 <button
+                  type="button"
+                  disabled={newUploadingImg || newAiAnalyzing}
+                  onClick={() => handleAnalyzeNewProductImagesWithAI(true)}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-extrabold transition-colors cursor-pointer shadow-xs disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>⚡ ১-ক্লিকে AI বিশ্লেষণ ও লাইভ পাবলিশ</span>
+                </button>
+                <button
                   type="submit"
-                  disabled={newUploadingImg}
-                  className="px-5 py-2 bg-[#E11D48] text-white rounded-xl font-bold hover:bg-[#BE123C] transition-colors cursor-pointer shadow-xs disabled:opacity-50"
+                  disabled={newUploadingImg || newAiAnalyzing}
+                  className="px-5 py-2 bg-[#E11D48] text-white rounded-xl font-extrabold hover:bg-[#BE123C] transition-colors cursor-pointer shadow-xs disabled:opacity-50"
                 >
                   ✅ সেভ ও লাইভ প্রকাশ করুন
                 </button>

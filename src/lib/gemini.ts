@@ -4,7 +4,11 @@
  */
 
 import { Product } from '../types';
-import { isBlockedOrErrorProductImageUrl, resolveSafeProductImageUrl } from './storeSync';
+import {
+  isBlockedOrErrorProductImageUrl,
+  resolveSafeProductImageUrl,
+  validateAndIsolateProductUrl,
+} from './storeSync';
 
 export interface AIProductAnalysis {
   titleBn: string;
@@ -353,6 +357,9 @@ export async function smartImportOrAnalyzeProduct(
   input: string,
   imageUrl?: string
 ): Promise<AIProductAnalysis> {
+  const urlValidation = validateAndIsolateProductUrl(input);
+  const normalizedInput = urlValidation.isValid ? urlValidation.normalizedUrl : input.trim();
+
   const directImages = extractDirectImages(input);
   if (imageUrl && !directImages.includes(imageUrl)) {
     directImages.unshift(imageUrl);
@@ -366,7 +373,7 @@ export async function smartImportOrAnalyzeProduct(
     const response = await fetch('/api/gemini/import-product', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ input, imageUrl }),
+      body: JSON.stringify({ input: normalizedInput, imageUrl }),
       signal: controller.signal,
     });
     clearTimeout(timer);
@@ -470,6 +477,67 @@ export async function smartImportOrAnalyzeProduct(
       seoKeywords: ['Dokandari', 'অনলাইন শপিং', 'ক্যাশ অন ডেলিভারি', 'বাংলাদেশ', extractedTitle],
     };
   }
+}
+
+/**
+ * Multi-Image Uploaded Product AI Vision Analyzer (4-5+ uploaded photos -> authentic Bengali title, description, category, features & price)
+ */
+export async function analyzeUploadedProductImagesWithAI(params: {
+  images: string[];
+  hintText?: string;
+  priceHint?: string;
+}): Promise<AIProductAnalysis> {
+  const validImages = (params.images || []).filter(Boolean);
+  const res = await fetch('/api/gemini/analyze-uploaded-product', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      images: validImages,
+      hintText: params.hintText || '',
+      priceHint: params.priceHint || '',
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`AI Vision analysis failed (${res.status})`);
+  }
+
+  const data = await res.json();
+  const singlePrice = Number(data.price) || Number(params.priceHint) || 1290;
+  const cleanBn = cleanProductTitle(
+    data.titleBn || params.hintText || 'দোকানদারি অরিজিনাল প্রোডাক্ট'
+  );
+
+  return {
+    titleBn: cleanBn,
+    titleEn: data.titleEn || params.hintText || 'Dokandari Original Product',
+    category: data.category in VERIFIED_IMAGE_GALLERIES ? data.category : 'lifestyle',
+    price: singlePrice,
+    originalPrice: Number(data.originalPrice) || Math.round(singlePrice * 1.25),
+    description:
+      data.description ||
+      `${cleanBn} — Dokandari অফিশিয়াল স্টোরের ১০০% অরিজিনাল ও ভেরিফাইড কোয়ালিটি পণ্য। সারা বাংলাদেশে ক্যাশ অন ডেলিভারি সুবিধা।`,
+    fabric: data.fabric || '১০০% অরিজিনাল প্রিমিয়াম কোয়ালিটি',
+    colors: Array.isArray(data.colors) && data.colors.length > 0 ? data.colors : ['ছবির অরিজিনাল কালার'],
+    sizes: Array.isArray(data.sizes) && data.sizes.length > 0 ? data.sizes : ['স্ট্যান্ডার্ড সাইজ'],
+    features:
+      Array.isArray(data.features) && data.features.length > 0
+        ? data.features
+        : [
+            '১০০% অরিজিনাল ও আপলোডকৃত ছবির হুবহু প্রোডাক্ট গ্যারান্টি',
+            'প্রিমিয়াম ফিনিশিং ও দীর্ঘস্থায়ী মান',
+            'ডেলিভারি ম্যানের সামনে চেক করে রিসিভ করার সুবিধা',
+            'সারা বাংলাদেশে দ্রুত ক্যাশ অন ডেলিভারি',
+          ],
+    images: validImages,
+    videos: [],
+    comboOffers: data.comboOffers || {
+      singlePrice,
+      doublePrice: singlePrice * 2 - 100,
+      triplePrice: singlePrice * 3 - 200,
+    },
+    seoKeywords: Array.isArray(data.seoKeywords) ? data.seoKeywords : ['Dokandari', cleanBn],
+  };
 }
 
 /**
@@ -716,14 +784,18 @@ export async function importStoreWithAI(
   products: Product[];
 }> {
   try {
-    // Strict 14-second timeout cap so store imports always complete within 10-15 seconds
+    const validation = validateAndIsolateProductUrl(storeUrl);
+    const effectiveUrl = validation.isValid ? validation.normalizedUrl : storeUrl.trim();
+    const effectiveMax = validation.isSingleProductUrl ? 1 : maxProducts;
+
+    // Strict 18-second timeout cap so store imports always complete reliably
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 14000);
+    const timer = setTimeout(() => controller.abort(), 18000);
 
     const res = await fetch('/api/gemini/import-store', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ storeUrl, maxProducts }),
+      body: JSON.stringify({ storeUrl: effectiveUrl, maxProducts: effectiveMax }),
       signal: controller.signal,
     });
     clearTimeout(timer);

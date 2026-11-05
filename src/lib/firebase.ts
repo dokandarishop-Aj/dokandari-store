@@ -59,7 +59,7 @@ try {
   firestoreInstance = initializeFirestore(
     app,
     {
-      experimentalAutoDetectLongPolling: true,
+      experimentalForceLongPolling: true,
       localCache: memoryLocalCache(),
     },
     firebaseConfig.firestoreDatabaseId

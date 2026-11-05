@@ -19,7 +19,10 @@ import {
 import { INITIAL_PRODUCTS } from './src/data/initialCatalog';
 import { initializeApp, getApps } from 'firebase/app';
 import {
+  initializeFirestore,
   getFirestore,
+  memoryLocalCache,
+  setLogLevel,
   collection,
   doc,
   getDocs,
@@ -31,12 +34,30 @@ import firebaseConfig from './firebase-applet-config.json';
 
 dotenv.config();
 
+try {
+  setLogLevel('silent');
+} catch {
+  // ignore
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const serverFirebaseApp =
   getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
-const serverDb = getFirestore(serverFirebaseApp, firebaseConfig.firestoreDatabaseId);
+let serverDb: ReturnType<typeof getFirestore>;
+try {
+  serverDb = initializeFirestore(
+    serverFirebaseApp,
+    {
+      experimentalForceLongPolling: true,
+      localCache: memoryLocalCache(),
+    },
+    firebaseConfig.firestoreDatabaseId
+  );
+} catch {
+  serverDb = getFirestore(serverFirebaseApp, firebaseConfig.firestoreDatabaseId);
+}
 
 const PORT = 3000;
 
@@ -826,7 +847,7 @@ function parseCustomWebsiteHtmlIntoResult(
     }
   }
 
-  // 6. Extract prioritized product gallery images (OpenGraph, WooCommerce data-large_image, data-zoom-image, data-src, srcset, and <img src>)
+  // 6. Extract prioritized product gallery images ONLY from this specific product (NEVER from related products, header, nav, or footer)
   const ogImages = [
     ...Array.from(
       html.matchAll(/<meta[^>]+(?:property|name)=["'](?:og:image|og:image:secure_url|twitter:image)["'][^>]+content=["']([^"']+)["']/gi)
@@ -836,38 +857,66 @@ function parseCustomWebsiteHtmlIntoResult(
     ).map((m) => resolveUrl(m[1])),
   ];
 
-  // Extract high-priority gallery attributes used by WooCommerce, Shopify, Magento, Laravel & Custom Websites
+  // Strip header, nav, footer, aside, and related/recommended/upsell product blocks before scanning DOM for product gallery images
+  const isolatedProductHtml = html
+    .replace(/<(?:header|nav|footer|aside)\b[^>]*>[\s\S]*?<\/(?:header|nav|footer|aside)>/gi, ' ')
+    .replace(
+      /<(?:section|div|ul)\b[^>]+(?:class|id)=["'][^"']*(?:related|upsell|cross-sell|similar-product|also-like|recommended|recently-viewed|more-products|other-products|widget_products|footer)[^"']*["'][^>]*>[\s\S]*$/gi,
+      ' '
+    );
+
+  // Extract high-priority gallery attributes used by WooCommerce, Shopify, Magento, Laravel & Custom Websites inside isolated product HTML
   const galleryAttrMatches = Array.from(
-    html.matchAll(
-      /(?:data-large_image|data-zoom-image|data-zoom|data-full-image|data-master|data-src|data-lazy-src|data-lazy|data-original|data-image)=["']([^"']+\.(?:jpg|jpeg|png|webp|avif)(?:\?[^"']*)?)["']/gi
+    isolatedProductHtml.matchAll(
+      /(?:data-large_image|data-zoom-image|data-zoom|data-full-image|data-master)=["']([^"']+\.(?:jpg|jpeg|png|webp|avif)(?:\?[^"']*)?)["']/gi
     )
   ).map((m) => resolveUrl(m[1]));
 
-  // Extract standard <img src="..."> tags (including relative paths like /wp-content/uploads/... or /uploads/products/...)
+  // Look for explicit product gallery containers first
+  const galleryContainerMatches = Array.from(
+    isolatedProductHtml.matchAll(
+      /<(?:div|figure|ul)\b[^>]+(?:class|id)=["'][^"']*(?:woocommerce-product-gallery|product-gallery|product_gallery|product-images|product-media|pdp-gallery|product-slider|single-product-main-image|gallery-images|images)[^"']*["'][^>]*>([\s\S]{1,35000}?)<\/(?:div|figure|ul)>/gi
+    )
+  ).map((m) => m[1]);
+
+  const galleryScopeHtml =
+    galleryContainerMatches.length > 0 ? galleryContainerMatches.join('\n') : isolatedProductHtml;
+
+  const scopedLazyAttrs = Array.from(
+    galleryScopeHtml.matchAll(
+      /(?:data-src|data-lazy-src|data-lazy|data-original|data-image)=["']([^"']+\.(?:jpg|jpeg|png|webp|avif)(?:\?[^"']*)?)["']/gi
+    )
+  ).map((m) => resolveUrl(m[1]));
+
   const imgTagMatches = Array.from(
-    html.matchAll(/<img[^>]+src=["']([^"']+\.(?:jpg|jpeg|png|webp|avif)(?:\?[^"']*)?)["']/gi)
+    galleryScopeHtml.matchAll(
+      /<img[^>]+src=["']([^"']+\.(?:jpg|jpeg|png|webp|avif)(?:\?[^"']*)?)["']/gi
+    )
   )
     .map((m) => resolveUrl(m[1]))
-    // Deprioritize tiny WordPress thumbnails like -100x100.jpg or -150x150.jpg by also adding their uncropped full-res version
     .flatMap((u) => {
       const fullRes = u.replace(/-\d{2,3}x\d{2,3}(\.(?:jpg|jpeg|png|webp))$/i, '$1');
-      return fullRes !== u ? [fullRes, u] : [u];
+      return fullRes !== u ? [fullRes] : [u];
     });
 
-  // Extract any absolute image URLs in inline JSON/scripts
-  const rawAbsImgMatches = Array.from(
-    html.matchAll(/(?:https?:)?\/\/[^\s"'<>\\]+\.(?:jpg|jpeg|png|webp)(?:\?[^\s"'<>\\]*)?/gi)
-  ).map((m) => resolveUrl(m[0]));
-
-  const allCandidateImages = [
+  // Prioritize JSON-LD Product images + OpenGraph image + explicit gallery zoom attributes
+  const primaryGalleryImages = [
     ...result.images,
     ...ogImages,
     ...galleryAttrMatches,
-    ...imgTagMatches,
-    ...rawAbsImgMatches,
   ].filter((u) => isValidScrapedProductImage(u));
 
-  result.images = Array.from(new Set(allCandidateImages)).slice(0, 8);
+  const secondaryGalleryImages = [
+    ...scopedLazyAttrs,
+    ...imgTagMatches,
+  ].filter((u) => isValidScrapedProductImage(u));
+
+  const combinedGallery =
+    primaryGalleryImages.length >= 2
+      ? [...primaryGalleryImages, ...secondaryGalleryImages.slice(0, 6)]
+      : [...primaryGalleryImages, ...secondaryGalleryImages];
+
+  result.images = Array.from(new Set(combinedGallery)).slice(0, 8);
 
   // 7. Extract video URLs (.mp4, .webm, AND YouTube watch/shorts/embed/youtu.be links)
   const videoMatches = Array.from(
@@ -1024,10 +1073,6 @@ async function scrapeWebpageMetadata(targetUrl: string): Promise<{
 
     result.images = Array.from(new Set(result.images.filter((u) => isValidScrapedProductImage(u)))).slice(0, 8);
     result.videos = deduplicateAndPickSingleVideo(result.videos);
-    if (result.images.length === 0 && result.title) {
-      const webImgs = await searchRealProductImagesOnWeb(result.title);
-      if (webImgs.length > 0) result.images = webImgs;
-    }
     if (result.images.length > 0) {
       return result;
     }
@@ -1257,14 +1302,6 @@ async function scrapeWebpageMetadata(targetUrl: string): Promise<{
 
   result.images = Array.from(new Set(result.images.filter((u) => isValidScrapedProductImage(u)))).slice(0, 8);
 
-  // Fallback 3: If page still blocked direct image extraction, search real web product images for this exact title
-  if (result.images.length === 0 && result.title) {
-    const webImages = await searchRealProductImagesOnWeb(result.title);
-    if (webImages.length > 0) {
-      result.images = webImages;
-    }
-  }
-
   return result;
 }
 
@@ -1317,6 +1354,38 @@ async function scrapeStorePageProducts(
     return discovered;
   }
 
+  const pathname = baseUrl.pathname || '/';
+  const isCollectionOrCategoryPage =
+    /\/(?:collections|category|categories|product-category|shop|store|catalog|all-products)(?:\/|$)/i.test(
+      pathname
+    ) && !/\/products\/[^/?#]+/i.test(pathname);
+  const isRootHomepage = pathname === '/' || pathname === '';
+  const isSingleProductUrl =
+    !isRootHomepage &&
+    !isCollectionOrCategoryPage &&
+    (/\/(?:product|products|product-detail|item|dp|gp\/product|p)\/[^/?#]+/i.test(pathname) ||
+      pathname.split('/').filter(Boolean).length >= 1);
+
+  // CRITICAL: If the user pasted a specific product page URL, scrape ONLY that single product!
+  // NEVER fetch site-wide /products.json or /wp-json/wc/store/products for a single product URL.
+  if (isSingleProductUrl) {
+    const singleMeta = await scrapeWebpageMetadata(storeUrl);
+    if (singleMeta.title || singleMeta.images.length > 0) {
+      return [
+        {
+          url: storeUrl,
+          title: singleMeta.title,
+          description: singleMeta.description,
+          images: singleMeta.images,
+          priceHint: singleMeta.priceHint,
+          colors: singleMeta.colors,
+          sizes: singleMeta.sizes,
+        },
+      ];
+    }
+    return [];
+  }
+
   const commonHeaders = {
     'User-Agent':
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -1324,15 +1393,16 @@ async function scrapeStorePageProducts(
     'Accept-Language': 'en-US,en;q=0.9,bn;q=0.8',
   };
 
-  // 1. Try Shopify JSON API endpoints first (fast 3s timeout, returns 100% real catalog data)
+  // 1. Try Shopify JSON API endpoints ONLY when on a collection or root store page
   const shopifyEndpoints: string[] = [];
   const collectionMatch = baseUrl.pathname.match(/\/collections\/([^/?#]+)/i);
   if (collectionMatch && collectionMatch[1]) {
     shopifyEndpoints.push(
       `${baseUrl.origin}/collections/${collectionMatch[1]}/products.json?limit=${Math.min(30, maxLimit)}`
     );
+  } else if (isRootHomepage) {
+    shopifyEndpoints.push(`${baseUrl.origin}/products.json?limit=${Math.min(30, maxLimit)}`);
   }
-  shopifyEndpoints.push(`${baseUrl.origin}/products.json?limit=${Math.min(30, maxLimit)}`);
 
   for (const endpoint of shopifyEndpoints) {
     if (discovered.length >= maxLimit) break;
@@ -1355,7 +1425,6 @@ async function scrapeStorePageProducts(
               const cleanBody = stripHtmlTags(sp.body_html || '').slice(0, 600);
               const handleUrl = sp.handle ? `${baseUrl.origin}/products/${sp.handle}` : storeUrl;
 
-              // Extract real options (sizes / colors) if present
               const colors: string[] = [];
               const sizes: string[] = [];
               if (Array.isArray(sp.options)) {
@@ -1395,45 +1464,47 @@ async function scrapeStorePageProducts(
     return discovered.slice(0, maxLimit);
   }
 
-  // 2. Try WooCommerce Store API (/wp-json/wc/store/products)
-  try {
-    const wcEndpoint = `${baseUrl.origin}/wp-json/wc/store/products?per_page=${Math.min(20, maxLimit)}`;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
-    const res = await fetch(wcEndpoint, { signal: controller.signal, headers: commonHeaders });
-    clearTimeout(timeout);
-    if (res.ok && (res.headers.get('content-type') || '').includes('json')) {
-      const wcData: any = await res.json();
-      if (Array.isArray(wcData) && wcData.length > 0) {
-        for (const wp of wcData.slice(0, maxLimit)) {
-          const imgs = Array.isArray(wp.images)
-            ? wp.images.map((im: any) => im?.src).filter((s: any) => typeof s === 'string' && s.startsWith('http'))
-            : [];
-          const rawPrice = wp.prices?.price
-            ? String(Number(wp.prices.price) / Math.pow(10, Number(wp.prices.currency_minor_unit || 0)))
-            : '';
-          if (wp.name && imgs.length > 0) {
-            discovered.push({
-              url: wp.permalink || storeUrl,
-              title: stripHtmlTags(String(wp.name)),
-              description: stripHtmlTags(wp.short_description || wp.description || '').slice(0, 600),
-              images: imgs.slice(0, 8),
-              priceHint: rawPrice,
-              sku: wp.sku || undefined,
-            });
+  // 2. Try WooCommerce Store API ONLY when on the root homepage
+  if (isRootHomepage) {
+    try {
+      const wcEndpoint = `${baseUrl.origin}/wp-json/wc/store/products?per_page=${Math.min(20, maxLimit)}`;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      const res = await fetch(wcEndpoint, { signal: controller.signal, headers: commonHeaders });
+      clearTimeout(timeout);
+      if (res.ok && (res.headers.get('content-type') || '').includes('json')) {
+        const wcData: any = await res.json();
+        if (Array.isArray(wcData) && wcData.length > 0) {
+          for (const wp of wcData.slice(0, maxLimit)) {
+            const imgs = Array.isArray(wp.images)
+              ? wp.images.map((im: any) => im?.src).filter((s: any) => typeof s === 'string' && s.startsWith('http'))
+              : [];
+            const rawPrice = wp.prices?.price
+              ? String(Number(wp.prices.price) / Math.pow(10, Number(wp.prices.currency_minor_unit || 0)))
+              : '';
+            if (wp.name && imgs.length > 0) {
+              discovered.push({
+                url: wp.permalink || storeUrl,
+                title: stripHtmlTags(String(wp.name)),
+                description: stripHtmlTags(wp.short_description || wp.description || '').slice(0, 600),
+                images: imgs.slice(0, 8),
+                priceHint: rawPrice,
+                sku: wp.sku || undefined,
+              });
+            }
           }
         }
       }
+    } catch {
+      // Not a WooCommerce API store
     }
-  } catch {
-    // Not a WooCommerce API store
   }
 
   if (discovered.length >= maxLimit) {
     return discovered.slice(0, maxLimit);
   }
 
-  // 3. Scrape the HTML of the target store/collection page directly
+  // 3. Scrape the HTML of the target store/collection page directly (stripping header, nav, footer, aside)
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 7500);
@@ -1443,11 +1514,15 @@ async function scrapeStorePageProducts(
     });
     clearTimeout(timeout);
     if (!response.ok) return discovered;
-    const html = await response.text();
+    const rawHtml = await response.text();
+    const html = rawHtml.replace(
+      /<(?:header|nav|footer|aside)\b[^>]*>[\s\S]*?<\/(?:header|nav|footer|aside)>/gi,
+      ' '
+    );
 
     // 3a. Parse JSON-LD Product & ItemList schemas
     const jsonLdMatches = Array.from(
-      html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)
+      rawHtml.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)
     );
     for (const jm of jsonLdMatches) {
       try {
@@ -1497,9 +1572,9 @@ async function scrapeStorePageProducts(
       }
     }
 
-    // 3b. Extract product links from HTML anchors
+    // 3b. Extract product links from main body HTML anchors only
     const linkMatches = Array.from(
-      html.matchAll(/href=["']([^"'#]+(?:\/products\/|\/product\/|\/item\/|\/dp\/|\/shop\/|\/p\/|product-detail)[^"'#]*)["']/gi)
+      html.matchAll(/href=["']([^"'#]+(?:\/products\/|\/product\/|\/item\/|\/dp\/|\/p\/|product-detail)[^"'#]*)["']/gi)
     )
       .map((m) => {
         try {
@@ -1523,7 +1598,6 @@ async function scrapeStorePageProducts(
       (u) => !discovered.some((d) => d.url === u)
     );
 
-    // Fetch up to maxLimit discovered product URLs in parallel batches to get real title, description & all images
     const remainingSlots = Math.max(0, maxLimit - discovered.length);
     const urlsToScrape = uniqueProductUrls.slice(0, remainingSlots);
 
@@ -1535,7 +1609,7 @@ async function scrapeStorePageProducts(
     );
 
     for (const sp of scrapedPages) {
-      if (sp.meta.title || sp.meta.images.length > 0) {
+      if (sp.meta.title && sp.meta.images.length > 0) {
         discovered.push({
           url: sp.url,
           title: sp.meta.title,
@@ -1546,7 +1620,6 @@ async function scrapeStorePageProducts(
       }
     }
 
-    // 3c. If page has multiple product images/cards directly on the page but non-standard URLs, extract them
     if (discovered.length === 0) {
       const pageMeta = await scrapeWebpageMetadata(storeUrl);
       if (pageMeta.title || pageMeta.images.length > 0) {
@@ -1716,10 +1789,7 @@ async function synthesizeProductFromScraped(
       ? `${titleBn} — ${cleanedScrapedDesc}। Dokandari (দোকানদারি) অফিশিয়াল স্টোরের ১০০% অরিজিনাল প্রোডাক্ট গ্যারান্টি, সারা বাংলাদেশে ক্যাশ অন ডেলিভারি এবং ডেলিভারি ম্যানের সামনে পার্সেল খুলে দেখে মূল্য পরিশোধের সুবিধা।`
       : `${titleBn} (${effectiveTitleEn}) — Dokandari (দোকানদারি) অফিশিয়াল স্টোরের ১০০% অরিজিনাল ইমপোর্টেড কোয়ালিটি গ্যারান্টি। সারা বাংলাদেশে দ্রুত হোম ডেলিভারি এবং ডেলিভারি ম্যানের সামনে পণ্য দেখে মূল্য পরিশোধের সুবিধা।`;
 
-  let validScrapedImages = (scraped.images || []).filter((u) => isValidScrapedProductImage(u));
-  if (validScrapedImages.length === 0) {
-    validScrapedImages = await searchRealProductImagesOnWeb(effectiveTitleEn);
-  }
+  const validScrapedImages = (scraped.images || []).filter((u) => isValidScrapedProductImage(u));
 
   // Convert remote product images to self-contained base64 data URLs so they render 100% reliably on live dokandari.com
   const inlinedImages = await convertRemoteImagesToDataUrls(validScrapedImages, 6);
@@ -2209,7 +2279,7 @@ titleBn, titleEn, category, price, originalPrice, description, fabric, colors, s
 
       const response = await withTimeout(
         ai.models.generateContent({
-          model: 'gemini-2.5-flash',
+          model: 'gemini-3.8-flash',
           contents: { parts: contentsParts },
           config: {
             responseMimeType: 'application/json',
@@ -2282,8 +2352,155 @@ titleBn, titleEn, category, price, originalPrice, description, fabric, colors, s
         },
       });
     } catch (error: any) {
-      console.warn('Gemini API rate/quota note (activating real scraped + translated metadata):', error?.message || error);
+      console.warn('Gemini API fallback note (activating real scraped + translated metadata):', error?.message || error);
       res.json(synthesizedFallback);
+    }
+  });
+
+  // 2.1b Multi-Image Uploaded Product AI Vision Analyzer Endpoint (/api/gemini/analyze-uploaded-product)
+  app.post('/api/gemini/analyze-uploaded-product', async (req, res) => {
+    const { images = [], hintText = '', priceHint = '' } = req.body as {
+      images?: string[];
+      hintText?: string;
+      priceHint?: string;
+    };
+
+    const validImages = Array.isArray(images)
+      ? images.map((img) => String(img || '').trim()).filter(Boolean)
+      : [];
+
+    if (validImages.length === 0 && !hintText.trim()) {
+      res.status(400).json({ error: 'At least one uploaded product image or hint text is required.' });
+      return;
+    }
+
+    try {
+      const resolvedParts = (
+        await Promise.all(
+          validImages.slice(0, 5).map((imgUrl) => resolveImagePart(imgUrl, undefined, true))
+        )
+      ).filter((p): p is { inlineData: { data: string; mimeType: string } } => Boolean(p));
+
+      const ai = getServerGeminiClient();
+      const visionPrompt = `
+You are Dokandari's Senior Product Vision & Catalog Specialist for Dokandari Bangladesh (দোকানদারি).
+Analyze the attached ${resolvedParts.length} uploaded product photo(s) carefully.
+${hintText ? `Merchant Product Hint / Title: "${hintText.trim()}"` : ''}
+${priceHint ? `Merchant Price Hint (BDT): "${priceHint.trim()}"` : ''}
+
+Instructions:
+1. Identify the exact product shown in the uploaded photos (its type, design, material, color, packaging, and use case).
+2. Write an authentic, high-converting Bengali product title ('titleBn') and clean English title ('titleEn') that accurately describe ONLY this exact uploaded product.
+3. Choose the single best category from:
+   home_decor, gadgets_electronics, fashion_clothing, beauty_personal_care, home_kitchen, mobile_accessories, lifestyle, travel_outdoor, health_fitness, kids_baby, office_essentials.
+4. Write a detailed, persuasive Bengali product description ('description') highlighting the real visual features seen in the photos, 100% original quality guarantee, and Cash on Delivery across Bangladesh.
+5. Provide realistic BDT price ('price', e.g., ${Number(priceHint) > 0 ? Number(priceHint) : 'between 650 and 2490'}), originalPrice, fabric/material specification in Bengali ('fabric'), available colors ('colors'), sizes ('sizes'), 4 key bullet features in Bengali ('features'), and SEO keywords ('seoKeywords').
+`;
+
+      const contentsParts: any[] = [...resolvedParts, { text: visionPrompt }];
+      const response = await withTimeout(
+        ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: { parts: contentsParts },
+          config: {
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                titleBn: { type: Type.STRING },
+                titleEn: { type: Type.STRING },
+                category: { type: Type.STRING },
+                price: { type: Type.NUMBER },
+                originalPrice: { type: Type.NUMBER },
+                description: { type: Type.STRING },
+                fabric: { type: Type.STRING },
+                colors: { type: Type.ARRAY, items: { type: Type.STRING } },
+                sizes: { type: Type.ARRAY, items: { type: Type.STRING } },
+                features: { type: Type.ARRAY, items: { type: Type.STRING } },
+                seoKeywords: { type: Type.ARRAY, items: { type: Type.STRING } },
+              },
+              required: [
+                'titleBn',
+                'titleEn',
+                'category',
+                'price',
+                'originalPrice',
+                'description',
+                'fabric',
+                'colors',
+                'sizes',
+                'features',
+                'seoKeywords',
+              ],
+            },
+          },
+        }),
+        12000,
+        'Gemini Multi-Image Vision Product Analysis'
+      );
+
+      const parsed = JSON.parse(response.text || '{}');
+      const finalPrice = Number(priceHint) > 0 ? Number(priceHint) : Number(parsed.price) || 1290;
+      const finalOriginalPrice = Number(parsed.originalPrice) > finalPrice ? Number(parsed.originalPrice) : Math.round(finalPrice * 1.25);
+
+      res.json({
+        titleBn: (parsed.titleBn || hintText || 'প্রিমিয়াম অরিজিনাল প্রোডাক্ট').trim(),
+        titleEn: (parsed.titleEn || hintText || 'Premium Original Product').trim(),
+        category: parsed.category || 'lifestyle',
+        price: finalPrice,
+        originalPrice: finalOriginalPrice,
+        description:
+          parsed.description ||
+          `${parsed.titleBn || hintText || 'এই প্রিমিয়াম প্রোডাক্টটি'} — Dokandari (দোকানদারি) অফিশিয়াল স্টোরের ১০০% অরিজিনাল ও ভেরিফাইড কোয়ালিটি পণ্য। সারা বাংলাদেশে ক্যাশ অন ডেলিভারি সুবিধা।`,
+        fabric: parsed.fabric || '১০০% অরিজিনাল প্রিমিয়াম কোয়ালিটি মেটেরিয়াল',
+        colors: Array.isArray(parsed.colors) && parsed.colors.length > 0 ? parsed.colors : ['ছবির অরিজিনাল কালার'],
+        sizes: Array.isArray(parsed.sizes) && parsed.sizes.length > 0 ? parsed.sizes : ['স্ট্যান্ডার্ড সাইজ'],
+        features:
+          Array.isArray(parsed.features) && parsed.features.length > 0
+            ? parsed.features
+            : [
+                '১০০% অরিজিনাল ও আপলোডকৃত ছবির হুবহু প্রোডাক্ট গ্যারান্টি',
+                'প্রিমিয়াম ফিনিশিং ও দীর্ঘস্থায়ী মান',
+                'ডেলিভারি ম্যানের সামনে চেক করে রিসিভ করার সুবিধা',
+                'সারা বাংলাদেশে দ্রুত ক্যাশ অন ডেলিভারি',
+              ],
+        seoKeywords: Array.isArray(parsed.seoKeywords) ? parsed.seoKeywords : ['Dokandari', 'Original Product'],
+        scrapedImages: validImages,
+        scrapedVideos: [],
+        comboOffers: {
+          singlePrice: finalPrice,
+          doublePrice: finalPrice * 2 - 100,
+          triplePrice: finalPrice * 3 - 200,
+        },
+      });
+    } catch (err: any) {
+      const fallbackPrice = Number(priceHint) > 0 ? Number(priceHint) : 1290;
+      const fallbackTitle = hintText.trim() || 'দোকানদারি এক্সক্লুসিভ অরিজিনাল প্রোডাক্ট';
+      res.json({
+        titleBn: fallbackTitle,
+        titleEn: hintText.trim() || 'Dokandari Exclusive Original Product',
+        category: 'lifestyle',
+        price: fallbackPrice,
+        originalPrice: Math.round(fallbackPrice * 1.25),
+        description: `${fallbackTitle} — Dokandari (দোকানদারি) অফিশিয়াল স্টোরের ১০০% অরিজিনাল ও ভেরিফাইড কোয়ালিটি পণ্য। সারা বাংলাদেশে দ্রুত ক্যাশ অন ডেলিভারি এবং ডেলিভারি ম্যানের সামনে পার্সেল খুলে দেখে মূল্য পরিশোধের সুবিধা।`,
+        fabric: '১০০% অরিজিনাল প্রিমিয়াম কোয়ালিটি',
+        colors: ['ছবির অরিজিনাল কালার'],
+        sizes: ['স্ট্যান্ডার্ড সাইজ'],
+        features: [
+          '১০০% অরিজিনাল ও আপলোডকৃত ছবির হুবহু প্রোডাক্ট গ্যারান্টি',
+          'প্রিমিয়াম ফিনিশিং ও দীর্ঘস্থায়ী মান',
+          'ডেলিভারি ম্যানের সামনে চেক করে রিসিভ করার সুবিধা',
+          'সারা বাংলাদেশে দ্রুত ক্যাশ অন ডেলিভারি',
+        ],
+        seoKeywords: ['Dokandari', fallbackTitle],
+        scrapedImages: validImages,
+        scrapedVideos: [],
+        comboOffers: {
+          singlePrice: fallbackPrice,
+          doublePrice: fallbackPrice * 2 - 100,
+          triplePrice: fallbackPrice * 3 - 200,
+        },
+      });
     }
   });
 
@@ -2380,7 +2597,7 @@ titleBn, titleEn, category, price, originalPrice, description, fabric, colors, s
 
         const batchResp = await withTimeout(
           ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-3.8-flash',
             contents: `Convert these real scraped e-commerce products into accurate Bengali (বাংলা) titles and descriptions for Dokandari Bangladesh.
 Strictly preserve the real product identity (do NOT invent unrelated products!).
 Categories allowed: home_decor, gadgets_electronics, fashion_clothing, beauty_personal_care, home_kitchen, mobile_accessories, lifestyle, travel_outdoor, health_fitness, kids_baby, office_essentials.
@@ -2532,7 +2749,7 @@ ${summaryLines}`,
 
       if (mode === 'campaign') {
         const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
+          model: 'gemini-3.8-flash',
           contents: `Create Facebook & TikTok ad copy in Bengali for "${title || 'প্রোডাক্ট'}" (Category: ${category || 'home_decor'}, Price: ৳${price || 1500}). Include catchy headline, benefits, Cash on Delivery note.`,
           config: {
             responseMimeType: 'application/json',
@@ -4608,7 +4825,7 @@ Reply in polite, helpful Bengali. Match recommendedProductId if applicable.`,
 
       const parts: any[] = [...resolvedParts, { text: promptBn }];
       const clients = getServerGeminiClients(apiKey);
-      const plannerModels = ['gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-3.8-flash'];
+      const plannerModels = ['gemini-3.8-flash', 'gemini-3.1-flash-lite'];
       let parsed: any = null;
 
       outerPlanLoop: for (const client of clients) {
@@ -4620,7 +4837,6 @@ Reply in polite, helpful Bengali. Match recommendedProductId if applicable.`,
                 contents: { parts },
                 config: {
                   systemInstruction: systemInstructionBn,
-                  temperature: 0.25,
                   responseMimeType: 'application/json',
                   responseSchema: {
                     type: Type.OBJECT,
@@ -4924,7 +5140,7 @@ Reply in polite, helpful Bengali. Match recommendedProductId if applicable.`,
       paidKeySelected: hasPaidSelectedKey,
       keySource: activeKeySource,
       models: {
-        planner: 'gemini-3.5-flash',
+        planner: 'gemini-3.8-flash',
         video: 'gemini-omni-1.1-flash',
         image: 'gemini-nano-banana-2.1',
         tts: 'gemini-3.8-flash-lite-tts',
@@ -4997,8 +5213,8 @@ Reply in polite, helpful Bengali. Match recommendedProductId if applicable.`,
         }
       }
 
-      // Attempt 2: `gemini-3.1-flash-image` / `gemini-2.5-flash-image` via generateContent
-      for (const genModel of ['gemini-3.1-flash-image', 'gemini-2.5-flash-image']) {
+      // Attempt 2: `gemini-3.1-flash-image` via generateContent
+      for (const genModel of ['gemini-3.1-flash-image']) {
         try {
           const contentParts: any[] = params.resolvedImgs.map((im) => ({
             inlineData: {
@@ -6085,10 +6301,12 @@ Return strict JSON with 100% complete, rich Bengali product details:
           4000,
           'Firestore orders fetch'
         );
+        const firestoreOrderIds = new Set<string>();
         snap.forEach((d) => {
           const data = d.data();
           const id = data?.id || d.id;
           if (data && id && !deletedSet.has(id)) {
+            firestoreOrderIds.add(id);
             const fullOrd: any = { ...data, id };
             orderMap.set(id, fullOrd);
             if (!mirror.orders[id] || mirror.orders[id].status !== fullOrd.status) {
@@ -6099,6 +6317,37 @@ Return strict JSON with 100% complete, rich Bengali product details:
         });
         if (updatedMirror) {
           writeLocalOrdersMirror(mirror);
+        }
+
+        // Automatically restore any active mirror orders that were missing from Firestore
+        const missingFromFirestore = Array.from(orderMap.entries()).filter(
+          ([id]) => !firestoreOrderIds.has(id)
+        );
+        if (missingFromFirestore.length > 0) {
+          Promise.all(
+            missingFromFirestore.map(([id, ord]) =>
+              setDoc(doc(serverDb, 'orders', id), ord, { merge: true }).catch(() => {})
+            )
+          ).catch(() => {});
+          // Also ensure those active order IDs are cleared from settings/deleted_orders
+          getDoc(doc(serverDb, 'settings', 'deleted_orders'))
+            .then((delSnap) => {
+              if (delSnap.exists()) {
+                const rawIds = delSnap.data()?.ids;
+                if (Array.isArray(rawIds)) {
+                  const activeMirrorIds = new Set(orderMap.keys());
+                  const cleanedIds = rawIds.filter((x: string) => !activeMirrorIds.has(x));
+                  if (cleanedIds.length !== rawIds.length) {
+                    setDoc(
+                      doc(serverDb, 'settings', 'deleted_orders'),
+                      { ids: cleanedIds, updatedAt: Date.now() },
+                      { merge: true }
+                    ).catch(() => {});
+                  }
+                }
+              }
+            })
+            .catch(() => {});
         }
       } catch {
         // fallback to local mirror

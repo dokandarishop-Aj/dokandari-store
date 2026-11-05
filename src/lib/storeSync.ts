@@ -1468,8 +1468,11 @@ export function resolveSafeProductImageUrl(
     url = `https:${url}`;
   }
 
-  // 3. Rewrite Laravel `/public/uploads/product/...` URLs (from dokandari.com or wsrv.nl) to verified local `/uploads/product/...`
-  if (url.includes('/public/uploads/product/') || url.includes('%2Fpublic%2Fuploads%2Fproduct%2F')) {
+  // 3. Rewrite Laravel `/public/uploads/product/...` URLs ONLY if they belong to dokandari.com or relative path
+  if (
+    (url.includes('/public/uploads/product/') || url.includes('%2Fpublic%2Fuploads%2Fproduct%2F')) &&
+    (!/^https?:\/\//i.test(url) || url.toLowerCase().includes('dokandari.com'))
+  ) {
     try {
       const decoded = decodeURIComponent(url);
       const fname = decoded.split('/public/uploads/product/')[1]?.split(/[?&]/)[0];
@@ -1714,11 +1717,18 @@ function normalizeProductImages(p: Product): Product {
   // Filter out accidentally overwritten generic Unsplash URLs if the product has real images or is not prod-1/prod-2
   const realImagesOnly = nonEmptyRaw.filter((img) => !isOverwrittenGenericImage(img, enriched.id));
 
+  const isImportedOrCustom =
+    Boolean((p as any).sourceUrl) ||
+    enriched.id.startsWith('dkd-') ||
+    enriched.id.startsWith('custom-');
+
   const baseList =
     realImagesOnly.length > 0
       ? realImagesOnly
       : nonEmptyRaw.length > 0
       ? nonEmptyRaw
+      : isImportedOrCustom
+      ? []
       : [
           getFallbackProductImage(enriched, 0),
           getFallbackProductImage(enriched, 1),
@@ -1727,9 +1737,11 @@ function normalizeProductImages(p: Product): Product {
 
   const safeImages = baseList.map((img, idx) => resolveSafeProductImageUrl(img, enriched, idx));
 
-  // Ensure at least 3 gallery images for ProductDetailPage thumbnails
-  while (safeImages.length < 3) {
-    safeImages.push(safeImages[0] || getFallbackProductImage(enriched, safeImages.length));
+  // Only pad initial catalog items to 3 images; for imported/custom products keep ONLY their real images
+  if (!isImportedOrCustom) {
+    while (safeImages.length < 3) {
+      safeImages.push(safeImages[0] || getFallbackProductImage(enriched, safeImages.length));
+    }
   }
 
   return {
@@ -1738,6 +1750,251 @@ function normalizeProductImages(p: Product): Product {
     images: safeImages,
     videos: cleanProductVideos(enriched.videos),
   };
+}
+
+export interface ValidatedProductUrlInfo {
+  isValid: boolean;
+  normalizedUrl: string;
+  hostname: string;
+  isSingleProductUrl: boolean;
+  singleProductId: string;
+  productSlug: string;
+  disallowSiteWideFallback: boolean;
+}
+
+/**
+ * Strictly validates a product or store URL and isolates the single product ID/slug when a specific
+ * product URL is provided, preventing the scraper from falling back to site-wide or random product discovery.
+ */
+export function validateAndIsolateProductUrl(rawInput: string): ValidatedProductUrlInfo {
+  const trimmed = String(rawInput || '').trim();
+  if (!trimmed) {
+    return {
+      isValid: false,
+      normalizedUrl: '',
+      hostname: '',
+      isSingleProductUrl: false,
+      singleProductId: '',
+      productSlug: '',
+      disallowSiteWideFallback: true,
+    };
+  }
+
+  let candidate = trimmed;
+  if (candidate.startsWith('www.')) {
+    candidate = `https://${candidate}`;
+  } else if (!/^https?:\/\//i.test(candidate) && /^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(\/.*)?$/.test(candidate)) {
+    candidate = `https://${candidate}`;
+  }
+
+  try {
+    const parsed = new URL(candidate);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error('Invalid protocol');
+    }
+    const hostname = parsed.hostname.toLowerCase();
+    const pathname = decodeURIComponent(parsed.pathname || '').replace(/\/+$/, '');
+    const segments = pathname.split('/').filter(Boolean);
+
+    let isSingleProductUrl = false;
+    let singleProductId = '';
+    let productSlug = '';
+
+    // 1. Query param product identifiers (?product=..., ?id=..., ?item_id=..., ?product_id=...)
+    const queryProdId =
+      parsed.searchParams.get('product') ||
+      parsed.searchParams.get('product_id') ||
+      parsed.searchParams.get('item_id') ||
+      parsed.searchParams.get('id') ||
+      '';
+    if (queryProdId) {
+      isSingleProductUrl = true;
+      singleProductId = queryProdId.trim();
+      productSlug = queryProdId.trim();
+    }
+
+    // 2. Explicit single-product URL path patterns across Alibaba, AliExpress, Amazon, Daraz, Shopify, WooCommerce, Laravel & Custom Stores
+    const alibabaMatch = pathname.match(/\/product-detail\/([^/?#]+?)(?:_(\d{5,}))?(?:\.html?)?$/i);
+    const aliExpressMatch = pathname.match(/\/item\/([^/?#]+?)(?:\.html?)?$/i);
+    const amazonMatch = pathname.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{8,12})/i);
+    const darazMatch = pathname.match(/\/products\/([^/?#]+?)-i(\d+)(?:-s\d+)?\.html/i);
+    const standardProductMatch = pathname.match(
+      /\/(?:products?|item|p|shop\/product|catalog\/product\/view\/id|product-page|details)\/([^/?#]+)/i
+    );
+
+    if (alibabaMatch) {
+      isSingleProductUrl = true;
+      productSlug = alibabaMatch[1];
+      singleProductId = alibabaMatch[2] || alibabaMatch[1];
+    } else if (aliExpressMatch) {
+      isSingleProductUrl = true;
+      productSlug = aliExpressMatch[1];
+      singleProductId = aliExpressMatch[1];
+    } else if (amazonMatch) {
+      isSingleProductUrl = true;
+      productSlug = amazonMatch[1];
+      singleProductId = amazonMatch[1];
+    } else if (darazMatch) {
+      isSingleProductUrl = true;
+      productSlug = darazMatch[1];
+      singleProductId = darazMatch[2];
+    } else if (standardProductMatch) {
+      isSingleProductUrl = true;
+      productSlug = standardProductMatch[1].replace(/\.(html?|php|json)$/i, '');
+      singleProductId = productSlug;
+    } else if (
+      segments.length >= 1 &&
+      !['collections', 'collection', 'category', 'categories', 'shop', 'store', 'products', 'catalog', 'search', 'tag', 'brand', 'brands'].includes(
+        segments[0].toLowerCase()
+      ) &&
+      !['collections', 'category', 'categories', 'shop', 'products', 'catalog'].includes(
+        segments[segments.length - 1].toLowerCase()
+      )
+    ) {
+      // Custom permalink structure (e.g. WooCommerce /my-product-slug/ or /category/my-product-slug.html)
+      const lastSeg = segments[segments.length - 1].replace(/\.(html?|php)$/i, '');
+      if (lastSeg.length > 2 && (lastSeg.includes('-') || /\d/.test(lastSeg) || segments.length >= 2)) {
+        isSingleProductUrl = true;
+        productSlug = lastSeg;
+        singleProductId = lastSeg;
+      }
+    }
+
+    return {
+      isValid: true,
+      normalizedUrl: parsed.href,
+      hostname,
+      isSingleProductUrl,
+      singleProductId,
+      productSlug,
+      // When a specific product URL is provided, NEVER fall back to site-wide or random product discovery
+      disallowSiteWideFallback: isSingleProductUrl,
+    };
+  } catch {
+    return {
+      isValid: false,
+      normalizedUrl: trimmed,
+      hostname: '',
+      isSingleProductUrl: false,
+      singleProductId: '',
+      productSlug: '',
+      disallowSiteWideFallback: true,
+    };
+  }
+}
+
+/**
+ * Precise DOM/HTML selector parser for a specific single product page.
+ * Strips related products, upsells, cross-sells, headers, footers, and sidebars BEFORE extracting
+ * the title, description, and gallery images so random items from the parent site's catalog are NEVER included.
+ */
+export function parseSingleProductDomHtml(
+  rawHtml: string,
+  pageUrl: string
+): {
+  title: string;
+  description: string;
+  images: string[];
+  priceHint: string;
+} {
+  const result = {
+    title: '',
+    description: '',
+    images: [] as string[],
+    priceHint: '',
+  };
+  if (!rawHtml || typeof rawHtml !== 'string') return result;
+
+  let baseUrl: URL | null = null;
+  try {
+    baseUrl = new URL(pageUrl);
+  } catch {
+    // ignore
+  }
+
+  const resolveImgUrl = (raw: string): string => {
+    if (!raw || typeof raw !== 'string') return '';
+    const cleaned = raw.replace(/\\u002F/g, '/').replace(/&amp;/gi, '&').replace(/\\/g, '').trim();
+    if (!cleaned || cleaned.startsWith('data:') || cleaned.startsWith('javascript:')) return '';
+    if (cleaned.startsWith('//')) return `https:${cleaned}`;
+    if (/^https?:\/\//i.test(cleaned)) return cleaned;
+    if (baseUrl) {
+      try {
+        return new URL(cleaned, baseUrl.href).href;
+      } catch {
+        return '';
+      }
+    }
+    return '';
+  };
+
+  // 1. Strip out <header>, <nav>, <footer>, <aside>, and Related/Upsell/Similar product sections
+  const isolatedProductHtml = rawHtml
+    .replace(/<header\b[^>]*>[\s\S]*?<\/header>/gi, ' ')
+    .replace(/<nav\b[^>]*>[\s\S]*?<\/nav>/gi, ' ')
+    .replace(/<footer\b[^>]*>[\s\S]*?<\/footer>/gi, ' ')
+    .replace(/<aside\b[^>]*>[\s\S]*?<\/aside>/gi, ' ')
+    .split(
+      /<(?:section|div)\b[^>]+(?:class|id)=["'][^"']*\b(?:related[-_ ]?products?|related\s+products|upsells?|cross[-_ ]?sells?|similar[-_ ]?products?|recommended[-_ ]?products?|also[-_ ]?like|recently[-_ ]?viewed|more[-_ ]?from)\b[^"']*["']/i
+    )[0];
+
+  // 2. Extract Title from precise product heading or OpenGraph
+  const h1Match =
+    isolatedProductHtml.match(
+      /<h1[^>]+class=["'][^"']*(?:product_title|product-title|entry-title|pdp-mod-product-badge-title|product-name|product__title)[^"']*["'][^>]*>([\s\S]*?)<\/h1>/i
+    )?.[1] ||
+    isolatedProductHtml.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i)?.[1] ||
+    isolatedProductHtml.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1] ||
+    '';
+  if (h1Match) {
+    result.title = h1Match.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  // 3. Extract Description from precise product description container
+  const descMatch =
+    isolatedProductHtml.match(
+      /<div[^>]+class=["'][^"']*(?:woocommerce-product-details__short-description|product-description|product_description|product-details|pdp-product-desc|product__description|short-description)[^"']*["'][^>]*>([\s\S]*?)<\/div>/i
+    )?.[1] ||
+    isolatedProductHtml.match(/<div[^>]+id=["']tab-description["'][^>]*>([\s\S]*?)<\/div>/i)?.[1] ||
+    isolatedProductHtml.match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i)?.[1] ||
+    '';
+  if (descMatch) {
+    result.description = descMatch.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 900);
+  }
+
+  // 4. Extract Gallery Images strictly from the product gallery DOM container + OpenGraph
+  const ogImgs = Array.from(
+    rawHtml.matchAll(
+      /<meta[^>]+(?:property|name)=["'](?:og:image|og:image:secure_url|twitter:image)["'][^>]+content=["']([^"']+)["']/gi
+    )
+  ).map((m) => resolveImgUrl(m[1]));
+
+  const galleryContainerMatch = isolatedProductHtml.match(
+    /<(?:div|figure|ul)\b[^>]+class=["'][^"']*(?:woocommerce-product-gallery|product-gallery|product_gallery|product-images|product-image-gallery|product__media-list|product-single__photos|pdp-gallery|gallery-images|xzoom-thumbs)[^"']*["'][^>]*>([\s\S]*?)<\/(?:div|figure|ul)>/i
+  );
+  const galleryScopeHtml = galleryContainerMatch ? galleryContainerMatch[0] : isolatedProductHtml;
+
+  const highResAttrs = Array.from(
+    galleryScopeHtml.matchAll(
+      /(?:data-large_image|data-zoom-image|data-zoom|data-full-image|data-master|data-src|data-lazy-src|data-original)=["']([^"']+\.(?:jpg|jpeg|png|webp|avif)(?:\?[^"']*)?)["']/gi
+    )
+  ).map((m) => resolveImgUrl(m[1]));
+
+  const scopedImgs = galleryContainerMatch
+    ? Array.from(
+        galleryScopeHtml.matchAll(/<img[^>]+src=["']([^"']+\.(?:jpg|jpeg|png|webp|avif)(?:\?[^"']*)?)["']/gi)
+      ).map((m) => resolveImgUrl(m[1]))
+    : [];
+
+  result.images = Array.from(
+    new Set(
+      [...ogImgs, ...highResAttrs, ...scopedImgs].filter(
+        (u) => u && !isBlockedOrErrorProductImageUrl(u)
+      )
+    )
+  ).slice(0, 8);
+
+  return result;
 }
 
 /**
@@ -2818,17 +3075,94 @@ export function addDeletedOrderId(orderId: string): void {
   }
 }
 
-export async function saveOrderPersisted(order: Order): Promise<Order> {
-  // Ensure order is not marked as deleted if re-saved
+export function removeDeletedOrderIds(orderIds: string[]): void {
+  if (!Array.isArray(orderIds) || orderIds.length === 0) return;
   try {
-    const delSet = getDeletedOrderIds();
-    if (delSet.has(order.id)) {
-      delSet.delete(order.id);
-      localStorage.setItem(LS_DELETED_ORDER_IDS_KEY, JSON.stringify(Array.from(delSet)));
+    const set = getDeletedOrderIds();
+    let changed = false;
+    for (const id of orderIds) {
+      if (set.has(id)) {
+        set.delete(id);
+        changed = true;
+      }
+    }
+    if (changed) {
+      localStorage.setItem(LS_DELETED_ORDER_IDS_KEY, JSON.stringify(Array.from(set)));
     }
   } catch {
     // ignore
   }
+}
+
+export function syncOrdersToLocalCache(ordersList: Order[]): void {
+  if (!Array.isArray(ordersList)) return;
+  try {
+    const sorted = [...ordersList]
+      .filter((o) => o && o.id)
+      .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+    const json = JSON.stringify(sorted.slice(0, 500));
+    localStorage.setItem(LS_ORDERS_BACKUP_KEY, json);
+    localStorage.setItem('dokandari_orders_v1', json);
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Merges orders from localStorage, Server Order Mirror (`/api/orders`), and Firestore `orders` collection
+ * without any date filter or artificial limit, ensuring 100% of historical and current orders persist across refreshes.
+ */
+export function mergeAndPersistAllOrders(sources: {
+  serverMirrorOrders?: Order[];
+  firestoreOrders?: Order[];
+  localOrders?: Order[];
+}): Order[] {
+  const serverList = Array.isArray(sources.serverMirrorOrders) ? sources.serverMirrorOrders : [];
+  const firestoreList = Array.isArray(sources.firestoreOrders) ? sources.firestoreOrders : [];
+  const localList = Array.isArray(sources.localOrders) ? sources.localOrders : getPersistedOrders();
+
+  // Any order actively stored in the server mirror (`/api/orders` -> `data/orders_mirror.json`) is a verified real order;
+  // ensure stale localStorage deleted_order_ids never hide it.
+  if (serverList.length > 0) {
+    removeDeletedOrderIds(serverList.map((o) => o?.id).filter(Boolean));
+  }
+
+  const deletedIds = getDeletedOrderIds();
+  const orderMap = new Map<string, Order>();
+
+  for (const locOrd of localList) {
+    if (locOrd && locOrd.id && !deletedIds.has(locOrd.id)) {
+      orderMap.set(locOrd.id, locOrd);
+    }
+  }
+  for (const srvOrd of serverList) {
+    if (srvOrd && srvOrd.id && !deletedIds.has(srvOrd.id)) {
+      orderMap.set(srvOrd.id, srvOrd);
+    }
+  }
+  for (const fsOrd of firestoreList) {
+    if (fsOrd && fsOrd.id && !deletedIds.has(fsOrd.id)) {
+      const existing = orderMap.get(fsOrd.id);
+      orderMap.set(fsOrd.id, {
+        ...(existing || {}),
+        ...fsOrd,
+        customerScreenshot: fsOrd.customerScreenshot || existing?.customerScreenshot,
+      });
+    }
+  }
+
+  const merged = Array.from(orderMap.values()).sort(
+    (a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)
+  );
+  if (merged.length > 0) {
+    syncOrdersToLocalCache(merged);
+  }
+  return merged;
+}
+
+export async function saveOrderPersisted(order: Order): Promise<Order> {
+  // Ensure order is not marked as deleted if re-saved
+  removeDeletedOrderIds([order.id]);
 
   let safeScreenshot = order.customerScreenshot;
   if (typeof safeScreenshot === 'string' && safeScreenshot.startsWith('data:image/')) {
@@ -2858,14 +3192,13 @@ export async function saveOrderPersisted(order: Order): Promise<Order> {
 
   // 1. Save to localStorage backup so customer & admin never lose an order (supports unlimited consecutive orders)
   try {
-    const existingRaw = localStorage.getItem(LS_ORDERS_BACKUP_KEY);
-    const list: Order[] = existingRaw ? JSON.parse(existingRaw) : [];
+    const existing = getPersistedOrders();
     const deletedIds = getDeletedOrderIds();
-    const filtered = Array.isArray(list)
-      ? list.filter((o) => o && o.id && o.id !== cleanOrder.id && !deletedIds.has(o.id))
-      : [];
+    const filtered = existing.filter(
+      (o) => o && o.id && o.id !== cleanOrder.id && !deletedIds.has(o.id)
+    );
     filtered.unshift(cleanOrder);
-    localStorage.setItem(LS_ORDERS_BACKUP_KEY, JSON.stringify(filtered.slice(0, 300)));
+    syncOrdersToLocalCache(filtered);
   } catch (e) {
     console.warn('localStorage order backup note:', e);
   }
@@ -2893,12 +3226,9 @@ export async function deleteOrderPersisted(orderId: string): Promise<void> {
 
   // 1. Remove from localStorage backup immediately
   try {
-    const existingRaw = localStorage.getItem(LS_ORDERS_BACKUP_KEY);
-    const list: Order[] = existingRaw ? JSON.parse(existingRaw) : [];
-    if (Array.isArray(list)) {
-      const next = list.filter((o) => o && o.id !== orderId);
-      localStorage.setItem(LS_ORDERS_BACKUP_KEY, JSON.stringify(next));
-    }
+    const existing = getPersistedOrders();
+    const next = existing.filter((o) => o && o.id !== orderId);
+    syncOrdersToLocalCache(next);
   } catch (e) {
     console.warn('localStorage order delete note:', e);
   }
@@ -2942,11 +3272,19 @@ export async function deleteOrdersBulkPersisted(orderIds: string[]): Promise<voi
 export function getPersistedOrders(): Order[] {
   try {
     const deletedIds = getDeletedOrderIds();
-    const raw = localStorage.getItem(LS_ORDERS_BACKUP_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((o) => o && o.id && !deletedIds.has(o.id));
+    const rawPrimary = localStorage.getItem(LS_ORDERS_BACKUP_KEY);
+    const rawSecondary = localStorage.getItem('dokandari_orders_v1');
+    const listPrimary: Order[] = rawPrimary ? JSON.parse(rawPrimary) : [];
+    const listSecondary: Order[] = rawSecondary ? JSON.parse(rawSecondary) : [];
+    const combinedMap = new Map<string, Order>();
+    for (const o of [...(Array.isArray(listSecondary) ? listSecondary : []), ...(Array.isArray(listPrimary) ? listPrimary : [])]) {
+      if (o && o.id && !deletedIds.has(o.id)) {
+        combinedMap.set(o.id, o);
+      }
+    }
+    return Array.from(combinedMap.values()).sort(
+      (a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)
+    );
   } catch {
     return [];
   }
