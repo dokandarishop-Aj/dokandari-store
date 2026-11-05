@@ -25,11 +25,16 @@ import {
   Check,
 } from 'lucide-react';
 import { Product, ProductCategory } from '../types';
-import { smartImportOrAnalyzeProduct, cleanProductTitle } from '../lib/gemini';
+import {
+  smartImportOrAnalyzeProduct,
+  analyzeUploadedProductImagesWithAI,
+  cleanProductTitle,
+} from '../lib/gemini';
 import {
   saveProductPersisted,
   deleteProductPersisted,
   compressImageFileToDataUrl,
+  isBlockedOrErrorProductImageUrl,
 } from '../lib/storeSync';
 import { BeforeAfterSlider } from './BeforeAfterSlider';
 
@@ -60,12 +65,13 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
   const [inStock, setInStock] = useState(product.inStock);
   const [productStatus, setProductStatus] = useState<'published' | 'draft'>(product.status || 'published');
 
-  // Gallery images & videos
-  const [images, setImages] = useState<string[]>(
-    product.images && product.images.length > 0
-      ? product.images
-      : ['https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?auto=format&fit=crop&w=800&q=80']
-  );
+  // Gallery images & videos (strip any blocked/founder images automatically)
+  const [images, setImages] = useState<string[]>(() => {
+    const clean = (product.images || []).filter(
+      (img) => img && !isBlockedOrErrorProductImageUrl(img)
+    );
+    return clean.length > 0 ? clean : product.images || [];
+  });
   const [newImageUrl, setNewImageUrl] = useState('');
   const [videos, setVideos] = useState<string[]>(product.videos || []);
   const [newVideoUrl, setNewVideoUrl] = useState('');
@@ -85,10 +91,45 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
   );
   const [newSizeInput, setNewSizeInput] = useState('');
 
-  // Combo Offers (matching screenshot image_edc57c7a.png!)
-  const [comboSinglePrice, setComboSinglePrice] = useState(product.price);
-  const [comboDoublePrice, setComboDoublePrice] = useState(product.price * 2 - 100);
-  const [comboTriplePrice, setComboTriplePrice] = useState(product.price * 3 - 200);
+  // Combo Offers: Support both Piece Mode (1, 2, 3 pcs) and Size Mode (Small, Medium, Full Body)
+  const [offerMode, setOfferMode] = useState<'piece' | 'size'>(
+    product.offerMode || product.comboConfig?.offerMode || 'piece'
+  );
+  const [pkg1Title, setPkg1Title] = useState(
+    product.comboConfig?.pkg1Title ||
+      (product.offerMode === 'size' ? 'Small Size (ছোট সাইজ)' : '১ টি (স্ট্যান্ডার্ড)')
+  );
+  const [pkg2Title, setPkg2Title] = useState(
+    product.comboConfig?.pkg2Title ||
+      (product.offerMode === 'size' ? 'Medium Size (মিডিয়াম সাইজ)' : '২ টি (কম্বো প্যাক)')
+  );
+  const [pkg3Title, setPkg3Title] = useState(
+    product.comboConfig?.pkg3Title ||
+      (product.offerMode === 'size' ? 'Full Body (বড় সাইজ)' : '৩ টি (মেগা সেভার)')
+  );
+  const [comboSinglePrice, setComboSinglePrice] = useState(
+    Number(product.comboConfig?.pkg1Price || product.price)
+  );
+  const [comboDoublePrice, setComboDoublePrice] = useState(
+    Number(product.comboConfig?.pkg2Price || product.price * 2 - 100)
+  );
+  const [comboTriplePrice, setComboTriplePrice] = useState(
+    Number(product.comboConfig?.pkg3Price || product.price * 3 - 200)
+  );
+
+  const handleToggleOfferMode = (mode: 'piece' | 'size') => {
+    setOfferMode(mode);
+    if (mode === 'size') {
+      setPkg1Title('Small Size (ছোট সাইজ)');
+      setPkg2Title('Medium Size (মিডিয়াম সাইজ)');
+      setPkg3Title('Full Body (বড় সাইজ)');
+      setSizes(['Small Size (ছোট সাইজ)', 'Medium Size (মিডিয়াম সাইজ)', 'Full Body (বড় সাইজ)']);
+    } else {
+      setPkg1Title('১ টি (স্ট্যান্ডার্ড)');
+      setPkg2Title('২ টি (কম্বো প্যাক)');
+      setPkg3Title('৩ টি (মেগা সেভার)');
+    }
+  };
 
   // Smart Auto-Import & AI state
   const [smartInput, setSmartInput] = useState('');
@@ -99,16 +140,19 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
   // Navigation tab in admin
   const [activeTab, setActiveTab] = useState<'product' | 'store' | 'whatsapp' | 'categories' | 'pixels'>('product');
 
-  // Trigger Gemini AI Vision & Enhancement analysis and auto-persist to Firestore
+  // Trigger Gemini AI Vision & Enhancement analysis on the uploaded images and auto-persist to Firestore
   const handleAiVisionAnalyze = async () => {
     setAiLoading(true);
-    setToastMessage('এআই দ্বারা প্রোডাক্ট ছবি ও ভিজ্যুয়াল কনটেন্ট বিশ্লেষণ করা হচ্ছে...');
+    setToastMessage('এআই দ্বারা আপলোডকৃত প্রোডাক্ট ছবি ও ভিজ্যুয়াল কনটেন্ট বিশ্লেষণ করা হচ্ছে...');
     try {
-      const visionPrompt = images[0]
-        ? 'Analyze and identify this uploaded product image strictly based on visual content for Dokandari catalog'
-        : (nameBn || nameEn);
-
-      const result = await smartImportOrAnalyzeProduct(visionPrompt, images[0]);
+      const cleanExistingImages = images.filter(
+        (img) => img && !isBlockedOrErrorProductImageUrl(img)
+      );
+      const result = await analyzeUploadedProductImagesWithAI({
+        images: cleanExistingImages,
+        hintText: nameBn || nameEn,
+        priceHint: String(price || ''),
+      });
       const nextNameBn = cleanProductTitle(result.titleBn || nameBn);
       const nextNameEn = result.titleEn || nameEn;
       const nextCat = (result.category as ProductCategory) || category;
@@ -118,13 +162,8 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
       const nextDesc = result.description || description;
       const nextColors = result.colors?.length ? result.colors : colors;
       const nextSizes = result.sizes?.length ? result.sizes : sizes;
-      const nextImages =
-        result.images?.length && result.images[0] !== images[0]
-          ? Array.from(new Set([...images, ...result.images]))
-          : images;
-      const nextVideos = result.videos?.length
-        ? Array.from(new Set([...videos, ...result.videos]))
-        : videos;
+      const nextImages = cleanExistingImages.length > 0 ? cleanExistingImages : images;
+      const nextVideos = videos;
 
       setNameBn(nextNameBn);
       setNameEn(nextNameEn);
@@ -188,7 +227,10 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
       const nextDesc = result.description || description;
       const nextColors = result.colors?.length ? result.colors : colors;
       const nextSizes = result.sizes?.length ? result.sizes : sizes;
-      const nextImages = result.images?.length ? result.images : images;
+      const scrapedCleanImages = (result.images || []).filter(
+        (img) => img && !isBlockedOrErrorProductImageUrl(img)
+      );
+      const nextImages = scrapedCleanImages.length > 0 ? scrapedCleanImages : images;
       const nextVideos = result.videos?.length ? result.videos : videos;
 
       setNameBn(nextNameBn);
@@ -202,9 +244,26 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
       setSizes(nextSizes);
       setImages(nextImages);
       setVideos(nextVideos);
+      const nextDouble = result.comboOffers?.doublePrice || nextPrice * 2 - 100;
+      const nextTriple = result.comboOffers?.triplePrice || nextPrice * 3 - 200;
+      const detectedSizeMode =
+        nextSizes.some((s: string) => /small|medium|full body|ছোট|মিডিয়াম|বড়/i.test(s))
+          ? 'size'
+          : offerMode;
+      const nextPkg1Title =
+        detectedSizeMode === 'size' ? 'Small Size (ছোট সাইজ)' : '১ টি (স্ট্যান্ডার্ড)';
+      const nextPkg2Title =
+        detectedSizeMode === 'size' ? 'Medium Size (মিডিয়াম সাইজ)' : '২ টি (কম্বো প্যাক)';
+      const nextPkg3Title =
+        detectedSizeMode === 'size' ? 'Full Body (বড় সাইজ)' : '৩ টি (মেগা সেভার)';
+
+      setOfferMode(detectedSizeMode);
+      setPkg1Title(nextPkg1Title);
+      setPkg2Title(nextPkg2Title);
+      setPkg3Title(nextPkg3Title);
       setComboSinglePrice(nextPrice);
-      setComboDoublePrice(result.comboOffers?.doublePrice || nextPrice * 2 - 100);
-      setComboTriplePrice(result.comboOffers?.triplePrice || nextPrice * 3 - 200);
+      setComboDoublePrice(nextDouble);
+      setComboTriplePrice(nextTriple);
       setSmartInput('');
 
       const autoSaved = await saveProductPersisted({
@@ -222,6 +281,24 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
         images: nextImages,
         videos: nextVideos,
         variants: { colors: nextColors, sizes: nextSizes },
+        offerMode: detectedSizeMode,
+        comboConfig: {
+          offerMode: detectedSizeMode,
+          pkg1Title: nextPkg1Title,
+          pkg1Sub: detectedSizeMode === 'size' ? 'রেগুলার সাইজ' : 'সাধারণ মূল্য',
+          pkg1Price: nextPrice,
+          pkg2Title: nextPkg2Title,
+          pkg2Sub: `সাশ্রয় ৳${Math.max(0, nextPrice * 2 - nextDouble)}`,
+          pkg2Price: nextDouble,
+          pkg2Discount: Math.max(0, nextPrice * 2 - nextDouble),
+          pkg2Badge: '🔥 সবচেয়ে জনপ্রিয়',
+          pkg3Title: nextPkg3Title,
+          pkg3Sub: 'মেগা সেভার + ফ্রি ডেলিভারি',
+          pkg3Price: nextTriple,
+          pkg3Discount: Math.max(0, nextPrice * 3 - nextTriple),
+          pkg3Badge: '🚚 ফ্রি ডেলিভারি!',
+          pkg3FreeDelivery: true,
+        },
         updatedAt: Date.now(),
       });
       onProductUpdated(autoSaved);
@@ -356,6 +433,24 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
       variants: {
         colors,
         sizes,
+      },
+      offerMode,
+      comboConfig: {
+        offerMode,
+        pkg1Title,
+        pkg1Sub: offerMode === 'size' ? 'রেগুলার সাইজ' : 'সাধারণ মূল্য',
+        pkg1Price: Number(comboSinglePrice || price),
+        pkg2Title,
+        pkg2Sub: `${Math.max(0, Number(price) * 2 - Number(comboDoublePrice))}৳ নগদ সাশ্রয়!`,
+        pkg2Price: Number(comboDoublePrice),
+        pkg2Discount: Math.max(0, Number(price) * 2 - Number(comboDoublePrice)),
+        pkg2Badge: '🔥 সবচেয়ে জনপ্রিয়',
+        pkg3Title,
+        pkg3Sub: `${Math.max(0, Number(price) * 3 - Number(comboTriplePrice))}৳ ছাড় + ০৳ ডেলিভারি`,
+        pkg3Price: Number(comboTriplePrice),
+        pkg3Discount: Math.max(0, Number(price) * 3 - Number(comboTriplePrice)),
+        pkg3Badge: '🚚 ফ্রি ডেলিভারি!',
+        pkg3FreeDelivery: true,
       },
       updatedAt: Date.now(),
     };
@@ -648,15 +743,16 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
                 <div className="flex items-center gap-2">
                   <label className="px-4 py-2 bg-rose-50 hover:bg-rose-100 text-[#E11D48] border border-rose-200 text-xs font-bold rounded-xl cursor-pointer inline-flex items-center gap-1.5 transition-colors">
                     <Upload className="w-3.5 h-3.5" />
-                    <span>ডিভাইস থেকে ছবি আপলোড করুন</span>
+                    <span>ডিভাইস থেকে ৪-১০টি ছবি একসাথে আপলোড করুন</span>
                     <input
                       type="file"
                       accept="image/*"
+                      multiple
                       onChange={handleFileUpload}
                       className="hidden"
                     />
                   </label>
-                  <span className="text-[11px] text-stone-400">JPG, PNG, WebP সাপোর্টেড</span>
+                  <span className="text-[11px] text-stone-400">একসাথে একাধিক JPG, PNG, WebP সাপোর্টেড</span>
                 </div>
               </div>
             </div>
@@ -946,23 +1042,54 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
               </form>
             </div>
 
-            {/* Pricing & 3 Combo Offers (matching screenshot image_edc57c7a.png!) */}
+            {/* Pricing & 3 Combo / Size Offers (Supports BOTH Piece Mode & Size Mode) */}
             <div className="bg-white rounded-2xl border border-rose-100 p-5 shadow-xs space-y-4">
-              <div className="flex items-center justify-between pb-2 border-b border-rose-100">
+              <div className="flex items-center justify-between pb-2 border-b border-rose-100 flex-wrap gap-2">
                 <h3 className="text-sm font-bold text-stone-900">
-                  মূল্য ও ৩টি কম্বো অফার (Pricing & Special Offers)
+                  মূল্য ও ৩টি অফার প্যাকেজ (পিস অথবা সাইজ অনুযায়ী)
                 </h3>
                 <span className="text-[11px] font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full">
-                  বেশি কিনুন, বেশি বাঁচান!
+                  রিয়েল-টাইম লাইভ সেভ!
                 </span>
               </div>
 
+              {/* Mode Selector: Piece vs Size */}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleToggleOfferMode('piece')}
+                  className={`py-2 px-3 rounded-xl border text-xs font-extrabold transition-all cursor-pointer ${
+                    offerMode === 'piece'
+                      ? 'bg-[#E11D48] text-white border-[#E11D48] shadow-xs'
+                      : 'bg-stone-50 text-stone-700 border-stone-200 hover:border-rose-300'
+                  }`}
+                >
+                  📦 পিস অনুযায়ী (১, ২, ৩ পিস)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleToggleOfferMode('size')}
+                  className={`py-2 px-3 rounded-xl border text-xs font-extrabold transition-all cursor-pointer ${
+                    offerMode === 'size'
+                      ? 'bg-[#E11D48] text-white border-[#E11D48] shadow-xs'
+                      : 'bg-stone-50 text-stone-700 border-stone-200 hover:border-rose-300'
+                  }`}
+                >
+                  📏 সাইজ অনুযায়ী (Small, Medium, Full)
+                </button>
+              </div>
+
               <div className="space-y-3 text-xs">
-                {/* 1 Pc regular */}
+                {/* Package 1 */}
                 <div className="p-3 rounded-xl border border-rose-200 bg-rose-50/40 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-stone-900">১ পিস (রেগুলার প্যাক)</span>
-                    <span className="text-[10px] text-stone-500 font-medium">সিঙ্গেল আইটেম</span>
+                  <div className="flex items-center justify-between gap-2">
+                    <input
+                      type="text"
+                      value={pkg1Title}
+                      onChange={(e) => setPkg1Title(e.target.value)}
+                      className="flex-1 px-2.5 py-1 bg-white border border-rose-200 rounded-lg font-extrabold text-stone-900 text-xs"
+                    />
+                    <span className="text-[10px] text-stone-500 font-medium shrink-0">প্যাকেজ ১</span>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
@@ -992,14 +1119,19 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
                   </div>
                 </div>
 
-                {/* 2 Pcs combo */}
+                {/* Package 2 */}
                 <div className="p-3 rounded-xl border border-stone-200 bg-stone-50 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-stone-900">২ পিস কম্বো প্যাক</span>
-                    <span className="text-[10px] font-bold text-[#E11D48] bg-rose-100 px-2 py-0.5 rounded-full">সবচেয়ে জনপ্রিয়</span>
+                  <div className="flex items-center justify-between gap-2">
+                    <input
+                      type="text"
+                      value={pkg2Title}
+                      onChange={(e) => setPkg2Title(e.target.value)}
+                      className="flex-1 px-2.5 py-1 bg-white border border-stone-300 rounded-lg font-extrabold text-stone-900 text-xs"
+                    />
+                    <span className="text-[10px] font-bold text-[#E11D48] bg-rose-100 px-2 py-0.5 rounded-full shrink-0">সবচেয়ে জনপ্রিয়</span>
                   </div>
                   <div>
-                    <label className="text-[11px] text-stone-600 block mb-0.5 font-medium">কম্বো মূল্য (৳ BDT)</label>
+                    <label className="text-[11px] text-stone-600 block mb-0.5 font-medium">প্যাকেজ ২ মূল্য (৳ BDT)</label>
                     <input
                       type="number"
                       value={comboDoublePrice}
@@ -1009,14 +1141,19 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
                   </div>
                 </div>
 
-                {/* 3 Pcs mega offer */}
+                {/* Package 3 */}
                 <div className="p-3 rounded-xl border border-stone-200 bg-stone-50 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-stone-900">৩ পিস মেগা অফার</span>
-                    <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">ফ্রি ডেলিভারি</span>
+                  <div className="flex items-center justify-between gap-2">
+                    <input
+                      type="text"
+                      value={pkg3Title}
+                      onChange={(e) => setPkg3Title(e.target.value)}
+                      className="flex-1 px-2.5 py-1 bg-white border border-stone-300 rounded-lg font-extrabold text-stone-900 text-xs"
+                    />
+                    <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full shrink-0">ফ্রি ডেলিভারি</span>
                   </div>
                   <div>
-                    <label className="text-[11px] text-stone-600 block mb-0.5 font-medium">মেগা অফার মূল্য (৳ BDT)</label>
+                    <label className="text-[11px] text-stone-600 block mb-0.5 font-medium">প্যাকেজ ৩ মূল্য (৳ BDT)</label>
                     <input
                       type="number"
                       value={comboTriplePrice}

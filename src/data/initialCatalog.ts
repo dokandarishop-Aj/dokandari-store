@@ -10,6 +10,73 @@ export const INITIAL_PRODUCTS: Product[] = [
   // 100% REAL DOKANDARI HOME DECOR & MIRROR PRODUCTS (WITH REAL PRODUCT IMAGES)
   // ============================================================================
   {
+    id: 'dkd-1793610538096-571',
+    name: 'ফেসবুক ও ইনস্টাগ্রাম প্রোফাইল থিম কাস্টম ফুল-লেংথ মিরর (আপনার ব্র্যান্ডের নামে কাস্টমাইজড আয়না)',
+    titleEn: 'Custom Social Media Profile Full-Length Mirror for Business & Home Decor',
+    category: 'home_decor',
+    price: 999,
+    originalPrice: 1250,
+    description:
+      'আপনার ব্যবসা প্রতিষ্ঠান, শোরুম, পার্লার, বুটিক শপ কিংবা ঘরের সৌন্দর্য বাড়াতে ফেসবুক, ইনস্টাগ্রাম ও টিকটক প্রোফাইল থিমের কাস্টম ফুল-লেংথ মিরর। আপনার পেজের নাম, ইউজারনেম ও লোগো দিয়ে সম্পূর্ণ কাস্টমাইজড ইউভি প্রিন্টিং ও আনব্রেকেবল অ্যাক্রিলিক এইচডি আয়না।',
+    fabric: 'HD আনব্রেকেবল অ্যাক্রিলিক মিরর ও ওয়াটারপ্রুফ ইউভি কাস্টম প্রিন্ট',
+    sku: 'DKD-HOM-571',
+    inStock: true,
+    rating: 5.0,
+    reviewCount: 95,
+    tag: 'বেস্ট সেলিং',
+    status: 'published',
+    sourceUrl: 'https://www.viralwomanbd.com/product/vw-prod-1793381883400',
+    offerMode: 'size',
+    comboConfig: {
+      offerMode: 'size',
+      pkg1Title: 'Small Size (ছোট সাইজ)',
+      pkg1Sub: 'রেগুলার সাইজ',
+      pkg1Price: 999,
+      pkg2Title: 'Medium Size (মিডিয়াম সাইজ)',
+      pkg2Sub: 'সাশ্রয় ৳১০০',
+      pkg2Price: 1898,
+      pkg2Discount: 100,
+      pkg2Badge: '🔥 সবচেয়ে জনপ্রিয়',
+      pkg3Title: 'Full Body (বড় সাইজ)',
+      pkg3Sub: 'মেগা সেভার + ফ্রি ডেলিভারি',
+      pkg3Price: 2797,
+      pkg3Discount: 200,
+      pkg3Badge: '🚚 ফ্রি ডেলিভারি!',
+      pkg3FreeDelivery: true,
+    },
+    variants: {
+      colors: [
+        'Facebook Page Theme',
+        'Instagram Profile Theme',
+        'TikTok Profile Theme',
+        'Custom Brand Logo Theme',
+      ],
+      sizes: [
+        'Small Size (ছোট সাইজ) - ৳999',
+        'Medium Size (মিডিয়াম সাইজ) - ৳1898',
+        'Full Body (বড় সাইজ) - ৳2797',
+      ],
+    },
+    features: [
+      'আপনার ফেসবুক পেজ, ইনস্টাগ্রাম বা ব্র্যান্ড লোগো দিয়ে ১০০% কাস্টমাইজড ডিজাইন',
+      'নিখুঁত এইচডি প্রিন্টিং ও আনব্রেকেবল প্রিমিয়াম কোয়ালিটি মিরর শিট',
+      'সহজে দেয়ালে ফিটিং করার সুবিধা (ডাবল সাইড হেভি-ডিউটি ফোম টেপ যুক্ত)',
+      'সারা বাংলাদেশে ক্যাশ অন ডেলিভারি ও পার্সেল খুলে দেখে নেওয়ার সুবিধা',
+    ],
+    images: [
+      'https://www.viralwomanbd.com/product-images/vw-prod-1793381883400-0-f7c9bda4ee.jpg',
+      'https://www.viralwomanbd.com/product-images/vw-prod-1793381883400-1-7d5b130754.jpg',
+      'https://www.viralwomanbd.com/product-images/vw-prod-1793381883400-2-c03044f72c.jpg',
+      'https://www.viralwomanbd.com/product-images/vw-prod-1793381883400-3-8133d420fd.jpg',
+      'https://www.viralwomanbd.com/product-images/vw-prod-1793381883400-4-1ce755fa22.jpg',
+      'https://www.viralwomanbd.com/product-images/vw-prod-1793381883400-5-e618995ab7.jpg',
+      'https://www.viralwomanbd.com/product-images/vw-prod-1793381883400-6-0529e3a1ee.jpg',
+      'https://www.viralwomanbd.com/product-images/vw-prod-1793381883400-7-2b5c8c025d.jpg',
+      'https://www.viralwomanbd.com/product-images/vw-prod-1793381883400-8-4d6e10b848.jpg',
+    ],
+    videos: ['https://www.youtube.com/shorts/AxWtyMdWRLw'],
+  },
+  {
     id: 'dkd-heart-shape-flexible-mirror',
     name: 'ঘরের সৌন্দর্য বাড়াতে প্রিমিয়াম হার্ট শেপ ফ্লেক্সিবল মিরর স্টিকার',
     titleEn: 'Premium Heart Shape Flexible Mirror Sticker for Bedroom & Wall Decor',
@@ -1561,373 +1628,5 @@ export const INITIAL_PRODUCTS: Product[] = [
       "/uploads/product/dkd-1793613770498-186-3.webp",
       "/uploads/product/dkd-1793613770498-186-4.webp"
     ]
-  },
-  {
-    "id": "dkd-anc-wireless-earbuds-pro",
-    "name": "প্রো ট্রু ওয়্যারলেস ব্লুটুথ ইয়ারবাডস - অ্যাক্টিভ নয়েজ ক্যান্সেলেশন ও ডিপ বেস",
-    "titleEn": "Pro TWS Wireless ANC Earbuds with Spatial Audio",
-    "category": "gadgets_electronics",
-    "price": 2450,
-    "originalPrice": 3499,
-    "description": "প্রো কোয়ালিটি অ্যাক্টিভ নয়েজ ক্যান্সেলেশন (ANC) ও এনভায়রনমেন্টাল নয়েজ ক্যান্সেলেশন (ENC) ট্রু ওয়্যারলেস স্টেরিও ইয়ারবাডস। গেমিং ও মিউজিকের জন্য আল্ট্রা লো-লেটেন্সি এবং ২৪ ঘণ্টা ব্যাটারি ব্যাকআপ।",
-    "fabric": "অ্যালুমিনিয়াম অ্যালয় চার্জিং কেস ও ম্যাট ফিনিশ",
-    "sku": "DKD-GAD-02",
-    "inStock": true,
-    "rating": 5,
-    "reviewCount": 94,
-    "tag": "টপ ট্রেন্ডিং",
-    "status": "published",
-    "variants": {
-      "sizes": [
-        "Universal In-Ear (S, M, L Tips)"
-      ],
-      "colors": [
-        "Space Grey",
-        "Matte Black",
-        "Pearl White"
-      ]
-    },
-    "features": [
-      "৩৫ ডেসিবল পর্যন্ত হাইব্রিড অ্যাক্টিভ নয়েজ ক্যান্সেলেশন",
-      "ব্লুটুথ ৫.৩ স্টেবল কানেক্টিভিটি ও হাই-ফাই স্টুডিও সাউন্ড",
-      "এক চার্জে ৮ ঘণ্টা এবং কেস সহ মোট ২৮ ঘণ্টা প্লেটাইম"
-    ],
-    "images": [
-      "https://images.unsplash.com/photo-1590658268037-6bf12165a8df?auto=format&fit=crop&w=1200&q=80",
-      "https://images.unsplash.com/photo-1590658268037-6bf12165a8df?auto=format&fit=crop&w=1200&q=80",
-      "https://images.unsplash.com/photo-1590658268037-6bf12165a8df?auto=format&fit=crop&w=1200&q=80"
-    ]
-  },
-  {
-    "id": "dkd-deep-tissue-massage-gun",
-    "name": "প্রফেশনাল ডিপ টিস্যু পারকাশন ম্যাসাজ গান - ৬ স্পিড ও ৪টি ইন্টারচেঞ্জেবল হেড",
-    "titleEn": "Professional Deep Tissue Percussion Muscle Massage Gun",
-    "category": "health_fitness",
-    "price": 2250,
-    "originalPrice": 3200,
-    "description": "শরীর ও মাংসপেশির ব্যথা দূর করতে, ওয়ার্কআউট পরবর্তী রিকভারির জন্য শক্তিশালী পারকাশন থেরাপি ম্যাসাজ গান। সাইলেন্ট ব্রাশলেস মোটর ও দীর্ঘস্থায়ী ব্যাটারি।",
-    "fabric": "শক-অ্যাবজরবিং সিলিকন গ্রিপ ও প্রিমিয়াম অ্যালয় বডি",
-    "sku": "DKD-FIT-09",
-    "inStock": true,
-    "rating": 5,
-    "reviewCount": 31,
-    "tag": "ফিটনেস",
-    "status": "published",
-    "variants": {
-      "colors": [
-        "Carbon Black",
-        "Metallic Red",
-        "Silver Grey"
-      ],
-      "sizes": [
-        "Pro Edition with 4 Attachments"
-      ]
-    },
-    "features": [
-      "৩২০০০ আরপিএম হাই-টর্ক ব্রাশলেস মোটর উইথ কোয়াইট গ্লাইড টেকনোলজি",
-      "৪টি ভিন্ন বডি পার্টের জন্য কাস্টমাইজড ম্যাসাজ হেডস",
-      "টাইপ-সি ফাস্ট রিচার্জেবল ২৫০০ mAh লিথিয়াম ব্যাটারি"
-    ],
-    "images": [
-      "https://images.unsplash.com/photo-1517838277536-f5f99be501cd?auto=format&fit=crop&w=1200&q=80",
-      "https://images.unsplash.com/photo-1517838277536-f5f99be501cd?auto=format&fit=crop&w=1200&q=80",
-      "https://images.unsplash.com/photo-1517838277536-f5f99be501cd?auto=format&fit=crop&w=1200&q=80"
-    ]
-  },
-  {
-    "id": "dkd-electric-chopper-grinder",
-    "name": "মাল্টিফাংশন ৪-ব্লেড ইলেকট্রিক ফুড চপার, মিট গ্রাইন্ডার ও কিচেন প্রসেসর",
-    "titleEn": "Stainless Steel 2L Electric Meat Grinder & Food Chopper",
-    "category": "home_kitchen",
-    "price": 1650,
-    "originalPrice": 2200,
-    "description": "শক্তিশালী ৩০০ ওয়াট কপার মোটর এবং ৪টি ধারালো এস-শেপ স্টেইনলেস স্টিল ব্লেড। মাত্র ৫ সেকেন্ডে মাংস কিমা, পেঁয়াজ, রসুন, আদা ও শাকসবজি নিখুঁত কুচি করার অত্যাধুনিক সমাধান।",
-    "fabric": "ফুড গ্রেড ৩০৪ স্টেইনলেস স্টিল বোল ও এবিএস হাউজিং",
-    "sku": "DKD-KIT-05",
-    "inStock": true,
-    "rating": 5,
-    "reviewCount": 45,
-    "tag": "স্মার্ট কিচেন",
-    "status": "published",
-    "variants": {
-      "colors": [
-        "Silver Stainless Steel",
-        "Rose Gold Limited Edition"
-      ],
-      "sizes": [
-        "2.0 Litre Capacity",
-        "3.0 Litre Family Size"
-      ]
-    },
-    "features": [
-      "৩০০W পিউর কপার মোটর উইথ থার্মাল ওভারহিট প্রোটেকশন",
-      "খাবারের বিশুদ্ধতা নিশ্চিত করতে ২ লিটার ফুড-গ্রেড স্টিল বোল",
-      "২ স্পিড মোড — সফট সবজি ও শক্ত মাংসের জন্য আলাদা কন্ট্রোল"
-    ],
-    "images": [
-      "https://images.unsplash.com/photo-1556911220-e15b29be8c8f?auto=format&fit=crop&w=1200&q=80",
-      "https://images.unsplash.com/photo-1556911220-e15b29be8c8f?auto=format&fit=crop&w=1200&q=80",
-      "https://images.unsplash.com/photo-1556911220-e15b29be8c8f?auto=format&fit=crop&w=1200&q=80"
-    ]
-  },
-  {
-    "id": "dkd-ergonomic-baby-carrier",
-    "name": "এরগনোমিক মাল্টি-পজিশন ব্রিদেবল বেবি ক্যারিয়ার উইথ হিপ সিট",
-    "titleEn": "Ergonomic 6-in-1 Baby Hip Seat Carrier with Lumbar Support",
-    "category": "kids_baby",
-    "price": 1950,
-    "originalPrice": 2800,
-    "description": "শিশুর আরাম ও মা-বাবার পিঠের সুরক্ষায় এরগনোমিক এম-শেপ হিপ সিট ক্যারিয়ার। ৩ থেকে ৩৬ মাস বয়সী শিশুদের জন্য ৬টি ভিন্ন পজিশনে ব্যবহারযোগ্য।",
-    "fabric": "১০০% ব্রিদেবল ৩ডি মেশ ও ন্যাচারাল কটন",
-    "sku": "DKD-KID-10",
-    "inStock": true,
-    "rating": 5,
-    "reviewCount": 46,
-    "tag": "প্যারেন্টিং",
-    "status": "published",
-    "variants": {
-      "sizes": [
-        "Universal Adjustable (0-36 Months / Up to 20kg)"
-      ],
-      "colors": [
-        "Soft Mint Green",
-        "Classic Denim Blue",
-        "Light Coral"
-      ]
-    },
-    "features": [
-      "আন্তর্জাতিক প্যাডিয়াট্রিক চিকিৎসকদের দ্বারা স্বীকৃত এরগনোমিক এম-পজিশন সিট",
-      "ভারসাম্য বজায় রেখে কাঁধ ও কোমরের চাপ কমাতে ওয়াইড কুশন স্ট্র্যাপ",
-      "দুধের বোতল, ডায়াপার ও ফোন রাখার উপযোগী মাল্টিপল ইউটিলিটি পকেট"
-    ],
-    "images": [
-      "https://images.unsplash.com/photo-1515488042361-ee00e0ddd4e4?auto=format&fit=crop&w=1200&q=80",
-      "https://images.unsplash.com/photo-1515488042361-ee00e0ddd4e4?auto=format&fit=crop&w=1200&q=80",
-      "https://images.unsplash.com/photo-1515488042361-ee00e0ddd4e4?auto=format&fit=crop&w=1200&q=80"
-    ]
-  },
-  {
-    "id": "dkd-expandable-travel-backpack",
-    "name": "ওয়াটারপ্রুফ অ্যান্টি-থেফট এক্সপান্ডেবল ট্রাভেল ও বিজনেস ব্যাকপ্যাক",
-    "titleEn": "Waterproof Expandable 40L Carry-On Travel Backpack with Laptop Sleeve",
-    "category": "travel_outdoor",
-    "price": 2750,
-    "originalPrice": 3800,
-    "description": "আন্তর্জাতিক ফ্লাইটের কেবিন সাইজ অনুমোদিত ৪০ লিটার এক্সপান্ডেবল ব্যাকপ্যাক। ১৭ ইঞ্চি ল্যাপটপ স্লিপ, জুতো রাখার আলাদা পকেট এবং ওয়াটারপ্রুফ ড্রিম ফ্যাব্রিক।",
-    "fabric": "হাই-ডেনসিটি ওয়াটারপ্রুফ অক্সফোর্ড ও পলিয়েস্টার কোটিং",
-    "sku": "DKD-TRV-08",
-    "inStock": true,
-    "rating": 5,
-    "reviewCount": 39,
-    "tag": "এক্সক্লুসিভ",
-    "status": "published",
-    "variants": {
-      "sizes": [
-        "30L Normal (Expandable to 40L)"
-      ],
-      "colors": [
-        "Charcoal Black",
-        "Navy Blue",
-        "Military Green"
-      ]
-    },
-    "features": [
-      "১৮০ ডিগ্রি স্যুটকেস-স্টাইল ওপেনিং সিস্টেম",
-      "ইউএসবি ফাস্ট চার্জিং পোর্ট ও লাগেজ ট্রলি স্ট্র্যাপ",
-      "হিডেন অ্যান্টি-থেফট ব্যাক পকেট ও টিএসএ লক স্লট"
-    ],
-    "images": [
-      "https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=1200&q=80",
-      "https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=1200&q=80",
-      "https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=1200&q=80"
-    ]
-  },
-  {
-    "id": "dkd-herbal-brightening-soap",
-    "name": "কিউবাই সেভেন হোয়াইট হারবাল স্কিন ব্রাইটেনিং ও ডিপ ক্লেন্সিং ফেসিয়াল সোপ",
-    "titleEn": "Seven White Herbs & Centella Deep Cleansing Facial Bar",
-    "category": "beauty_personal_care",
-    "price": 699,
-    "originalPrice": 950,
-    "description": "সাতটি দুর্লভ প্রাকৃতিক ঔষধি উদ্ভিদ ও সেন্টেলা এশিয়াটিকা সমৃদ্ধ ডিপ ক্লিনিং অর্গানিক সোপ। ত্বক মসৃণ, সতেজ ও প্রাকৃতিকভাবে উজ্জ্বল রাখতে কার্যকর।",
-    "fabric": "১০০% ন্যাচারাল হারবাল এক্সট্র্যাক্ট ও কোল্ড-প্রেসড অয়েল",
-    "sku": "DKD-BTY-04",
-    "inStock": true,
-    "rating": 5,
-    "reviewCount": 112,
-    "tag": "বেস্ট সেলিং",
-    "status": "published",
-    "variants": {
-      "sizes": [
-        "100g Bar"
-      ],
-      "colors": [
-        "১ পিস রেগুলার",
-        "২ পিস কম্বো প্যাক",
-        "৩ পিস ফ্যামিলি অফার"
-      ]
-    },
-    "features": [
-      "ন্যাচারাল হারবাল ফর্মুলা, কোনো ক্ষতিকর কেমিক্যাল মুক্ত",
-      "অতিরিক্ত তেল ও ধুলাবালি দূর করে স্কিন ব্যারিয়ার সুরক্ষিত রাখে",
-      "নারী-পুরুষ উভয়ের ত্বকের জন্য শতভাগ নিরাপদ ও উপযোগী"
-    ],
-    "images": [
-      "https://images.unsplash.com/photo-1601049541289-9b1b7bbbfe19?auto=format&fit=crop&w=1200&q=80",
-      "https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&w=1200&q=80",
-      "https://images.unsplash.com/photo-1601049541289-9b1b7bbbfe19?auto=format&fit=crop&w=1200&q=80"
-    ]
-  },
-  {
-    "id": "dkd-insulated-thermal-flask",
-    "name": "স্মার্ট টেম্পারেচার ডিসপ্লে ভ্যাকুয়াম ইনসুলেটেড থার্মাল ফ্লাস্ক বোতল (৭৫০ মিলি)",
-    "titleEn": "Smart LED Temperature Display Vacuum Insulated Flask 750ml",
-    "category": "lifestyle",
-    "price": 890,
-    "originalPrice": 1350,
-    "description": "স্মার্ট এলইডি টাচ স্ক্রিন টেম্পারেচার ডিসপ্লে যুক্ত ডাবল-ওয়াল ভ্যাকুয়াম ইনসুলেটেড বোতল। ২৪ ঘণ্টা বরফ ঠান্ডা ও ১২ ঘণ্টা গরম রাখার আন্তর্জাতিক কোয়ালিটি।",
-    "fabric": "ফুড-গ্রেড ৩০৪ স্টেইনলেস স্টিল ডাবল ওয়াল ইনসুলেশন",
-    "sku": "DKD-LFT-07",
-    "inStock": true,
-    "rating": 5,
-    "reviewCount": 52,
-    "tag": "ট্রেন্ডিং",
-    "status": "published",
-    "variants": {
-      "colors": [
-        "Matte Black",
-        "Emerald Green",
-        "Pastel Pink",
-        "Royal Blue"
-      ],
-      "sizes": [
-        "500ml Compact",
-        "750ml Standard",
-        "1000ml Large"
-      ]
-    },
-    "features": [
-      "এলইডি টাচ স্ক্রিনে রিয়েল-টাইম তরলের তাপমাত্রা প্রদর্শন",
-      "১০০% লিক-প্রুফ ফুড-গ্রেড সিলিকন সিল লক ক্যাপ",
-      "অফিস, জিম, স্পোর্টস ও ভ্রমণের জন্য আদর্শ লাইফস্টাইল বোতল"
-    ],
-    "images": [
-      "https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?auto=format&fit=crop&w=1200&q=80",
-      "https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?auto=format&fit=crop&w=1200&q=80",
-      "https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?auto=format&fit=crop&w=1200&q=80"
-    ]
-  },
-  {
-    "id": "dkd-magnetic-powerbank-10000",
-    "name": "ম্যাগনেটিক ওয়্যারলেস ফাস্ট চার্জিং পাওয়ার ব্যাংক ১০০০০ mAh - টাইপ-সি পিডি ২০W",
-    "titleEn": "10000mAh Magnetic Wireless Fast Charging Power Bank 20W PD",
-    "category": "mobile_accessories",
-    "price": 1950,
-    "originalPrice": 2750,
-    "description": "স্মার্ট স্লিম পকেট সাইজ ম্যাগনেটিক পাওয়ার ব্যাংক। আইফোন ও স্যামসাং সহ যেকোনো কিউআই ওয়্যারলেস সমর্থিত ফোনের পেছনে শক্তিশালী ম্যাগনেটে আটকে চার্জ করার আধুনিক ডিভাইস।",
-    "fabric": "ফায়ারপ্রুফ পলিকার্বনেট ও অ্যালুমিনিয়াম ম্যাগনেটিক রিং",
-    "sku": "DKD-MOB-06",
-    "inStock": true,
-    "rating": 5,
-    "reviewCount": 88,
-    "tag": "পপুলার",
-    "status": "published",
-    "variants": {
-      "sizes": [
-        "10,000 mAh Ultra Slim",
-        "20,000 mAh High Capacity"
-      ],
-      "colors": [
-        "Titanium Grey",
-        "Deep Navy Blue",
-        "Matte White"
-      ]
-    },
-    "features": [
-      "১৫W ওয়্যারলেস চার্জিং এবং ২০W টাইপ-সি পিডি ফাস্ট আউটপুট",
-      "শক্তিশালী ম্যাগনেটিক গ্রিপ — চার্জ চলাকালে একহাতে ফোন ব্যবহার",
-      "এলইডি ডিজিটাল ডিসপ্লেতে নিখুঁত ব্যাটারি পার্সেন্টেজ শো"
-    ],
-    "images": [
-      "https://images.unsplash.com/photo-1584438784894-089d6a62b8fa?auto=format&fit=crop&w=1200&q=80",
-      "https://images.unsplash.com/photo-1584438784894-089d6a62b8fa?auto=format&fit=crop&w=1200&q=80",
-      "https://images.unsplash.com/photo-1584438784894-089d6a62b8fa?auto=format&fit=crop&w=1200&q=80"
-    ]
-  },
-  {
-    "id": "dkd-memory-foam-lumbar-cushion",
-    "name": "এরগনোমিক মেমোরি ফোম লাম্বার সাপোর্ট ব্যাক কুশন ও সিট কমফোর্ট প্যাড",
-    "titleEn": "Ergonomic Memory Foam Back Lumbar Support Cushion for Office Chair",
-    "category": "office_essentials",
-    "price": 1350,
-    "originalPrice": 1950,
-    "description": "অফিস বা পড়ার টেবিলে দীর্ঘক্ষণ বসে কাজ করার সময় মেরুদণ্ড সোজা রাখতে ও পিঠের ব্যথা দূর করতে অর্থোপেডিক প্রিমিয়াম মেমোরি ফোম লাম্বার কুশন।",
-    "fabric": "১০০% হাই-ডেনসিটি মেমোরি ফোম ও ব্রিদেবল মেশ কভার",
-    "sku": "DKD-OFC-11",
-    "inStock": true,
-    "rating": 5,
-    "reviewCount": 58,
-    "tag": "অফিস সেরা",
-    "status": "published",
-    "variants": {
-      "sizes": [
-        "Standard Ergonomic Contour (Universal Fit)"
-      ],
-      "colors": [
-        "Executive Black",
-        "Navy Blue",
-        "Silver Slate"
-      ]
-    },
-    "features": [
-      "শরীরের শেপ অনুযায়ী অ্যাডজাস্ট হওয়া থার্মো-সংবেদনশীল পিওর মেমোরি ফোম",
-      "সহজে খুলে ধোয়ার উপযোগী জিপার দেওয়া ব্রিদেবল মেশ ফ্যাব্রিক কভার",
-      "চেয়ারের সাথে শক্তভাবে আটকে রাখার জন্য ডাবল অ্যাডজাস্টেবল ইলাস্টিক স্ট্র্যাপ"
-    ],
-    "images": [
-      "https://images.unsplash.com/photo-1497215728101-856f4ea42174?auto=format&fit=crop&w=1200&q=80",
-      "https://images.unsplash.com/photo-1497215728101-856f4ea42174?auto=format&fit=crop&w=1200&q=80",
-      "https://images.unsplash.com/photo-1497215728101-856f4ea42174?auto=format&fit=crop&w=1200&q=80"
-    ]
-  },
-  {
-    "id": "dkd-unisex-heavyweight-hoodie",
-    "name": "ইউনিসেক্স প্রিমিয়াম হেভিওয়েট কটন ওভারসাইজড ড্রপ-শোল্ডার হুডি",
-    "titleEn": "Unisex Premium Heavyweight 380 GSM Cotton Oversized Hoodie",
-    "category": "fashion_clothing",
-    "price": 1850,
-    "originalPrice": 2400,
-    "description": "৩৮০ জিএসএম প্রিমিয়াম খাঁটি ব্রাশড কটন ফ্লিস দিয়ে তৈরি আন্তর্জাতিক মানের ড্রপ শোল্ডার ওভারসাইজড হুডি। সকল জেন্ডারের জন্য স্টাইলিশ, টেকসই এবং শীতের দিনে চরম আরামদায়ক।",
-    "fabric": "৩৮০ GSM ১০০% কম্বড ব্রাশড অর্গানিক কটন ফ্লিস",
-    "sku": "DKD-FAS-03",
-    "inStock": true,
-    "rating": 5,
-    "reviewCount": 63,
-    "tag": "হট ড্রপ",
-    "status": "published",
-    "variants": {
-      "colors": [
-        "Midnight Black",
-        "Oatmeal Heather",
-        "Deep Forest Green",
-        "Espresso Brown"
-      ],
-      "sizes": [
-        "M (Oversized)",
-        "L (Oversized)",
-        "XL (Oversized)",
-        "XXL"
-      ]
-    },
-    "features": [
-      "প্রিমিয়াম অ্যান্টি-পিলিং সফট ব্রাশড ফ্লিস ফেব্রিক",
-      "ডাবল-লেয়ার হুড ও মেটাল টিপযুক্ত ড্রস্ট্রিং",
-      "কাঙ্গারু পকেট ও নিখুঁত রিইনফোর্সড ডাবল স্টিচিং"
-    ],
-    "images": [
-      "https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=1200&q=80",
-      "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=1200&q=80",
-      "https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=1200&q=80"
-    ]
-  },
+  }
 ];

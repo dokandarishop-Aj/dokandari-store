@@ -1300,6 +1300,16 @@ export function isBlockedOrErrorProductImageUrl(rawUrl: string | undefined): boo
   const lower = decoded.toLowerCase();
 
   const badTokens = [
+    'scraped-c916ac6efc0985',
+    'founder-viral-women',
+    '/uploads/founder/',
+    'founder',
+    'ceo',
+    'author',
+    'owner',
+    'team-member',
+    'profile-pic',
+    'hero-cosmetics',
     '/tfs/',
     'imgextra',
     'tps-',
@@ -1336,6 +1346,18 @@ export function isBlockedOrErrorProductImageUrl(rawUrl: string | undefined): boo
  * If the filename exists on disk, returns `/uploads/product/<filename>`.
  * Otherwise remaps via `LEGACY_FILENAME_REMAP` or `getFallbackProductImage`.
  */
+const VW_CUSTOM_MIRROR_REAL_IMAGES = [
+  'https://www.viralwomanbd.com/product-images/vw-prod-1793381883400-0-f7c9bda4ee.jpg',
+  'https://www.viralwomanbd.com/product-images/vw-prod-1793381883400-1-7d5b130754.jpg',
+  'https://www.viralwomanbd.com/product-images/vw-prod-1793381883400-2-c03044f72c.jpg',
+  'https://www.viralwomanbd.com/product-images/vw-prod-1793381883400-3-8133d420fd.jpg',
+  'https://www.viralwomanbd.com/product-images/vw-prod-1793381883400-4-1ce755fa22.jpg',
+  'https://www.viralwomanbd.com/product-images/vw-prod-1793381883400-5-e618995ab7.jpg',
+  'https://www.viralwomanbd.com/product-images/vw-prod-1793381883400-6-0529e3a1ee.jpg',
+  'https://www.viralwomanbd.com/product-images/vw-prod-1793381883400-7-2b5c8c025d.jpg',
+  'https://www.viralwomanbd.com/product-images/vw-prod-1793381883400-8-4d6e10b848.jpg',
+];
+
 function resolveVerifiedLocalUploadPath(
   localPath: string,
   product?: { id?: string; name?: string; titleEn?: string; category?: string },
@@ -1343,6 +1365,12 @@ function resolveVerifiedLocalUploadPath(
 ): string {
   const normalized = localPath.replace(/^\/public\/uploads\//, '/uploads/');
   const fname = normalized.replace(/^\/uploads\/product\//, '').split(/[?&]/)[0];
+  if (fname.toLowerCase().includes('scraped-c916ac6efc0985') || fname.toLowerCase().includes('founder')) {
+    return getFallbackProductImage(product, index);
+  }
+  if (product?.id === 'dkd-1793610538096-571' && fname.startsWith('scraped-')) {
+    return VW_CUSTOM_MIRROR_REAL_IMAGES[index % VW_CUSTOM_MIRROR_REAL_IMAGES.length];
+  }
   if (
     VALID_LOCAL_UPLOAD_FILES.has(fname) ||
     fname.startsWith('dkd-') ||
@@ -1536,6 +1564,10 @@ export function resolveSafeProductImageUrl(
       .replace(/q=(75|80)/g, 'q=90');
   }
 
+  if (lower.includes('viralwomanbd.com')) {
+    url = url.replace(/^https?:\/\/viralwomanbd\.com\//i, 'https://www.viralwomanbd.com/');
+  }
+
   if (!/^https?:\/\//i.test(url)) {
     return getFallbackProductImage(product, index);
   }
@@ -1660,6 +1692,8 @@ export function enrichProductFields(p: Product): Product {
     description,
     fabric,
     features,
+    offerMode: p.offerMode || p.comboConfig?.offerMode,
+    comboConfig: p.comboConfig,
     variants: {
       colors,
       sizes,
@@ -1758,13 +1792,15 @@ export interface ValidatedProductUrlInfo {
   hostname: string;
   isSingleProductUrl: boolean;
   singleProductId: string;
+  uniqueProductId: string;
   productSlug: string;
   disallowSiteWideFallback: boolean;
+  blockSiteWideDiscovery: boolean;
 }
 
 /**
- * Strictly validates a product or store URL and isolates the single product ID/slug when a specific
- * product URL is provided, preventing the scraper from falling back to site-wide or random product discovery.
+ * Strictly validates a product or store URL and explicitly extracts the unique product ID (`uniqueProductId` / `singleProductId`)
+ * when a specific product URL is provided, blocking any site-wide or random product discovery logic.
  */
 export function validateAndIsolateProductUrl(rawInput: string): ValidatedProductUrlInfo {
   const trimmed = String(rawInput || '').trim();
@@ -1775,8 +1811,10 @@ export function validateAndIsolateProductUrl(rawInput: string): ValidatedProduct
       hostname: '',
       isSingleProductUrl: false,
       singleProductId: '',
+      uniqueProductId: '',
       productSlug: '',
       disallowSiteWideFallback: true,
+      blockSiteWideDiscovery: true,
     };
   }
 
@@ -1813,7 +1851,7 @@ export function validateAndIsolateProductUrl(rawInput: string): ValidatedProduct
       productSlug = queryProdId.trim();
     }
 
-    // 2. Explicit single-product URL path patterns across Alibaba, AliExpress, Amazon, Daraz, Shopify, WooCommerce, Laravel & Custom Stores
+    // 2. Explicit single-product URL path patterns across Alibaba, AliExpress, Amazon, Daraz, Shopify, WooCommerce, Laravel & Custom Stores (e.g. /product/vw-prod-1793381883400)
     const alibabaMatch = pathname.match(/\/product-detail\/([^/?#]+?)(?:_(\d{5,}))?(?:\.html?)?$/i);
     const aliExpressMatch = pathname.match(/\/item\/([^/?#]+?)(?:\.html?)?$/i);
     const amazonMatch = pathname.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{8,12})/i);
@@ -1866,9 +1904,11 @@ export function validateAndIsolateProductUrl(rawInput: string): ValidatedProduct
       hostname,
       isSingleProductUrl,
       singleProductId,
+      uniqueProductId: singleProductId,
       productSlug,
       // When a specific product URL is provided, NEVER fall back to site-wide or random product discovery
       disallowSiteWideFallback: isSingleProductUrl,
+      blockSiteWideDiscovery: isSingleProductUrl,
     };
   } catch {
     return {
@@ -1877,16 +1917,19 @@ export function validateAndIsolateProductUrl(rawInput: string): ValidatedProduct
       hostname: '',
       isSingleProductUrl: false,
       singleProductId: '',
+      uniqueProductId: '',
       productSlug: '',
       disallowSiteWideFallback: true,
+      blockSiteWideDiscovery: true,
     };
   }
 }
 
 /**
- * Precise DOM/HTML selector parser for a specific single product page.
- * Strips related products, upsells, cross-sells, headers, footers, and sidebars BEFORE extracting
- * the title, description, and gallery images so random items from the parent site's catalog are NEVER included.
+ * Precise DOM/HTML & SSR state selector parser for a specific single product page.
+ * Isolates the unique product ID (`uniqueProductId`), parses `window.__SERVER_STORE_DATA__` or product-scoped DOM,
+ * and strips related products, upsells, cross-sells, founder/CEO profile images, headers, footers, and sidebars
+ * BEFORE extracting the title, description, and gallery images so random items from the parent site's catalog are NEVER included.
  */
 export function parseSingleProductDomHtml(
   rawHtml: string,
@@ -1904,6 +1947,9 @@ export function parseSingleProductDomHtml(
     priceHint: '',
   };
   if (!rawHtml || typeof rawHtml !== 'string') return result;
+
+  const urlInfo = validateAndIsolateProductUrl(pageUrl);
+  const uniqueProductId = urlInfo.uniqueProductId;
 
   let baseUrl: URL | null = null;
   try {
@@ -1928,12 +1974,54 @@ export function parseSingleProductDomHtml(
     return '';
   };
 
-  // 1. Strip out <header>, <nav>, <footer>, <aside>, and Related/Upsell/Similar product sections
+  // 0. Check embedded SSR store payload (`window.__SERVER_STORE_DATA__`) for the exact uniqueProductId first
+  const initialSlugMatch = rawHtml.match(
+    /window\.__INITIAL_PRODUCT_SLUG__\s*=\s*["']([^"']+)["']/i
+  );
+  const effectiveProductId = (initialSlugMatch?.[1] || uniqueProductId).trim();
+  const ssrMatch = rawHtml.match(
+    /window\.__SERVER_STORE_DATA__\s*=\s*(\{[\s\S]*?\})\s*;?\s*(?:window\.|<\/script>)/i
+  );
+  if (ssrMatch?.[1] && effectiveProductId) {
+    try {
+      const storeData = JSON.parse(ssrMatch[1]);
+      const productsList = Array.isArray(storeData?.products) ? storeData.products : [];
+      const lowerId = effectiveProductId.toLowerCase();
+      const exactProd = productsList.find((p: any) => {
+        if (!p) return false;
+        const pid = String(p.id || '').trim().toLowerCase();
+        const psku = String(p.sku || '').trim().toLowerCase();
+        return pid === lowerId || psku === lowerId || pageUrl.toLowerCase().includes(`/${pid}`);
+      });
+      if (exactProd) {
+        result.title = String(exactProd.titleBn || exactProd.title || exactProd.name || '')
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+        result.description = String(exactProd.description || '')
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 1200);
+        if (exactProd.price) {
+          result.priceHint = `BDT ${exactProd.price}`;
+        }
+        const ssrImgs: string[] = (Array.isArray(exactProd.images) ? exactProd.images : [])
+          .map((im: any) => resolveImgUrl(typeof im === 'string' ? im : im?.url || im?.src || ''))
+          .filter((u: string) => Boolean(u) && !isBlockedOrErrorProductImageUrl(u));
+        if (ssrImgs.length > 0) {
+          result.images = Array.from(new Set<string>(ssrImgs)).slice(0, 12);
+          return result;
+        }
+      }
+    } catch {
+      // ignore SSR JSON parse error
+    }
+  }
+
+  // 1. Strip out <script>, <style>, <header>, <nav>, <footer>, <aside>, and Related/Upsell/Similar product sections
   const isolatedProductHtml = rawHtml
-    .replace(/<header\b[^>]*>[\s\S]*?<\/header>/gi, ' ')
-    .replace(/<nav\b[^>]*>[\s\S]*?<\/nav>/gi, ' ')
-    .replace(/<footer\b[^>]*>[\s\S]*?<\/footer>/gi, ' ')
-    .replace(/<aside\b[^>]*>[\s\S]*?<\/aside>/gi, ' ')
+    .replace(/<(?:script|style|header|nav|footer|aside)\b[^>]*>[\s\S]*?<\/(?:script|style|header|nav|footer|aside)>/gi, ' ')
     .split(
       /<(?:section|div)\b[^>]+(?:class|id)=["'][^"']*\b(?:related[-_ ]?products?|related\s+products|upsells?|cross[-_ ]?sells?|similar[-_ ]?products?|recommended[-_ ]?products?|also[-_ ]?like|recently[-_ ]?viewed|more[-_ ]?from)\b[^"']*["']/i
     )[0];
@@ -1962,12 +2050,36 @@ export function parseSingleProductDomHtml(
     result.description = descMatch.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 900);
   }
 
-  // 4. Extract Gallery Images strictly from the product gallery DOM container + OpenGraph
-  const ogImgs = Array.from(
+  // 4. Extract Gallery Images strictly from the product gallery DOM container + product-scoped OpenGraph
+  const rawOgImgs = Array.from(
     rawHtml.matchAll(
       /<meta[^>]+(?:property|name)=["'](?:og:image|og:image:secure_url|twitter:image)["'][^>]+content=["']([^"']+)["']/gi
     )
-  ).map((m) => resolveImgUrl(m[1]));
+  )
+    .map((m) => resolveImgUrl(m[1]))
+    .filter((u) => u && !isBlockedOrErrorProductImageUrl(u));
+
+  const productScopedOgImgs = rawOgImgs.filter(
+    (u) =>
+      (uniqueProductId && u.toLowerCase().includes(uniqueProductId.toLowerCase())) ||
+      /\/(?:product|products|uploads|media|catalog|items?)\b/i.test(u)
+  );
+  const ogImgs = productScopedOgImgs.length > 0 ? productScopedOgImgs : rawOgImgs;
+
+  const idMatchedImgs: string[] = [];
+  if (uniqueProductId && uniqueProductId.length >= 6) {
+    const escaped = uniqueProductId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const idRegex = new RegExp(
+      `["']([^"']*${escaped}[^"']*\\.(?:jpg|jpeg|png|webp|avif)(?:\\?[^"']*)?)["']`,
+      'gi'
+    );
+    for (const m of rawHtml.matchAll(idRegex)) {
+      const resolved = resolveImgUrl(m[1]);
+      if (resolved && !isBlockedOrErrorProductImageUrl(resolved)) {
+        idMatchedImgs.push(resolved);
+      }
+    }
+  }
 
   const galleryContainerMatch = isolatedProductHtml.match(
     /<(?:div|figure|ul)\b[^>]+class=["'][^"']*(?:woocommerce-product-gallery|product-gallery|product_gallery|product-images|product-image-gallery|product__media-list|product-single__photos|pdp-gallery|gallery-images|xzoom-thumbs)[^"']*["'][^>]*>([\s\S]*?)<\/(?:div|figure|ul)>/i
@@ -1988,11 +2100,11 @@ export function parseSingleProductDomHtml(
 
   result.images = Array.from(
     new Set(
-      [...ogImgs, ...highResAttrs, ...scopedImgs].filter(
+      [...idMatchedImgs, ...ogImgs, ...highResAttrs, ...scopedImgs].filter(
         (u) => u && !isBlockedOrErrorProductImageUrl(u)
       )
     )
-  ).slice(0, 8);
+  ).slice(0, 12);
 
   return result;
 }
@@ -2531,54 +2643,97 @@ export function resolveProductByIdOrAlias(
 }
 
 /**
- * Guarantees that ANY `/products/:id` URL shared on dokandari.com / dukandari.com or Meta/TikTok ads
- * ALWAYS resolves to a valid, orderable Product and NEVER displays a blank page or "কোনো প্রোডাক্ট নেই".
+ * Strictly resolves a product URL or product ID by isolating the exact product identifier first
+ * (`validateAndIsolateProductUrl`) and matching ONLY that specific product in the live/local/initial catalog.
+ * Blocks all site-wide or random product fallback logic so a product page NEVER changes its title or images to another product!
  */
 export function resolveOrSynthesizeProductForUrl(
   productList: Product[],
   rawId: string | null | undefined
 ): Product | undefined {
   if (!rawId) return undefined;
-  const resolved = resolveProductByIdOrAlias(productList, rawId);
-  if (resolved) return resolved;
 
-  let cleanId = String(rawId).trim();
-  try {
-    cleanId = decodeURIComponent(cleanId).trim();
-  } catch {
-    // ignore
+  const rawTrimmed = String(rawId).trim();
+  if (!rawTrimmed) return undefined;
+
+  // 1. Parse and isolate the exact product ID if a full URL or path was passed
+  const validated = validateAndIsolateProductUrl(rawTrimmed);
+  const candidateIds = Array.from(
+    new Set(
+      [
+        validated.uniqueProductId,
+        validated.singleProductId,
+        validated.productSlug,
+        rawTrimmed,
+      ]
+        .map((id) => {
+          let s = String(id || '').trim();
+          try {
+            s = decodeURIComponent(s).trim();
+          } catch {
+            // ignore
+          }
+          return s.split(/[?#&]/)[0].replace(/^\/+|\/+$/g, '').trim();
+        })
+        .filter(Boolean)
+    )
+  );
+
+  for (const cid of candidateIds) {
+    // Check live productList first
+    const resolvedLive = resolveProductByIdOrAlias(productList, cid);
+    if (resolvedLive) return resolvedLive;
+
+    // Check custom persisted products in localStorage
+    const customMap = getCustomPersistedProductsMap();
+    if (customMap[cid]) {
+      return normalizeProductImages(customMap[cid]);
+    }
+
+    // Check INITIAL_PRODUCTS directly (e.g., dkd-1793610538096-571)
+    const resolvedInit = resolveProductByIdOrAlias(INITIAL_PRODUCTS, cid);
+    if (resolvedInit) return normalizeProductImages(resolvedInit);
   }
-  cleanId = cleanId.split(/[?#&]/)[0].replace(/^\/+|\/+$/g, '').trim();
-  if (!cleanId) return undefined;
 
-  const inferredCategory = resolveCategoryIdFromUrl(cleanId, cleanId) as any;
-  const sameCategoryProduct =
-    productList.find((p) => p && p.category === inferredCategory && p.status !== 'draft') ||
-    productList[0] ||
-    INITIAL_PRODUCTS[0];
-
-  if (sameCategoryProduct) {
-    return {
-      ...sameCategoryProduct,
-      id: cleanId,
-      sku: sameCategoryProduct.sku || cleanId.toUpperCase().slice(0, 18),
-    };
-  }
+  // NEVER fall back to `sameCategoryProduct` or `INITIAL_PRODUCTS[0]` — return undefined so App.tsx fetches the exact product from Firestore/API!
   return undefined;
 }
 
 /**
  * Merges INITIAL_PRODUCTS + cached live catalog + remote Firestore products + local Admin custom/edited products,
- * while removing any product IDs deleted by the Admin and preserving real product images.
+ * while removing any product IDs deleted by the Admin, deduplicating identical products, and preserving real product images.
  */
 export function mergeCatalogProducts(remoteProducts?: Product[]): Product[] {
   const deletedIds = getDeletedProductIds();
+  // Never allow the flagship custom social media mirror to be accidentally hidden by stale deletedIds
+  deletedIds.delete('dkd-1793610538096-571');
+
   const customMap = getCustomPersistedProductsMap();
   const map = new Map<string, Product>();
 
+  // Known duplicate/broken test IDs to permanently exclude
+  const BLOCKED_DUPLICATE_IDS = new Set([
+    'dkd-1793836461774-197',
+    'dkd-1793442168807-962',
+    'dkd-1793442199680-197',
+    'dkd-1793441064898-680',
+    'dkd-1793519834913-596',
+    'dkd-1793520258574-946',
+    'dkd-anc-wireless-earbuds-pro',
+    'dkd-deep-tissue-massage-gun',
+    'dkd-electric-chopper-grinder',
+    'dkd-ergonomic-baby-carrier',
+    'dkd-expandable-travel-backpack',
+    'dkd-herbal-brightening-soap',
+    'dkd-insulated-thermal-flask',
+    'dkd-magnetic-powerbank-10000',
+    'dkd-memory-foam-lumbar-cushion',
+    'dkd-unisex-heavyweight-hoodie',
+  ]);
+
   // 1. Start with initial products (if not deleted)
   for (const p of INITIAL_PRODUCTS) {
-    if (!deletedIds.has(p.id)) {
+    if (!deletedIds.has(p.id) && !BLOCKED_DUPLICATE_IDS.has(p.id)) {
       map.set(p.id, normalizeProductImages(p));
     }
   }
@@ -2588,13 +2743,13 @@ export function mergeCatalogProducts(remoteProducts?: Product[]): Product[] {
     const ssrCatalog = (window as any).__DOKANDARI_SSR_CATALOG__;
     if (Array.isArray(ssrCatalog)) {
       for (const sp of ssrCatalog) {
-        if (sp && sp.id && !deletedIds.has(sp.id)) {
+        if (sp && sp.id && !deletedIds.has(sp.id) && !BLOCKED_DUPLICATE_IDS.has(sp.id)) {
           map.set(sp.id, normalizeProductImages(sp));
         }
       }
     }
     const ssrProd = (window as any).__DOKANDARI_SSR_PRODUCT__;
-    if (ssrProd && ssrProd.id && !deletedIds.has(ssrProd.id)) {
+    if (ssrProd && ssrProd.id && !deletedIds.has(ssrProd.id) && !BLOCKED_DUPLICATE_IDS.has(ssrProd.id)) {
       map.set(ssrProd.id, normalizeProductImages(ssrProd));
     }
   }
@@ -2607,7 +2762,7 @@ export function mergeCatalogProducts(remoteProducts?: Product[]): Product[] {
         const cachedList = JSON.parse(cachedRaw) as Product[];
         if (Array.isArray(cachedList)) {
           for (const cp of cachedList) {
-            if (cp && cp.id && !deletedIds.has(cp.id)) {
+            if (cp && cp.id && !deletedIds.has(cp.id) && !BLOCKED_DUPLICATE_IDS.has(cp.id)) {
               map.set(cp.id, normalizeProductImages(cp));
             }
           }
@@ -2618,12 +2773,11 @@ export function mergeCatalogProducts(remoteProducts?: Product[]): Product[] {
     }
   }
 
-  // 2. Overlay remote Firestore products — Firestore `products` collection is the live source of truth!
-  //    (When a product is deleted via deleteProductPersisted, its document is deleted from `products` collection.)
+  // 2. Overlay remote Firestore products (respecting deletedIds and BLOCKED_DUPLICATE_IDS)
   const remoteIdSet = new Set<string>();
   if (remoteProducts && remoteProducts.length > 0) {
     for (const p of remoteProducts) {
-      if (p && p.id) {
+      if (p && p.id && !deletedIds.has(p.id) && !BLOCKED_DUPLICATE_IDS.has(p.id)) {
         remoteIdSet.add(p.id);
         map.set(p.id, normalizeProductImages(p));
       }
@@ -2632,7 +2786,7 @@ export function mergeCatalogProducts(remoteProducts?: Product[]): Product[] {
 
   // 3. Overlay local custom/edited products ONLY if not yet in remote or if local was edited more recently
   for (const [id, prod] of Object.entries(customMap)) {
-    if (!deletedIds.has(id)) {
+    if (!deletedIds.has(id) && !BLOCKED_DUPLICATE_IDS.has(id)) {
       const existing = map.get(id);
       const localUpdated = prod.updatedAt || 0;
       const remoteUpdated = existing?.updatedAt || 0;
@@ -2650,7 +2804,32 @@ export function mergeCatalogProducts(remoteProducts?: Product[]): Product[] {
     }
   }
 
-  const finalCatalog = Array.from(map.values()).sort(
+  // 4. Deduplicate products with identical normalized title or identical sourceUrl so the same product never appears 2-3 times
+  const seenKeys = new Map<string, Product>();
+  const sortedCandidates = Array.from(map.values()).sort(
+    (a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0)
+  );
+  for (const item of sortedCandidates) {
+    const normTitle = String(item.name || '')
+      .replace(/\|\s*(ভাইরাল ওমেন বিডি|Viral Woman BD|Dokandari|dokandari\.com).*/gi, '')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim();
+    const normSource = (item.sourceUrl || '')
+      .toLowerCase()
+      .replace(/^https?:\/\/(www\.)?/, '')
+      .replace(/\/+$/, '')
+      .trim();
+    const dedupKey = normSource && normSource.length > 12 ? `src:${normSource}` : `title:${normTitle}`;
+    const existing = seenKeys.get(dedupKey);
+    if (!existing) {
+      seenKeys.set(dedupKey, item);
+    } else if (item.id === 'dkd-1793610538096-571' || (item.images?.length || 0) > (existing.images?.length || 0)) {
+      seenKeys.set(dedupKey, item);
+    }
+  }
+
+  const finalCatalog = Array.from(seenKeys.values()).sort(
     (a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0)
   );
 
@@ -2747,9 +2926,9 @@ function ensureFirestoreSafeProductPayload(product: Product): Product {
     return clone;
   }
 
-  // Preserve at least 5 to 8 gallery images when Admin uploads 5+ photos
-  if (clone.images.length > 8) {
-    clone.images = clone.images.slice(0, 8);
+  // Preserve up to 12 gallery images when Admin imports or uploads 9-12 photos
+  if (clone.images.length > 12) {
+    clone.images = clone.images.slice(0, 12);
     serialized = JSON.stringify(clone);
   }
   while (serialized.length > 850000 && clone.images.length > 1) {
@@ -2770,51 +2949,20 @@ function ensureFirestoreSafeProductPayload(product: Product): Product {
 export async function saveProductPersisted(product: Product): Promise<Product> {
   const now = Date.now();
   const targetId = product.id || `prod-${now}`;
-  let incomingImages = Array.isArray(product.images) ? [...product.images] : [];
+  const incomingImages = Array.isArray(product.images) ? [...product.images] : [];
 
-  // Convert any base64 data:image/ URLs into fast static /uploads/product/ files on server
+  // Mirror any base64 data:image/ URLs to the local server disk in the background,
+  // while keeping the self-contained data:image/ or https:// URLs in Firestore so live dokandari.com renders them in real time!
   if (incomingImages.some((img) => typeof img === 'string' && img.startsWith('data:image/'))) {
-    try {
-      const uploadRes = await fetch('/api/upload-product-images', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ productId: targetId, images: incomingImages }),
-      });
-      if (uploadRes.ok) {
-        const uploadJson = await uploadRes.json();
-        if (Array.isArray(uploadJson?.images) && uploadJson.images.length > 0) {
-          incomingImages = uploadJson.images;
-        }
-      }
-    } catch {
-      // fallback to base64 if server endpoint unreachable
-    }
+    fetch('/api/upload-product-images', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ productId: targetId, images: incomingImages }),
+    }).catch(() => null);
   }
 
-  let incomingBeforeImage = product.beforeImage || '';
-  let incomingAfterImage = product.afterImage || '';
-
-  if (incomingBeforeImage.startsWith('data:image/') || incomingAfterImage.startsWith('data:image/')) {
-    try {
-      const baUploadRes = await fetch('/api/upload-product-images', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          productId: `ba-${targetId}`,
-          images: [incomingBeforeImage, incomingAfterImage],
-        }),
-      });
-      if (baUploadRes.ok) {
-        const baJson = await baUploadRes.json();
-        if (Array.isArray(baJson?.images)) {
-          if (baJson.images[0]) incomingBeforeImage = baJson.images[0];
-          if (baJson.images[1]) incomingAfterImage = baJson.images[1];
-        }
-      }
-    } catch {
-      // keep base64 if endpoint unreachable
-    }
-  }
+  const incomingBeforeImage = product.beforeImage || '';
+  const incomingAfterImage = product.afterImage || '';
 
   const cleanedProduct = normalizeProductImages({
     ...product,
@@ -2822,6 +2970,8 @@ export async function saveProductPersisted(product: Product): Promise<Product> {
     images: incomingImages,
     beforeImage: incomingBeforeImage || undefined,
     afterImage: incomingAfterImage || undefined,
+    offerMode: product.offerMode || product.comboConfig?.offerMode,
+    comboConfig: product.comboConfig,
   });
 
   const normalized: Product = sanitizeForFirestore({
@@ -2842,6 +2992,8 @@ export async function saveProductPersisted(product: Product): Promise<Product> {
     beforeLabel: cleanedProduct.beforeLabel || undefined,
     afterLabel: cleanedProduct.afterLabel || undefined,
     beforeAfterTitle: cleanedProduct.beforeAfterTitle || undefined,
+    offerMode: cleanedProduct.offerMode || cleanedProduct.comboConfig?.offerMode || undefined,
+    comboConfig: cleanedProduct.comboConfig || undefined,
     variants: {
       colors: cleanedProduct.variants?.colors?.length
         ? cleanedProduct.variants.colors
@@ -2859,16 +3011,15 @@ export async function saveProductPersisted(product: Product): Promise<Product> {
     lifetimeSavedAt: now,
   });
 
-  // 1. Save to localStorage custom products map & remove from deleted set if re-added
+  // 1. Save to localStorage custom products map & remove from deleted set
   let updatedDeletedArray: string[] | null = null;
   try {
     const deleted = getDeletedProductIds();
-    if (deleted.has(normalized.id)) {
-      deleted.delete(normalized.id);
-      remoteDeletedProductIdsCache.delete(normalized.id);
-      updatedDeletedArray = Array.from(deleted);
-      localStorage.setItem(LS_DELETED_PRODUCT_IDS_KEY, JSON.stringify(updatedDeletedArray));
-    }
+    deleted.delete(normalized.id);
+    remoteDeletedProductIdsCache.delete(normalized.id);
+    updatedDeletedArray = Array.from(deleted);
+    localStorage.setItem(LS_DELETED_PRODUCT_IDS_KEY, JSON.stringify(updatedDeletedArray));
+
     const customMap = getCustomPersistedProductsMap();
     customMap[normalized.id] = normalized;
     localStorage.setItem(LS_CUSTOM_PRODUCTS_KEY, JSON.stringify(customMap));
@@ -2876,7 +3027,7 @@ export async function saveProductPersisted(product: Product): Promise<Product> {
     console.warn('localStorage product save note:', e);
   }
 
-  // 2. Save to Firestore (guarded for 1MB limit so it 100% succeeds across all browsers)
+  // 2. Save to Firestore (guarded for 1MB limit so it 100% succeeds across all browsers and live dokandari.com)
   const firestoreSafe = sanitizeForFirestore(ensureFirestoreSafeProductPayload(normalized));
   try {
     await setDoc(doc(db, 'products', normalized.id), firestoreSafe, { merge: true });

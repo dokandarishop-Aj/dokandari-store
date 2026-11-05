@@ -309,20 +309,145 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     ? Math.round(((product.originalPrice - product.price) / product.originalPrice) * 100)
     : 20;
 
-  // 3 High-Converting Combo Pack Deals (Pack 1: Regular, Pack 2: Save 150৳, Pack 3: Free Delivery + Save 350৳)
+  // Support BOTH Piece-Based (1, 2, 3 pcs) and Size-Based (Small, Medium, Full Body) Combo Offers
+  const activeOfferMode: 'piece' | 'size' =
+    product.offerMode || product.comboConfig?.offerMode || 'piece';
+
+  const pkg1Title =
+    product.comboConfig?.pkg1Title ||
+    (activeOfferMode === 'size' ? 'Small Size (ছোট সাইজ)' : '১ টি (স্ট্যান্ডার্ড)');
+  const pkg1Sub =
+    product.comboConfig?.pkg1Sub ||
+    (activeOfferMode === 'size' ? 'রেগুলার সাইজ' : 'সাধারণ মূল্য');
+  const pkg1Price = Number(product.comboConfig?.pkg1Price || product.price);
+
+  const pkg2Title =
+    product.comboConfig?.pkg2Title ||
+    (activeOfferMode === 'size' ? 'Medium Size (মিডিয়াম সাইজ)' : '২ টি (কম্বো প্যাক)');
+  const pkg2Discount = Number(
+    product.comboConfig?.pkg2Discount ?? (activeOfferMode === 'size' ? 100 : 150)
+  );
+  const pkg2Price = Number(
+    product.comboConfig?.pkg2Price || Math.max(pkg1Price, pkg1Price * 2 - pkg2Discount)
+  );
+  const pkg2Sub =
+    product.comboConfig?.pkg2Sub || `${pkg2Discount}৳ নগদ সাশ্রয়!`;
+
+  const pkg3Title =
+    product.comboConfig?.pkg3Title ||
+    (activeOfferMode === 'size' ? 'Full Body (বড় সাইজ)' : '৩ টি (মেগা সেভার)');
+  const pkg3Discount = Number(
+    product.comboConfig?.pkg3Discount ?? (activeOfferMode === 'size' ? 200 : 350)
+  );
+  const pkg3Price = Number(
+    product.comboConfig?.pkg3Price || Math.max(pkg1Price, pkg1Price * 3 - pkg3Discount)
+  );
+  const pkg3Sub =
+    product.comboConfig?.pkg3Sub || `${pkg3Discount}৳ ছাড় + ০৳ ডেলিভারি`;
+
   const [selectedCombo, setSelectedCombo] = useState<1 | 2 | 3>(1);
 
   const handleSelectCombo = (pack: 1 | 2 | 3) => {
     setSelectedCombo(pack);
-    setQuantity(pack);
+    if (activeOfferMode === 'size') {
+      setQuantity(1);
+      if (pack === 1) setSelectedSize(pkg1Title);
+      else if (pack === 2) setSelectedSize(pkg2Title);
+      else setSelectedSize(pkg3Title);
+    } else {
+      setQuantity(pack);
+    }
   };
 
-  const comboDiscount = selectedCombo === 3 ? 350 : selectedCombo === 2 ? 150 : 0;
+  // Real-time Admin Offer Mode Switcher (Piece vs Size)
+  const handleAdminSwitchOfferMode = async (mode: 'piece' | 'size') => {
+    const nextConfig =
+      mode === 'size'
+        ? {
+            offerMode: 'size' as const,
+            pkg1Title: 'Small Size (ছোট সাইজ)',
+            pkg1Sub: 'রেগুলার সাইজ',
+            pkg1Price: product.price,
+            pkg2Title: 'Medium Size (মিডিয়াম সাইজ)',
+            pkg2Sub: 'সাশ্রয় ৳১০০',
+            pkg2Price: Math.max(product.price, product.price * 2 - 100),
+            pkg2Discount: 100,
+            pkg2Badge: '🔥 সবচেয়ে জনপ্রিয়',
+            pkg3Title: 'Full Body (বড় সাইজ)',
+            pkg3Sub: 'মেগা সেভার + ফ্রি ডেলিভারি',
+            pkg3Price: Math.max(product.price, product.price * 3 - 200),
+            pkg3Discount: 200,
+            pkg3Badge: '🚚 ফ্রি ডেলিভারি!',
+            pkg3FreeDelivery: true,
+          }
+        : {
+            offerMode: 'piece' as const,
+            pkg1Title: '১ টি (স্ট্যান্ডার্ড)',
+            pkg1Sub: 'সাধারণ মূল্য',
+            pkg1Price: product.price,
+            pkg2Title: '২ টি (কম্বো প্যাক)',
+            pkg2Sub: '১৫০৳ নগদ সাশ্রয়!',
+            pkg2Price: Math.max(product.price, product.price * 2 - 150),
+            pkg2Discount: 150,
+            pkg2Badge: '🔥 সবচেয়ে জনপ্রিয়',
+            pkg3Title: '৩ টি (মেগা সেভার)',
+            pkg3Sub: '৩৫০৳ ছাড় + ০৳ ডেলিভারি',
+            pkg3Price: Math.max(product.price, product.price * 3 - 350),
+            pkg3Discount: 350,
+            pkg3Badge: '🚚 ফ্রি ডেলিভারি!',
+            pkg3FreeDelivery: true,
+          };
+
+    const nextSizes =
+      mode === 'size'
+        ? [nextConfig.pkg1Title, nextConfig.pkg2Title, nextConfig.pkg3Title]
+        : product.variants?.sizes || ['স্ট্যান্ডার্ড সাইজ (Standard Pack)'];
+
+    const updatedProd: Product = {
+      ...product,
+      offerMode: mode,
+      comboConfig: nextConfig,
+      variants: {
+        colors: product.variants?.colors || [],
+        sizes: nextSizes,
+      },
+      updatedAt: Date.now(),
+    };
+    if (mode === 'size') {
+      setSelectedCombo(1);
+      setQuantity(1);
+      setSelectedSize(nextConfig.pkg1Title);
+    } else {
+      setSelectedCombo(1);
+      setQuantity(1);
+    }
+    const saved = await saveProductPersisted(updatedProd);
+    if (onProductUpdated) onProductUpdated(saved);
+  };
+
+  const comboDiscount =
+    selectedCombo === 3 ? pkg3Discount : selectedCombo === 2 ? pkg2Discount : 0;
   const isFreeDeliveryCombo = selectedCombo === 3;
   const baseShippingCost = deliveryArea === 'dhaka' ? 70 : 120;
   const finalShipping = isFreeDeliveryCombo ? 0 : baseShippingCost;
-  const rawSubtotal = product.price * quantity;
-  const subtotalPrice = Math.max(0, rawSubtotal - comboDiscount);
+
+  const selectedUnitOrPackPrice =
+    activeOfferMode === 'size'
+      ? selectedCombo === 3
+        ? pkg3Price
+        : selectedCombo === 2
+          ? pkg2Price
+          : pkg1Price
+      : product.price;
+
+  const rawSubtotal =
+    activeOfferMode === 'size'
+      ? selectedUnitOrPackPrice * quantity
+      : product.price * quantity;
+  const subtotalPrice =
+    activeOfferMode === 'size'
+      ? rawSubtotal
+      : Math.max(0, rawSubtotal - comboDiscount);
   const totalPrice = subtotalPrice + finalShipping;
 
   // Real-time Lead Recovery mechanism: automatically captures customer phone & details on Product & Checkout page
@@ -407,17 +532,8 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     setTimeout(() => setAddedToCartToast(false), 2500);
   };
 
-  // Scroll directly to the 1-Click Order Form on the Product Page (or open checkout view)
+  // Navigate directly to the separate Order Form / Instant Checkout Page
   const handleGoToInstantCheckout = () => {
-    const formEl = document.getElementById('direct-pdp-order-form');
-    if (formEl && viewStep === 'product') {
-      formEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      const firstInput = formEl.querySelector('input') as HTMLInputElement | null;
-      if (firstInput) {
-        setTimeout(() => firstInput.focus(), 350);
-      }
-      return;
-    }
     try {
       window.history.pushState(
         null,
@@ -1951,20 +2067,57 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                   </div>
                 )}
 
-                {/* 3 HIGH-CONVERSION COMBO PACK CARDS (AOV Booster & Return Reducer) */}
-                <div className="space-y-2 pt-1">
-                  <div className="flex items-center justify-between">
+                {/* 3 HIGH-CONVERSION COMBO / SIZE PACK CARDS (Supports both Piece Mode & Size Mode) */}
+                <div className="space-y-2.5 pt-1">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
                     <span className="text-xs font-black text-stone-900 flex items-center gap-1.5">
                       <span className="w-2 h-2 rounded-full bg-[#E11D48] animate-ping" />
-                      <span>অফার ও কম্বো প্যাকেজ নির্বাচন করুন:</span>
+                      <span>
+                        {activeOfferMode === 'size'
+                          ? 'পছন্দের সাইজ ও অফার প্যাকেজ নির্বাচন করুন:'
+                          : 'অফার ও কম্বো প্যাকেজ নির্বাচন করুন:'}
+                      </span>
                     </span>
                     <span className="text-[10px] font-bold text-[#E11D48] bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full">
-                      🔥 ৩৫০৳ পর্যন্ত সাশ্রয়!
+                      🔥 ৳{pkg3Discount} পর্যন্ত সাশ্রয় + ফ্রি ডেলিভারি!
                     </span>
                   </div>
 
+                  {/* Admin Real-Time Offer Mode Toggle (Piece vs Size) */}
+                  {isAdmin && (
+                    <div className="p-2 rounded-xl bg-rose-50/80 border border-rose-200 flex items-center justify-between gap-2 flex-wrap">
+                      <span className="text-[11px] font-extrabold text-rose-950">
+                        ⚙️ অ্যাডমিন অফার মোড (রিয়েল-টাইম সেভ):
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleAdminSwitchOfferMode('piece')}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition-all cursor-pointer ${
+                            activeOfferMode === 'piece'
+                              ? 'bg-[#E11D48] text-white shadow-2xs'
+                              : 'bg-white text-stone-700 border border-stone-200 hover:border-rose-300'
+                          }`}
+                        >
+                          📦 পিস অনুযায়ী (১, ২, ৩ পিস)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleAdminSwitchOfferMode('size')}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition-all cursor-pointer ${
+                            activeOfferMode === 'size'
+                              ? 'bg-[#E11D48] text-white shadow-2xs'
+                              : 'bg-white text-stone-700 border border-stone-200 hover:border-rose-300'
+                          }`}
+                        >
+                          📏 সাইজ অনুযায়ী (Small, Medium, Full Body)
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    {/* Pack 1: 1 Pc */}
+                    {/* Pack 1 */}
                     <button
                       type="button"
                       onClick={() => handleSelectCombo(1)}
@@ -1978,9 +2131,9 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                     >
                       <div>
                         <div className="flex items-center justify-between">
-                          <span className="text-xs font-extrabold text-stone-900">১ টি (স্ট্যান্ডার্ড)</span>
+                          <span className="text-xs font-extrabold text-stone-900">{pkg1Title}</span>
                           <span
-                            className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                            className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
                               selectedCombo === 1
                                 ? isOrganic
                                   ? 'border-[#16A34A] bg-[#16A34A]'
@@ -1991,15 +2144,19 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                             {selectedCombo === 1 && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
                           </span>
                         </div>
-                        <p className="text-[10px] text-stone-500 font-medium mt-0.5">সাধারণ মূল্য</p>
+                        <p className="text-[10px] text-stone-500 font-medium mt-0.5">{pkg1Sub}</p>
                       </div>
                       <div className="mt-2 pt-1 border-t border-stone-100 flex items-baseline justify-between">
-                        <span className="text-xs font-mono font-black text-stone-900">৳{product.price.toLocaleString()}</span>
-                        <span className="text-[10px] text-stone-400">১ পিস</span>
+                        <span className="text-xs font-mono font-black text-stone-900">
+                          ৳{pkg1Price.toLocaleString()}
+                        </span>
+                        <span className="text-[10px] text-stone-500 font-semibold">
+                          {activeOfferMode === 'size' ? 'রেগুলার' : '১ পিস'}
+                        </span>
                       </div>
                     </button>
 
-                    {/* Pack 2: 2 Pcs - Popular Combo */}
+                    {/* Pack 2 */}
                     <button
                       type="button"
                       onClick={() => handleSelectCombo(2)}
@@ -2016,9 +2173,9 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                       </span>
                       <div>
                         <div className="flex items-center justify-between">
-                          <span className="text-xs font-extrabold text-stone-900">২ টি (কম্বো প্যাক)</span>
+                          <span className="text-xs font-extrabold text-stone-900">{pkg2Title}</span>
                           <span
-                            className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                            className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
                               selectedCombo === 2
                                 ? isOrganic
                                   ? 'border-[#16A34A] bg-[#16A34A]'
@@ -2029,17 +2186,19 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                             {selectedCombo === 2 && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
                           </span>
                         </div>
-                        <p className="text-[10px] text-emerald-700 font-bold mt-0.5">১৫০৳ নগদ সাশ্রয়!</p>
+                        <p className="text-[10px] text-emerald-700 font-bold mt-0.5">{pkg2Sub}</p>
                       </div>
                       <div className="mt-2 pt-1 border-t border-stone-100 flex items-baseline justify-between">
                         <span className="text-xs font-mono font-black text-[#E11D48]">
-                          ৳{(product.price * 2 - 150).toLocaleString()}
+                          ৳{pkg2Price.toLocaleString()}
                         </span>
-                        <span className="text-[10px] text-stone-400 line-through">৳{(product.price * 2).toLocaleString()}</span>
+                        <span className="text-[10px] text-stone-400 line-through">
+                          ৳{(pkg2Price + pkg2Discount).toLocaleString()}
+                        </span>
                       </div>
                     </button>
 
-                    {/* Pack 3: 3 Pcs - Mega Saver + Free Delivery */}
+                    {/* Pack 3 */}
                     <button
                       type="button"
                       onClick={() => handleSelectCombo(3)}
@@ -2056,9 +2215,9 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                       </span>
                       <div>
                         <div className="flex items-center justify-between">
-                          <span className="text-xs font-extrabold text-stone-900">৩ টি (মেগা সেভার)</span>
+                          <span className="text-xs font-extrabold text-stone-900">{pkg3Title}</span>
                           <span
-                            className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                            className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
                               selectedCombo === 3
                                 ? isOrganic
                                   ? 'border-[#16A34A] bg-[#16A34A]'
@@ -2069,13 +2228,15 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                             {selectedCombo === 3 && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
                           </span>
                         </div>
-                        <p className="text-[10px] text-emerald-700 font-bold mt-0.5">৩৫০৳ ছাড় + ০৳ ডেলিভারি</p>
+                        <p className="text-[10px] text-emerald-700 font-bold mt-0.5">{pkg3Sub}</p>
                       </div>
                       <div className="mt-2 pt-1 border-t border-stone-100 flex items-baseline justify-between">
                         <span className="text-xs font-mono font-black text-[#E11D48]">
-                          ৳{(product.price * 3 - 350).toLocaleString()}
+                          ৳{pkg3Price.toLocaleString()}
                         </span>
-                        <span className="text-[10px] text-stone-400 line-through">৳{(product.price * 3).toLocaleString()}</span>
+                        <span className="text-[10px] text-stone-400 line-through">
+                          ৳{(pkg3Price + pkg3Discount).toLocaleString()}
+                        </span>
                       </div>
                     </button>
                   </div>
@@ -2091,9 +2252,11 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                         onClick={() => {
                           const n = Math.max(1, quantity - 1);
                           setQuantity(n);
-                          if (n === 1) setSelectedCombo(1);
-                          else if (n === 2) setSelectedCombo(2);
-                          else if (n >= 3) setSelectedCombo(3);
+                          if (activeOfferMode === 'piece') {
+                            if (n === 1) setSelectedCombo(1);
+                            else if (n === 2) setSelectedCombo(2);
+                            else if (n >= 3) setSelectedCombo(3);
+                          }
                         }}
                         className="px-2.5 py-1 text-stone-700 font-bold hover:bg-stone-100 cursor-pointer"
                       >
@@ -2107,8 +2270,10 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                         onClick={() => {
                           const n = quantity + 1;
                           setQuantity(n);
-                          if (n === 2) setSelectedCombo(2);
-                          else if (n >= 3) setSelectedCombo(3);
+                          if (activeOfferMode === 'piece') {
+                            if (n === 2) setSelectedCombo(2);
+                            else if (n >= 3) setSelectedCombo(3);
+                          }
                         }}
                         className="px-2.5 py-1 text-stone-700 font-bold hover:bg-stone-100 cursor-pointer"
                       >
@@ -2207,167 +2372,6 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               <div className="pt-2 border-t border-stone-100">
                 <GuaranteeBadgesRow />
               </div>
-            </div>
-
-            {/* DIRECT 1-CLICK CASH ON DELIVERY ORDER FORM ON PRODUCT PAGE (অ্যাড ক্যাম্পেইন থেকে আসা কাস্টমারদের ১-ক্লিকে সরাসরি অর্ডার ফর্ম) */}
-            <div
-              id="direct-pdp-order-form"
-              className={`bg-white rounded-2xl border-2 p-4 sm:p-6 shadow-md space-y-3.5 ${
-                isOrganic ? 'border-emerald-300' : 'border-rose-300'
-              }`}
-            >
-              <div
-                className={`p-3 rounded-xl border flex items-center justify-between gap-2 flex-wrap ${
-                  isOrganic
-                    ? 'bg-[#ECFDF5] border-emerald-200'
-                    : 'bg-[#FFF0F3] border-rose-200'
-                }`}
-              >
-                <h3
-                  className={`text-sm sm:text-base font-extrabold flex items-center gap-2 ${
-                    isOrganic ? 'text-emerald-950' : 'text-rose-950'
-                  }`}
-                >
-                  <ShoppingBag
-                    className={`w-4 h-4 shrink-0 ${
-                      isOrganic ? 'text-[#16A34A]' : 'text-[#E11D48]'
-                    }`}
-                  />
-                  <span>অর্ডার করতে নিচের ফর্মটি পূরণ করুন (ক্যাশ অন ডেলিভারি)</span>
-                </h3>
-                <span className="text-[11px] font-bold text-emerald-700 bg-white px-2.5 py-1 rounded-full border border-emerald-200">
-                  ✓ ১ টাকাও অগ্রিম লাগবে না
-                </span>
-              </div>
-
-              {orderError && (
-                <div className="p-2.5 bg-rose-100 border border-rose-300 text-xs font-bold text-rose-900 rounded-xl">
-                  ⚠️ {orderError}
-                </div>
-              )}
-
-              <form onSubmit={handleDirectOrder} className="space-y-3 text-xs sm:text-sm">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-stone-800 font-extrabold mb-1 flex items-center gap-1.5">
-                      <User className="w-3.5 h-3.5 text-[#E11D48]" />
-                      <span>আপনার নাম *</span>
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={customerName}
-                      onChange={(e) => setCustomerName(e.target.value)}
-                      placeholder="আপনার সম্পূর্ণ নাম লিখুন"
-                      className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:border-[#E11D48] focus:bg-white font-medium"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-stone-800 font-extrabold mb-1 flex items-center gap-1.5">
-                      <Phone className="w-3.5 h-3.5 text-[#E11D48]" />
-                      <span>মোবাইল নম্বর (১১ ডিজিট) *</span>
-                    </label>
-                    <input
-                      type="tel"
-                      required
-                      value={customerPhone}
-                      onChange={(e) => setCustomerPhone(e.target.value)}
-                      placeholder="01XXXXXXXXX"
-                      className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:border-[#E11D48] focus:bg-white font-mono font-bold"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-stone-800 font-extrabold mb-1 flex items-center gap-1.5">
-                    <MapPin className="w-3.5 h-3.5 text-[#E11D48]" />
-                    <span>সম্পূর্ণ ডেলিভারি ঠিকানা *</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={customerAddress}
-                    onChange={(e) => setCustomerAddress(e.target.value)}
-                    placeholder="বাসা/রোড, বাজার/এলাকা, থানা ও জেলা লিখুন..."
-                    className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:border-[#E11D48] focus:bg-white"
-                  />
-                </div>
-
-                {/* Delivery Area Selector */}
-                <div className="grid grid-cols-2 gap-2.5">
-                  <button
-                    type="button"
-                    onClick={() => setDeliveryArea('dhaka')}
-                    className={`p-2.5 rounded-xl border-2 text-left transition-all cursor-pointer flex items-center justify-between ${
-                      deliveryArea === 'dhaka'
-                        ? 'border-[#E11D48] bg-[#FFF0F3] text-[#E11D48] font-extrabold'
-                        : 'border-stone-200 bg-stone-50 text-stone-700 font-semibold hover:border-rose-200'
-                    }`}
-                  >
-                    <span className="text-xs font-extrabold">
-                      {deliveryArea === 'dhaka' ? '✓ ' : ''}ঢাকার ভেতরে
-                    </span>
-                    <span className="text-xs font-mono font-black bg-white px-2 py-0.5 rounded border border-rose-200 text-[#E11D48]">
-                      ৳৭০
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setDeliveryArea('outside_dhaka')}
-                    className={`p-2.5 rounded-xl border-2 text-left transition-all cursor-pointer flex items-center justify-between ${
-                      deliveryArea === 'outside_dhaka'
-                        ? 'border-[#E11D48] bg-[#FFF0F3] text-[#E11D48] font-extrabold'
-                        : 'border-stone-200 bg-stone-50 text-stone-700 font-semibold hover:border-rose-200'
-                    }`}
-                  >
-                    <span className="text-xs font-extrabold">
-                      {deliveryArea === 'outside_dhaka' ? '✓ ' : ''}ঢাকার বাইরে
-                    </span>
-                    <span className="text-xs font-mono font-black bg-white px-2 py-0.5 rounded border border-rose-200 text-[#E11D48]">
-                      ৳১২০
-                    </span>
-                  </button>
-                </div>
-
-                {/* Compact Total Summary */}
-                <div
-                  className={`px-3.5 py-2.5 rounded-xl flex items-center justify-between border ${
-                    isOrganic
-                      ? 'bg-[#ECFDF5] border-emerald-200'
-                      : 'bg-[#FFF0F3]/80 border-rose-200'
-                  }`}
-                >
-                  <span className="text-xs font-bold text-stone-800">
-                    মোট বিল ({quantity}টি পণ্য + ডেলিভারি ৳{finalShipping}):
-                  </span>
-                  <span
-                    className={`text-base sm:text-lg font-mono font-black ${
-                      isOrganic ? 'text-[#15803D]' : 'text-[#E11D48]'
-                    }`}
-                  >
-                    ৳{totalPrice.toLocaleString()}
-                  </span>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={isOrdering}
-                  className={`w-full py-3.5 px-5 active:scale-[0.99] disabled:bg-stone-400 text-white rounded-xl text-sm sm:text-base font-extrabold shadow-md transition-all cursor-pointer flex items-center justify-center gap-2 ${
-                    isOrganic
-                      ? 'bg-[#16A34A] hover:bg-[#15803D] ring-2 ring-emerald-300/70'
-                      : 'bg-gradient-to-r from-[#E11D48] via-[#F43F5E] to-[#BE123C] hover:from-[#BE123C] hover:to-[#9F1239] ring-2 ring-rose-300/70'
-                  }`}
-                >
-                  <ShoppingBag className="w-5 h-5" />
-                  <span>
-                    {isOrdering
-                      ? 'অর্ডার প্রসেস হচ্ছে...'
-                      : `অর্ডার কনফার্ম করুন — ৳${totalPrice.toLocaleString()}`}
-                  </span>
-                </button>
-              </form>
             </div>
 
             {/* Dedicated Reusable 'Before & After' Product Comparison Slider */}

@@ -132,6 +132,24 @@ export interface ProductVariant {
   sizes?: string[];
 }
 
+export interface ProductComboConfig {
+  offerMode?: 'piece' | 'size';
+  pkg1Title?: string;
+  pkg1Sub?: string;
+  pkg1Price?: number;
+  pkg2Title?: string;
+  pkg2Sub?: string;
+  pkg2Price?: number;
+  pkg2Discount?: number;
+  pkg2Badge?: string;
+  pkg3Title?: string;
+  pkg3Sub?: string;
+  pkg3Price?: number;
+  pkg3Discount?: number;
+  pkg3Badge?: string;
+  pkg3FreeDelivery?: boolean;
+}
+
 export interface Product {
   id: string;
   name: string;
@@ -149,6 +167,8 @@ export interface Product {
   afterLabel?: string;
   beforeAfterTitle?: string;
   variants: ProductVariant;
+  offerMode?: 'piece' | 'size';
+  comboConfig?: ProductComboConfig;
   inStock: boolean;
   stock?: number;
   costPrice?: number;
