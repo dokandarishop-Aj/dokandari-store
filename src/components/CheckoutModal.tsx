@@ -43,7 +43,13 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [customerName, setCustomerName] = useState(initialCustomerName);
   const [customerPhone, setCustomerPhone] = useState(userProfile?.phone || '');
   const [customerAddress, setCustomerAddress] = useState(userProfile?.address || '');
-  const [customerScreenshot, setCustomerScreenshot] = useState<string>('');
+  const [customerScreenshot, setCustomerScreenshot] = useState<string>(() => {
+    try {
+      return sessionStorage.getItem('dkd_custom_screenshot_latest') || '';
+    } catch {
+      return '';
+    }
+  });
   const [isUploadingScreenshot, setIsUploadingScreenshot] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -57,9 +63,14 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     if (!file) return;
     setIsUploadingScreenshot(true);
     try {
-      const compressed = await compressImageFileToDataUrl(file, 640, 0.72);
+      const compressed = await compressImageFileToDataUrl(file, 960, 0.78);
       if (compressed) {
         setCustomerScreenshot(compressed);
+        try {
+          sessionStorage.setItem('dkd_custom_screenshot_latest', compressed);
+        } catch {
+          // ignore
+        }
       }
     } catch (err) {
       console.warn('Screenshot upload note:', err);
@@ -74,6 +85,14 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     if (isOpen && items.length > 0) {
       setCompletedOrder(null);
       setErrorMsg('');
+      if (!customerScreenshot) {
+        try {
+          const saved = sessionStorage.getItem('dkd_custom_screenshot_latest');
+          if (saved) setCustomerScreenshot(saved);
+        } catch {
+          // ignore
+        }
+      }
       trackPixelInitiateCheckout(items, currentTotal);
     }
   }, [isOpen, items.length]);

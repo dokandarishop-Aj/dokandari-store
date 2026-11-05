@@ -3247,15 +3247,78 @@ export function removeDeletedOrderIds(orderIds: string[]): void {
 
 export function syncOrdersToLocalCache(ordersList: Order[]): void {
   if (!Array.isArray(ordersList)) return;
+  const sorted = [...ordersList]
+    .filter((o) => o && o.id)
+    .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
   try {
-    const sorted = [...ordersList]
-      .filter((o) => o && o.id)
-      .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
     const json = JSON.stringify(sorted.slice(0, 500));
     localStorage.setItem(LS_ORDERS_BACKUP_KEY, json);
     localStorage.setItem('dokandari_orders_v1', json);
   } catch {
-    // ignore
+    // Fallback if localStorage quota is reached when many orders contain high-res screenshots
+    try {
+      const compact = sorted.slice(0, 300).map((o, idx) => ({
+        ...o,
+        customerScreenshot: idx < 25 ? o.customerScreenshot : undefined,
+      }));
+      const json = JSON.stringify(compact);
+      localStorage.setItem(LS_ORDERS_BACKUP_KEY, json);
+      localStorage.setItem('dokandari_orders_v1', json);
+    } catch {
+      // ignore
+    }
+  }
+}
+
+/**
+ * Triggers a direct 1-click file download of the customer's uploaded profile/design screenshot
+ * for printing and order fulfillment (works in both iframe preview and live domain).
+ */
+export async function downloadCustomerScreenshot(
+  screenshotUrl: string,
+  orderId: string,
+  customerName?: string
+): Promise<void> {
+  if (!screenshotUrl) return;
+  const safeName = String(customerName || 'customer')
+    .replace(/[^a-zA-Z0-9\u0980-\u09FF_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 30);
+  const fileName = `dokandari-order-${orderId || 'custom'}-${safeName || 'screenshot'}.jpg`;
+
+  try {
+    let blob: Blob;
+    if (screenshotUrl.startsWith('data:')) {
+      const parts = screenshotUrl.split(',');
+      const mimeMatch = parts[0]?.match(/:(.*?);/);
+      const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+      const byteString = atob(parts[1] || '');
+      const ab = new ArrayBuffer(byteString.length);
+      const ia = new Uint8Array(ab);
+      for (let i = 0; i < byteString.length; i++) {
+        ia[i] = byteString.charCodeAt(i);
+      }
+      blob = new Blob([ab], { type: mime });
+    } else {
+      const response = await fetch(screenshotUrl);
+      blob = await response.blob();
+    }
+
+    const blobUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+  } catch {
+    const link = document.createElement('a');
+    link.href = screenshotUrl;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   }
 }
 
@@ -3288,16 +3351,27 @@ export function mergeAndPersistAllOrders(sources: {
   }
   for (const srvOrd of serverList) {
     if (srvOrd && srvOrd.id && !deletedIds.has(srvOrd.id)) {
-      orderMap.set(srvOrd.id, srvOrd);
+      const existing = orderMap.get(srvOrd.id);
+      orderMap.set(srvOrd.id, {
+        ...(existing || {}),
+        ...srvOrd,
+        customerScreenshot: srvOrd.customerScreenshot || existing?.customerScreenshot,
+      });
     }
   }
   for (const fsOrd of firestoreList) {
     if (fsOrd && fsOrd.id && !deletedIds.has(fsOrd.id)) {
       const existing = orderMap.get(fsOrd.id);
+      // Prefer data:image or https screenshot over broken local /uploads path
+      const bestScreenshot =
+        fsOrd.customerScreenshot &&
+        !fsOrd.customerScreenshot.startsWith('/uploads/')
+          ? fsOrd.customerScreenshot
+          : existing?.customerScreenshot || fsOrd.customerScreenshot;
       orderMap.set(fsOrd.id, {
         ...(existing || {}),
         ...fsOrd,
-        customerScreenshot: fsOrd.customerScreenshot || existing?.customerScreenshot,
+        customerScreenshot: bestScreenshot,
       });
     }
   }
@@ -3315,8 +3389,10 @@ export async function saveOrderPersisted(order: Order): Promise<Order> {
   // Ensure order is not marked as deleted if re-saved
   removeDeletedOrderIds([order.id]);
 
+  // Keep self-contained data:image/jpeg or https URL directly in Firestore (< 700KB) for 100% lifetime persistence
+  // across all servers, devices, and deployments (never replace with ephemeral /uploads/ path).
   let safeScreenshot = order.customerScreenshot;
-  if (typeof safeScreenshot === 'string' && safeScreenshot.startsWith('data:image/')) {
+  if (typeof safeScreenshot === 'string' && safeScreenshot.length > 750000) {
     try {
       safeScreenshot = await uploadBannerImageToServer(
         safeScreenshot,

@@ -156,6 +156,7 @@ import {
   deleteCourierReturnPersisted,
   restoreAllRealCatalogProducts,
   saveAllStoreDataLifetime,
+  downloadCustomerScreenshot,
 } from '../lib/storeSync';
 import {
   OfficialWhatsAppIcon,
@@ -497,6 +498,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [editOrderNotes, setEditOrderNotes] = useState('');
   const [editOrderSaving, setEditOrderSaving] = useState(false);
   const [editOrderAddProdId, setEditOrderAddProdId] = useState('');
+  const [selectedOrderScreenshotModal, setSelectedOrderScreenshotModal] = useState<Order | null>(null);
 
   // Business Expense Edit State
   const [editingExpense, setEditingExpense] = useState<BusinessExpense | null>(null);
@@ -5607,21 +5609,35 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                 {o.items.map((i) => `${i.quantity}x ${i.name}`).join(', ')}
                               </div>
                               {o.customerScreenshot && (
-                                <div className="flex items-center gap-2 pt-1">
-                                  <a
-                                    href={o.customerScreenshot}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 text-[10px] font-extrabold transition-colors"
-                                    title="কাস্টমারের পাঠানো স্ক্রিনশট বড় করে দেখুন"
+                                <div className="flex items-center gap-1.5 pt-1 flex-wrap">
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedOrderScreenshotModal(o)}
+                                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-900 text-[10px] font-extrabold transition-colors cursor-pointer"
+                                    title="কাস্টমারের পাঠানো স্ক্রিনশট ফুল ভিউতে দেখুন"
                                   >
                                     <img
                                       src={o.customerScreenshot}
                                       alt="Customer Screenshot"
-                                      className="w-6 h-6 rounded object-cover border border-emerald-300"
+                                      className="w-6 h-6 rounded object-cover border border-emerald-400"
                                     />
-                                    <span>📸 কাস্টমার স্ক্রিনশট যুক্ত</span>
-                                  </a>
+                                    <span>🔍 স্ক্রিনশট ফুল ভিউ</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      downloadCustomerScreenshot(
+                                        o.customerScreenshot!,
+                                        o.id,
+                                        o.customer.name
+                                      )
+                                    }
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#E11D48] hover:bg-[#BE123C] text-white text-[10px] font-extrabold shadow-2xs transition-colors cursor-pointer"
+                                    title="প্রিন্ট করার জন্য কাস্টমারের স্ক্রিনশট ডাউনলোড করুন"
+                                  >
+                                    <Download className="w-3 h-3" />
+                                    <span>ডাউনলোড</span>
+                                  </button>
                                 </div>
                               )}
                             </td>
@@ -5836,21 +5852,42 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         </span>
                       </div>
                       {selectedOrderForView.customerScreenshot && (
-                        <div className="pt-2 border-t border-stone-200">
-                          <span className="text-[10px] text-stone-500 font-bold block mb-1">
-                            কাস্টমার প্রদত্ত স্ক্রিনশট:
-                          </span>
-                          <a
-                            href={selectedOrderForView.customerScreenshot}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
-                            <img
-                              src={selectedOrderForView.customerScreenshot}
-                              alt="Screenshot"
-                              className="w-full h-24 object-cover rounded-xl border border-stone-300 hover:opacity-90"
-                            />
-                          </a>
+                        <div className="pt-2 border-t border-stone-200 space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[10.5px] text-emerald-800 font-extrabold block">
+                              📷 কাস্টমার প্রদত্ত পেজ/প্রোফাইল স্ক্রিনশট:
+                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setSelectedOrderScreenshotModal(selectedOrderForView)}
+                                className="px-2 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-[10px] font-extrabold cursor-pointer"
+                              >
+                                🔍 ফুল ভিউ
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  downloadCustomerScreenshot(
+                                    selectedOrderForView.customerScreenshot!,
+                                    selectedOrderForView.id,
+                                    selectedOrderForView.customer.name
+                                  )
+                                }
+                                className="px-2.5 py-1 rounded-lg bg-[#E11D48] hover:bg-[#BE123C] text-white text-[10px] font-extrabold flex items-center gap-1 cursor-pointer"
+                              >
+                                <Download className="w-3 h-3" />
+                                <span>ডাউনলোড</span>
+                              </button>
+                            </div>
+                          </div>
+                          <img
+                            src={selectedOrderForView.customerScreenshot}
+                            alt="Screenshot"
+                            onClick={() => setSelectedOrderScreenshotModal(selectedOrderForView)}
+                            className="w-full h-32 object-contain bg-stone-950 rounded-xl border border-stone-300 cursor-pointer hover:opacity-95"
+                            title="বড় করে দেখতে ক্লিক করুন"
+                          />
                         </div>
                       )}
                     </div>
@@ -5966,6 +6003,84 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       className="px-4 py-2 rounded-xl border border-stone-300 text-stone-700 font-bold text-xs cursor-pointer"
                     >
                       বন্ধ করুন
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* FULL-SCREEN CUSTOMER SCREENSHOT LIGHTBOX & DIRECT DOWNLOAD MODAL */}
+            {selectedOrderScreenshotModal && selectedOrderScreenshotModal.customerScreenshot && (
+              <div
+                onClick={() => setSelectedOrderScreenshotModal(null)}
+                className="fixed inset-0 z-50 bg-stone-950/85 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 animate-in fade-in"
+              >
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  className="bg-white rounded-3xl border-2 border-rose-200 max-w-3xl w-full p-4 sm:p-6 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto"
+                >
+                  <div className="flex items-center justify-between gap-3 border-b border-stone-200 pb-3 flex-wrap">
+                    <div>
+                      <h3 className="text-sm sm:text-base font-extrabold text-stone-900 flex items-center gap-2">
+                        <span>📷 কাস্টমার প্রোফাইল / কাস্টম ডিজাইন স্ক্রিনশট (ফুল ভিউ)</span>
+                      </h3>
+                      <p className="text-xs text-stone-600 mt-0.5">
+                        অর্ডার: <strong className="font-mono text-[#E11D48]">#{selectedOrderScreenshotModal.id}</strong> | কাস্টমার:{' '}
+                        <strong>{selectedOrderScreenshotModal.customer.name}</strong> ({selectedOrderScreenshotModal.customer.phone})
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          downloadCustomerScreenshot(
+                            selectedOrderScreenshotModal.customerScreenshot!,
+                            selectedOrderScreenshotModal.id,
+                            selectedOrderScreenshotModal.customer.name
+                          )
+                        }
+                        className="px-4 py-2 rounded-xl bg-[#16A34A] hover:bg-[#15803D] text-white text-xs sm:text-sm font-extrabold flex items-center gap-1.5 shadow-sm cursor-pointer"
+                      >
+                        <Download className="w-4 h-4" />
+                        <span>⬇️ স্ক্রিনশট ডাউনলোড করুন (প্রিন্টের জন্য)</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setSelectedOrderScreenshotModal(null)}
+                        className="p-2 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-700 cursor-pointer"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl bg-stone-950 p-3 flex items-center justify-center max-h-[70vh] overflow-auto">
+                    <img
+                      src={selectedOrderScreenshotModal.customerScreenshot}
+                      alt={`Order ${selectedOrderScreenshotModal.id} Customer Screenshot`}
+                      className="max-w-full max-h-[66vh] object-contain rounded-xl shadow-lg"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3 pt-1 flex-wrap text-xs">
+                    <span className="text-emerald-700 font-bold">
+                      ✓ এই স্ক্রিনশটটি ফায়ারবেস ডাটাবেজে (Firestore) লাইফটাইম সেভ রয়েছে
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        downloadCustomerScreenshot(
+                          selectedOrderScreenshotModal.customerScreenshot!,
+                          selectedOrderScreenshotModal.id,
+                          selectedOrderScreenshotModal.customer.name
+                        )
+                      }
+                      className="px-5 py-2.5 rounded-xl bg-[#E11D48] hover:bg-[#BE123C] text-white font-extrabold flex items-center gap-2 shadow-sm cursor-pointer"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>অরিজিনাল ফাইল ডাউনলোড করুন</span>
                     </button>
                   </div>
                 </div>

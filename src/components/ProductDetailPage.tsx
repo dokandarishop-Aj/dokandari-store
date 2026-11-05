@@ -182,7 +182,30 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   const [customerPhone, setCustomerPhone] = useState(userProfile?.phone || '');
   const [customerAddress, setCustomerAddress] = useState(userProfile?.address || '');
   const [deliveryArea, setDeliveryArea] = useState<'dhaka' | 'outside_dhaka'>('dhaka');
-  const [customerScreenshot, setCustomerScreenshot] = useState<string>('');
+  const [customerScreenshot, setCustomerScreenshot] = useState<string>(() => {
+    try {
+      return (
+        sessionStorage.getItem(`dkd_custom_screenshot_${product.id}`) ||
+        sessionStorage.getItem('dkd_custom_screenshot_latest') ||
+        ''
+      );
+    } catch {
+      return '';
+    }
+  });
+  const [customerScreenshotName, setCustomerScreenshotName] = useState<string>(() => {
+    try {
+      return (
+        sessionStorage.getItem(`dkd_custom_screenshot_name_${product.id}`) ||
+        (sessionStorage.getItem(`dkd_custom_screenshot_${product.id}`)
+          ? 'profile-screenshot.jpg'
+          : '')
+      );
+    } catch {
+      return '';
+    }
+  });
+  const [previewScreenshotModal, setPreviewScreenshotModal] = useState(false);
   const [isUploadingScreenshot, setIsUploadingScreenshot] = useState(false);
   const [isOrdering, setIsOrdering] = useState(false);
   const [orderError, setOrderError] = useState('');
@@ -192,15 +215,37 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     if (!file) return;
     setIsUploadingScreenshot(true);
     try {
-      const compressed = await compressImageFileToDataUrl(file, 640, 0.72);
+      const fileName = file.name || 'custom-profile-screenshot.jpg';
+      // High-resolution printable quality (960px, 0.78 JPEG ~90-150KB, fits inside Firestore 1MB document for lifetime persistence)
+      const compressed = await compressImageFileToDataUrl(file, 960, 0.78);
       if (compressed) {
         setCustomerScreenshot(compressed);
+        setCustomerScreenshotName(fileName);
+        try {
+          sessionStorage.setItem(`dkd_custom_screenshot_${product.id}`, compressed);
+          sessionStorage.setItem(`dkd_custom_screenshot_name_${product.id}`, fileName);
+          sessionStorage.setItem('dkd_custom_screenshot_latest', compressed);
+        } catch {
+          // ignore
+        }
       }
     } catch (err) {
       console.warn('Customer screenshot upload note:', err);
     } finally {
       setIsUploadingScreenshot(false);
       e.target.value = '';
+    }
+  };
+
+  const handleClearCustomerScreenshot = () => {
+    setCustomerScreenshot('');
+    setCustomerScreenshotName('');
+    try {
+      sessionStorage.removeItem(`dkd_custom_screenshot_${product.id}`);
+      sessionStorage.removeItem(`dkd_custom_screenshot_name_${product.id}`);
+      sessionStorage.removeItem('dkd_custom_screenshot_latest');
+    } catch {
+      // ignore
     }
   };
 
@@ -1141,6 +1186,26 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                   {completedOrder.customer.address} ({completedOrder.customer.district})
                 </div>
               </div>
+
+              {completedOrder.customerScreenshot && (
+                <div className="pt-2.5 border-t border-stone-200 flex items-center justify-between gap-3 flex-wrap">
+                  <div className="flex items-center gap-2.5">
+                    <img
+                      src={completedOrder.customerScreenshot}
+                      alt="কাস্টমার প্রোফাইল স্ক্রিনশট"
+                      className="w-12 h-12 rounded-xl object-cover border-2 border-emerald-400 shrink-0"
+                    />
+                    <div>
+                      <span className="text-xs font-extrabold text-emerald-800 block">
+                        ✅ আপনার পেজ/প্রোফাইল স্ক্রিনশট সফলভাবে অর্ডারের সাথে জমা হয়েছে!
+                      </span>
+                      <span className="text-[10.5px] text-stone-500">
+                        আমাদের প্রিন্টিং টিম আপনার দেওয়া ডিজাইন অনুযায়ী প্রোডাক্ট প্রস্তুত করবে।
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* 4-Column Guarantee Badges on Thank You Page */}
@@ -1542,47 +1607,22 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                   </button>
                 </div>
 
-                {/* Customer Screenshot Upload Box (Sent Directly with Order to Admin Panel) */}
-                <div className="p-3 rounded-xl bg-stone-50 border border-dashed border-rose-300 flex items-center justify-between gap-3 flex-wrap">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    {customerScreenshot ? (
-                      <img
-                        src={customerScreenshot}
-                        alt="কাস্টমার স্ক্রিনশট"
-                        className="w-12 h-12 rounded-lg object-cover border border-rose-300 shrink-0"
-                      />
-                    ) : (
-                      <div className="w-10 h-10 rounded-lg bg-rose-100 text-[#E11D48] flex items-center justify-center shrink-0">
-                        <Upload className="w-4 h-4" />
-                      </div>
-                    )}
-                    <div className="min-w-0">
-                      <p className="text-xs font-extrabold text-stone-900">
+                {/* Customer Profile / Custom Design Screenshot Upload Box on Order Form */}
+                <div className="p-3.5 rounded-2xl bg-[#FFFDF9] border-2 border-dashed border-stone-800 space-y-2.5">
+                  <label className="block text-xs sm:text-sm font-extrabold text-stone-900 flex items-center gap-1.5">
+                    <span>📷 আপনার পেজ/প্রোফাইল স্ক্রিনশট বা কাস্টম ডিজাইনের ছবি আপলোড করুন:</span>
+                  </label>
+
+                  <div className="flex items-center justify-between gap-2.5 flex-wrap">
+                    <label className="inline-flex items-center gap-2.5 cursor-pointer text-xs">
+                      <span className="px-3 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-900 font-bold rounded-lg border border-stone-300 transition-colors">
+                        {isUploadingScreenshot ? 'আপলোড হচ্ছে...' : 'Choose File'}
+                      </span>
+                      <span className="text-stone-600 font-medium truncate max-w-[200px] sm:max-w-xs">
                         {customerScreenshot
-                          ? '✅ স্ক্রিনশট যুক্ত হয়েছে (অ্যাডমিন প্যানেলে অর্ডারের সাথে যাবে)'
-                          : '📸 প্রোডাক্ট বা অর্ডারের স্ক্রিনশট দিন (ঐচ্ছিক)'}
-                      </p>
-                      <p className="text-[10.5px] text-stone-500">
-                        স্ক্রিনশট দিলে তা সরাসরি অ্যাডমিন প্যানেলে আপনার অর্ডারের সাথে যুক্ত হবে
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {customerScreenshot && (
-                      <button
-                        type="button"
-                        onClick={() => setCustomerScreenshot('')}
-                        className="px-2.5 py-1.5 text-[11px] font-bold text-rose-700 bg-rose-100 rounded-lg cursor-pointer"
-                      >
-                        মুছুন
-                      </button>
-                    )}
-                    <label className="px-3 py-1.5 bg-white hover:bg-rose-50 text-[#E11D48] border border-rose-300 rounded-lg text-xs font-extrabold cursor-pointer transition-colors shrink-0">
-                      {isUploadingScreenshot
-                        ? 'আপলোড হচ্ছে...'
-                        : customerScreenshot
-                        ? 'পরিবর্তন করুন'
-                        : '+ স্ক্রিনশট দিন'}
+                          ? customerScreenshotName || 'স্ক্রিনশট যুক্ত হয়েছে ✓'
+                          : 'No file chosen'}
+                      </span>
                       <input
                         type="file"
                         accept="image/*"
@@ -1590,7 +1630,43 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                         className="hidden"
                       />
                     </label>
+
+                    {customerScreenshot && (
+                      <div className="flex items-center gap-2">
+                        <img
+                          src={customerScreenshot}
+                          alt="কাস্টমার স্ক্রিনশট"
+                          onClick={() => setPreviewScreenshotModal(true)}
+                          className="w-11 h-11 rounded-lg object-cover border-2 border-[#E11D48] cursor-pointer shrink-0"
+                          title="বড় করে দেখতে ক্লিক করুন"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setPreviewScreenshotModal(true)}
+                          className="px-2.5 py-1 text-[11px] font-extrabold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg cursor-pointer"
+                        >
+                          🔍 ফুল ভিউ
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleClearCustomerScreenshot}
+                          className="px-2.5 py-1 text-[11px] font-bold text-rose-700 bg-rose-100 rounded-lg cursor-pointer"
+                        >
+                          ✕ মুছুন
+                        </button>
+                      </div>
+                    )}
                   </div>
+
+                  {customerScreenshot ? (
+                    <p className="text-[11px] font-bold text-emerald-700">
+                      ✅ আপনার স্ক্রিনশট যুক্ত হয়েছে — অর্ডার কনফার্ম করলে এটি সরাসরি আমাদের অ্যাডমিন প্যানেলে প্রিন্টিংয়ের জন্য চলে যাবে।
+                    </p>
+                  ) : (
+                    <p className="text-[10.5px] text-stone-500">
+                      কাস্টমাইজড মিরর বা কাস্টম প্রোডাক্টের জন্য আপনার ফেসবুক/ইনস্টাগ্রাম/টিকটক প্রোফাইল স্ক্রিনশট বা লোগো এখানে দিন।
+                    </p>
+                  )}
                 </div>
 
                 {/* Compact Total Summary */}
@@ -1634,6 +1710,39 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Full-Screen Preview Modal for Customer Uploaded Screenshot */}
+        {previewScreenshotModal && customerScreenshot && (
+          <div
+            onClick={() => setPreviewScreenshotModal(false)}
+            className="fixed inset-0 z-50 bg-stone-950/80 backdrop-blur-xs flex items-center justify-center p-4"
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white rounded-3xl border border-rose-200 max-w-lg w-full p-4 sm:p-5 shadow-2xl space-y-3"
+            >
+              <div className="flex items-center justify-between border-b border-stone-200 pb-2.5">
+                <h4 className="text-xs sm:text-sm font-extrabold text-stone-900">
+                  📷 আপনার আপলোডকৃত পেজ/প্রোফাইল স্ক্রিনশট (ফুল ভিউ)
+                </h4>
+                <button
+                  type="button"
+                  onClick={() => setPreviewScreenshotModal(false)}
+                  className="px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-bold cursor-pointer"
+                >
+                  ✕ বন্ধ করুন
+                </button>
+              </div>
+              <div className="max-h-[70vh] overflow-auto rounded-2xl bg-stone-950 flex items-center justify-center p-2">
+                <img
+                  src={customerScreenshot}
+                  alt="কাস্টমার স্ক্রিনশট ফুল ভিউ"
+                  className="max-w-full max-h-[65vh] object-contain rounded-xl"
+                />
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -2067,25 +2176,20 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                   </div>
                 )}
 
-                {/* 3 HIGH-CONVERSION COMBO / SIZE PACK CARDS (Supports both Piece Mode & Size Mode) */}
-                <div className="space-y-2.5 pt-1">
+                {/* 3 HIGH-CONVERSION SPECIAL OFFER / COMBO CARDS (Matching Screenshot Design) */}
+                <div className="p-3 sm:p-4 rounded-2xl bg-rose-50/40 border border-rose-200/80 space-y-3">
                   <div className="flex items-center justify-between flex-wrap gap-2">
-                    <span className="text-xs font-black text-stone-900 flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-[#E11D48] animate-ping" />
-                      <span>
-                        {activeOfferMode === 'size'
-                          ? 'পছন্দের সাইজ ও অফার প্যাকেজ নির্বাচন করুন:'
-                          : 'অফার ও কম্বো প্যাকেজ নির্বাচন করুন:'}
-                      </span>
+                    <span className="text-xs sm:text-sm font-black text-stone-900 flex items-center gap-1.5">
+                      <span>🔥 স্পেশাল অফার (বেশি কিনুন, বেশি বাঁচান!)</span>
                     </span>
-                    <span className="text-[10px] font-bold text-[#E11D48] bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full">
-                      🔥 ৳{pkg3Discount} পর্যন্ত সাশ্রয় + ফ্রি ডেলিভারি!
+                    <span className="text-[10px] font-extrabold text-[#E11D48] bg-rose-100/90 border border-rose-200 px-2.5 py-0.5 rounded-full">
+                      সীমিত সময়ের ধামাকা
                     </span>
                   </div>
 
                   {/* Admin Real-Time Offer Mode Toggle (Piece vs Size) */}
                   {isAdmin && (
-                    <div className="p-2 rounded-xl bg-rose-50/80 border border-rose-200 flex items-center justify-between gap-2 flex-wrap">
+                    <div className="p-2 rounded-xl bg-white border border-rose-200 flex items-center justify-between gap-2 flex-wrap">
                       <span className="text-[11px] font-extrabold text-rose-950">
                         ⚙️ অ্যাডমিন অফার মোড (রিয়েল-টাইম সেভ):
                       </span>
@@ -2096,7 +2200,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                           className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition-all cursor-pointer ${
                             activeOfferMode === 'piece'
                               ? 'bg-[#E11D48] text-white shadow-2xs'
-                              : 'bg-white text-stone-700 border border-stone-200 hover:border-rose-300'
+                              : 'bg-stone-50 text-stone-700 border border-stone-200 hover:border-rose-300'
                           }`}
                         >
                           📦 পিস অনুযায়ী (১, ২, ৩ পিস)
@@ -2107,7 +2211,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                           className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition-all cursor-pointer ${
                             activeOfferMode === 'size'
                               ? 'bg-[#E11D48] text-white shadow-2xs'
-                              : 'bg-white text-stone-700 border border-stone-200 hover:border-rose-300'
+                              : 'bg-stone-50 text-stone-700 border border-stone-200 hover:border-rose-300'
                           }`}
                         >
                           📏 সাইজ অনুযায়ী (Small, Medium, Full Body)
@@ -2116,137 +2220,162 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                     </div>
                   )}
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div className="grid grid-cols-3 gap-2 sm:gap-3">
                     {/* Pack 1 */}
                     <button
                       type="button"
                       onClick={() => handleSelectCombo(1)}
-                      className={`p-2.5 rounded-xl border-2 text-left transition-all cursor-pointer relative flex flex-col justify-between ${
+                      className={`p-2.5 sm:p-3.5 rounded-2xl border-2 text-center transition-all cursor-pointer flex flex-col items-center justify-between gap-1.5 ${
                         selectedCombo === 1
                           ? isOrganic
-                            ? 'border-[#16A34A] bg-[#F0FDF4] shadow-xs ring-1 ring-emerald-300'
-                            : 'border-[#E11D48] bg-rose-50/60 shadow-xs ring-1 ring-rose-300'
-                          : 'border-stone-200 bg-white hover:border-stone-300'
+                            ? 'border-[#16A34A] bg-white shadow-sm ring-2 ring-emerald-200'
+                            : 'border-[#E11D48] bg-white shadow-sm ring-2 ring-rose-200'
+                          : 'border-rose-100 bg-white/90 hover:border-rose-300'
                       }`}
                     >
-                      <div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-extrabold text-stone-900">{pkg1Title}</span>
-                          <span
-                            className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                              selectedCombo === 1
-                                ? isOrganic
-                                  ? 'border-[#16A34A] bg-[#16A34A]'
-                                  : 'border-[#E11D48] bg-[#E11D48]'
-                                : 'border-stone-300 bg-white'
-                            }`}
-                          >
-                            {selectedCombo === 1 && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
-                          </span>
-                        </div>
-                        <p className="text-[10px] text-stone-500 font-medium mt-0.5">{pkg1Sub}</p>
-                      </div>
-                      <div className="mt-2 pt-1 border-t border-stone-100 flex items-baseline justify-between">
-                        <span className="text-xs font-mono font-black text-stone-900">
-                          ৳{pkg1Price.toLocaleString()}
-                        </span>
-                        <span className="text-[10px] text-stone-500 font-semibold">
-                          {activeOfferMode === 'size' ? 'রেগুলার' : '১ পিস'}
-                        </span>
-                      </div>
+                      <span className="px-2 py-0.5 rounded-full bg-stone-100 text-stone-700 text-[9.5px] sm:text-[10px] font-extrabold">
+                        ১ পিস প্যাক
+                      </span>
+                      <span className="text-xs sm:text-sm font-black text-stone-900 leading-tight">
+                        {activeOfferMode === 'size' ? pkg1Title.split('(')[0].trim() : pkg1Title}
+                      </span>
+                      <span className="text-sm sm:text-lg font-mono font-black text-stone-900">
+                        ৳{pkg1Price.toLocaleString()}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md bg-stone-100 text-stone-600 text-[9.5px] sm:text-[10px] font-bold">
+                        রেগুলার
+                      </span>
                     </button>
 
                     {/* Pack 2 */}
                     <button
                       type="button"
                       onClick={() => handleSelectCombo(2)}
-                      className={`p-2.5 rounded-xl border-2 text-left transition-all cursor-pointer relative flex flex-col justify-between ${
+                      className={`p-2.5 sm:p-3.5 rounded-2xl border-2 text-center transition-all cursor-pointer flex flex-col items-center justify-between gap-1.5 ${
                         selectedCombo === 2
                           ? isOrganic
-                            ? 'border-[#16A34A] bg-[#F0FDF4] shadow-xs ring-2 ring-emerald-400'
-                            : 'border-[#E11D48] bg-rose-50/70 shadow-xs ring-2 ring-rose-400'
-                          : 'border-stone-200 bg-white hover:border-stone-300'
+                            ? 'border-[#16A34A] bg-white shadow-sm ring-2 ring-emerald-300'
+                            : 'border-[#E11D48] bg-white shadow-sm ring-2 ring-rose-300'
+                          : 'border-rose-100 bg-white/90 hover:border-rose-300'
                       }`}
                     >
-                      <span className="absolute -top-2 right-2 px-1.5 py-0.2 rounded-md bg-amber-500 text-stone-950 text-[9px] font-black uppercase tracking-wide shadow-2xs">
-                        🔥 সবচেয়ে জনপ্রিয়
+                      <span className="px-2 py-0.5 rounded-full bg-[#E11D48] text-white text-[9.5px] sm:text-[10px] font-extrabold shadow-2xs">
+                        সবচেয়ে জনপ্রিয়
                       </span>
-                      <div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-extrabold text-stone-900">{pkg2Title}</span>
-                          <span
-                            className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                              selectedCombo === 2
-                                ? isOrganic
-                                  ? 'border-[#16A34A] bg-[#16A34A]'
-                                  : 'border-[#E11D48] bg-[#E11D48]'
-                                : 'border-stone-300 bg-white'
-                            }`}
-                          >
-                            {selectedCombo === 2 && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
-                          </span>
-                        </div>
-                        <p className="text-[10px] text-emerald-700 font-bold mt-0.5">{pkg2Sub}</p>
-                      </div>
-                      <div className="mt-2 pt-1 border-t border-stone-100 flex items-baseline justify-between">
-                        <span className="text-xs font-mono font-black text-[#E11D48]">
-                          ৳{pkg2Price.toLocaleString()}
-                        </span>
-                        <span className="text-[10px] text-stone-400 line-through">
-                          ৳{(pkg2Price + pkg2Discount).toLocaleString()}
-                        </span>
-                      </div>
+                      <span className="text-xs sm:text-sm font-black text-stone-900 leading-tight">
+                        {activeOfferMode === 'size' ? pkg2Title.split('(')[0].trim() : pkg2Title}
+                      </span>
+                      <span className="text-sm sm:text-lg font-mono font-black text-[#E11D48]">
+                        ৳{pkg2Price.toLocaleString()}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 text-[9.5px] sm:text-[10px] font-extrabold">
+                        সাশ্রয় ৳{pkg2Discount}
+                      </span>
                     </button>
 
                     {/* Pack 3 */}
                     <button
                       type="button"
                       onClick={() => handleSelectCombo(3)}
-                      className={`p-2.5 rounded-xl border-2 text-left transition-all cursor-pointer relative flex flex-col justify-between ${
+                      className={`p-2.5 sm:p-3.5 rounded-2xl border-2 text-center transition-all cursor-pointer flex flex-col items-center justify-between gap-1.5 ${
                         selectedCombo === 3
                           ? isOrganic
-                            ? 'border-[#16A34A] bg-[#F0FDF4] shadow-xs ring-2 ring-emerald-500'
-                            : 'border-[#E11D48] bg-rose-50/80 shadow-xs ring-2 ring-rose-500'
-                          : 'border-stone-200 bg-white hover:border-stone-300'
+                            ? 'border-[#16A34A] bg-white shadow-sm ring-2 ring-emerald-400'
+                            : 'border-[#E11D48] bg-white shadow-sm ring-2 ring-rose-400'
+                          : 'border-rose-100 bg-white/90 hover:border-rose-300'
                       }`}
                     >
-                      <span className="absolute -top-2 right-2 px-1.5 py-0.2 rounded-md bg-emerald-600 text-white text-[9px] font-black uppercase tracking-wide shadow-2xs animate-pulse">
-                        🚚 ফ্রি ডেলিভারি!
+                      <span className="px-2 py-0.5 rounded-full bg-[#16A34A] text-white text-[9.5px] sm:text-[10px] font-extrabold shadow-2xs">
+                        🚚 ফ্রি ডেলিভারি
                       </span>
-                      <div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-extrabold text-stone-900">{pkg3Title}</span>
-                          <span
-                            className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                              selectedCombo === 3
-                                ? isOrganic
-                                  ? 'border-[#16A34A] bg-[#16A34A]'
-                                  : 'border-[#E11D48] bg-[#E11D48]'
-                                : 'border-stone-300 bg-white'
-                            }`}
-                          >
-                            {selectedCombo === 3 && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
-                          </span>
-                        </div>
-                        <p className="text-[10px] text-emerald-700 font-bold mt-0.5">{pkg3Sub}</p>
-                      </div>
-                      <div className="mt-2 pt-1 border-t border-stone-100 flex items-baseline justify-between">
-                        <span className="text-xs font-mono font-black text-[#E11D48]">
-                          ৳{pkg3Price.toLocaleString()}
-                        </span>
-                        <span className="text-[10px] text-stone-400 line-through">
-                          ৳{(pkg3Price + pkg3Discount).toLocaleString()}
-                        </span>
-                      </div>
+                      <span className="text-xs sm:text-sm font-black text-stone-900 leading-tight">
+                        {activeOfferMode === 'size' ? pkg3Title.split('(')[0].trim() : pkg3Title}
+                      </span>
+                      <span className="text-sm sm:text-lg font-mono font-black text-[#E11D48]">
+                        ৳{pkg3Price.toLocaleString()}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 text-[9.5px] sm:text-[10px] font-extrabold">
+                        মেগা সেভার
+                      </span>
                     </button>
                   </div>
                 </div>
 
-                {/* Quantity & Subtotal */}
-                <div className="flex items-center justify-between gap-3 pt-1">
+                {/* CUSTOMER PROFILE / CUSTOM DESIGN SCREENSHOT UPLOAD BOX ON PRODUCT PAGE (Exact Match to Screenshot!) */}
+                <div className="p-3.5 sm:p-4 rounded-2xl bg-[#FFFDF9] border-2 border-dashed border-stone-800 space-y-2">
+                  <label className="block text-xs sm:text-sm font-extrabold text-stone-900">
+                    📷 আপনার পেজ/প্রোফাইল স্ক্রিনশট বা কাস্টম ডিজাইনের ছবি আপলোড করুন:
+                  </label>
+
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <label className="inline-flex items-center gap-2.5 cursor-pointer text-xs sm:text-sm">
+                      <span className="px-3 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-900 font-semibold rounded-lg border border-stone-300 transition-colors">
+                        {isUploadingScreenshot ? 'আপলোড হচ্ছে...' : 'Choose File'}
+                      </span>
+                      <span className="text-stone-600 font-medium truncate max-w-[180px] sm:max-w-xs">
+                        {customerScreenshot
+                          ? customerScreenshotName || 'স্ক্রিনশট যুক্ত হয়েছে ✓'
+                          : 'No file chosen'}
+                      </span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleCustomerScreenshotUpload}
+                        className="hidden"
+                      />
+                    </label>
+
+                    {customerScreenshot && (
+                      <div className="flex items-center gap-2">
+                        <img
+                          src={customerScreenshot}
+                          alt="আপলোডকৃত প্রোফাইল স্ক্রিনশট"
+                          onClick={() => setPreviewScreenshotModal(true)}
+                          className="w-11 h-11 rounded-lg object-cover border-2 border-[#E11D48] cursor-pointer shrink-0 shadow-2xs"
+                          title="বড় করে দেখতে ক্লিক করুন"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setPreviewScreenshotModal(true)}
+                          className="px-2.5 py-1 text-[11px] font-extrabold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg cursor-pointer"
+                        >
+                          🔍 ফুল ভিউ
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleClearCustomerScreenshot}
+                          className="px-2.5 py-1 text-[11px] font-bold text-rose-700 bg-rose-100 hover:bg-rose-200 rounded-lg cursor-pointer"
+                        >
+                          ✕ মুছুন
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {customerScreenshot && (
+                    <p className="text-[11px] font-bold text-emerald-700 pt-0.5">
+                      ✅ আপনার প্রোফাইল/ডিজাইন স্ক্রিনশট যুক্ত হয়েছে! অর্ডার কনফার্ম করলে এটি সরাসরি আমাদের কাছে চলে যাবে।
+                    </p>
+                  )}
+                </div>
+
+                {/* Selected Package/Size & Subtotal Bar (Matching Screenshot!) */}
+                <div className="px-3.5 py-2.5 rounded-xl bg-rose-50/60 border border-rose-200/80 flex items-center justify-between gap-2 flex-wrap">
                   <div className="flex items-center gap-2.5">
-                    <span className="text-[11px] sm:text-xs font-bold text-stone-900">পরিমাণ:</span>
-                    <div className="flex items-center border border-stone-300 rounded-lg overflow-hidden bg-white">
+                    <span className="text-xs sm:text-sm font-extrabold text-[#BE123C] flex items-center gap-1.5">
+                      <span>🛍️</span>
+                      <span>
+                        {activeOfferMode === 'size'
+                          ? (selectedCombo === 1
+                              ? pkg1Title.split('(')[0].trim()
+                              : selectedCombo === 2
+                                ? pkg2Title.split('(')[0].trim()
+                                : pkg3Title.split('(')[0].trim())
+                          : `${quantity} টি প্যাক`}
+                      </span>
+                    </span>
+
+                    <div className="flex items-center border border-rose-200 rounded-lg overflow-hidden bg-white">
                       <button
                         type="button"
                         onClick={() => {
@@ -2258,11 +2387,11 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                             else if (n >= 3) setSelectedCombo(3);
                           }
                         }}
-                        className="px-2.5 py-1 text-stone-700 font-bold hover:bg-stone-100 cursor-pointer"
+                        className="px-2 py-0.5 text-stone-700 font-bold hover:bg-rose-50 cursor-pointer text-xs"
                       >
                         -
                       </button>
-                      <span className="px-3 py-1 text-xs font-mono font-bold text-stone-900 tabular-nums">
+                      <span className="px-2.5 py-0.5 text-xs font-mono font-bold text-stone-900 tabular-nums">
                         {quantity}
                       </span>
                       <button
@@ -2275,41 +2404,60 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                             else if (n >= 3) setSelectedCombo(3);
                           }
                         }}
-                        className="px-2.5 py-1 text-stone-700 font-bold hover:bg-stone-100 cursor-pointer"
+                        className="px-2 py-0.5 text-stone-700 font-bold hover:bg-rose-50 cursor-pointer text-xs"
                       >
                         +
                       </button>
                     </div>
                   </div>
 
-                  <div className="text-xs font-bold text-stone-700">
-                    মোট মূল্য:{' '}
+                  <div className="text-xs sm:text-sm font-bold text-stone-700">
+                    সর্বমোট:{' '}
                     <span
-                      className={`text-sm sm:text-base font-extrabold font-mono ${
+                      className={`text-base sm:text-xl font-black font-mono ${
                         isOrganic ? 'text-[#15803D]' : 'text-[#E11D48]'
                       }`}
                     >
                       ৳{subtotalPrice.toLocaleString()}
                     </span>
-                    {comboDiscount > 0 && (
-                      <span className="text-[10px] font-bold text-emerald-700 ml-1">
-                        (৳{comboDiscount} ছাড়)
-                      </span>
-                    )}
                   </div>
                 </div>
               </div>
 
-              {/* HIGH-UP ACTION BUTTONS: INSTANT CHECKOUT, ADD TO CART & WHATSAPP */}
-              <div className="pt-2 space-y-2.5">
+              {/* ACTION BUTTONS MATCHING SCREENSHOT: 1. ORDER NOW (PINK), 2. WHATSAPP (GREEN) + ADD TO CART */}
+              <div className="pt-1 space-y-2.5">
+                <button
+                  type="button"
+                  onClick={handleGoToInstantCheckout}
+                  className={`w-full py-3.5 sm:py-4 px-4 active:scale-[0.98] text-white rounded-2xl text-sm sm:text-base font-extrabold shadow-md hover:shadow-lg flex items-center justify-center gap-2 transition-all duration-200 cursor-pointer ${
+                    isOrganic
+                      ? 'bg-[#16A34A] hover:bg-[#15803D] ring-2 ring-emerald-300/70'
+                      : 'bg-gradient-to-r from-[#E11D48] via-[#EC004F] to-[#BE123C] hover:from-[#BE123C] hover:to-[#9F1239] ring-2 ring-rose-300/70'
+                  }`}
+                >
+                  <ShoppingBag className="w-5 h-5 text-white shrink-0" />
+                  <span>
+                    অর্ডার করুন (৳{subtotalPrice.toLocaleString()}) - ক্যাশ অন ডেলিভারি
+                  </span>
+                </button>
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <button
                     type="button"
+                    onClick={handleWhatsAppOrder}
+                    className="py-3 px-4 bg-[#16A34A] hover:bg-[#15803D] active:scale-95 text-white rounded-xl text-xs sm:text-sm font-extrabold flex items-center justify-center gap-2 shadow-2xs transition-all cursor-pointer"
+                  >
+                    <OfficialWhatsAppIcon className="w-4 h-4 shrink-0" />
+                    <span>WhatsApp এ অর্ডার</span>
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={handleAddToCartOnCheckout}
-                    className={`py-3 px-4 bg-white active:scale-95 border-2 rounded-xl text-xs sm:text-sm font-extrabold flex items-center justify-center gap-2 shadow-2xs transition-all cursor-pointer ${
+                    className={`py-3 px-4 bg-rose-50/70 active:scale-95 border rounded-xl text-xs sm:text-sm font-extrabold flex items-center justify-center gap-2 shadow-2xs transition-all cursor-pointer ${
                       isOrganic
-                        ? 'hover:bg-[#ECFDF5] border-[#16A34A] text-[#15803D]'
-                        : 'hover:bg-rose-50 border-[#E11D48] text-[#E11D48]'
+                        ? 'hover:bg-[#ECFDF5] border-emerald-200 text-[#15803D]'
+                        : 'hover:bg-rose-100 border-rose-200 text-[#E11D48]'
                     }`}
                   >
                     {addedToCartToast ? (
@@ -2324,46 +2472,22 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                             isOrganic ? 'text-[#16A34A]' : 'text-[#E11D48]'
                           }`}
                         />
-                        <span>অ্যাড টু কার্ট (কার্টে যোগ করুন)</span>
+                        <span>কার্টে যোগ করুন</span>
                       </>
                     )}
                   </button>
-
-                  <button
-                    type="button"
-                    onClick={handleWhatsAppOrder}
-                    className="py-3 px-4 bg-[#10B981] hover:bg-[#059669] active:scale-95 text-white rounded-xl text-xs sm:text-sm font-extrabold flex items-center justify-center gap-2 shadow-2xs transition-all cursor-pointer"
-                  >
-                    <OfficialWhatsAppIcon className="w-4 h-4 shrink-0" />
-                    <span>WhatsApp এ অর্ডার করুন</span>
-                  </button>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={handleGoToInstantCheckout}
-                  className={`w-full py-3.5 px-4 active:scale-[0.98] text-white rounded-xl text-sm sm:text-base font-extrabold shadow-md hover:shadow-lg flex items-center justify-center gap-2 transition-all duration-200 cursor-pointer ${
-                    isOrganic
-                      ? 'bg-[#16A34A] hover:bg-[#15803D] ring-2 ring-emerald-300/70'
-                      : 'bg-gradient-to-r from-[#E11D48] via-[#F43F5E] to-[#BE123C] hover:from-[#BE123C] hover:to-[#9F1239] ring-2 ring-rose-300/70'
-                  }`}
-                >
-                  <ShoppingBag className="w-5 h-5 text-white shrink-0 animate-bounce" />
-                  <span>
-                    ইনস্ট্যান্ট অর্ডার করুন (৳{totalPrice.toLocaleString()}) — ক্যাশ অন ডেলিভারি
-                  </span>
-                </button>
-
                 {/* Delivery Fee Quick Note */}
-                <div className="flex items-center justify-between text-[10.5px] sm:text-xs text-stone-600 px-1 font-semibold">
-                  <div className="flex items-center gap-1">
+                <div className="px-3 py-2 rounded-xl bg-stone-50 border border-stone-200/80 flex items-center justify-between text-[11px] sm:text-xs text-stone-700 font-bold">
+                  <div className="flex items-center gap-1.5">
                     <Truck
                       className={`w-3.5 h-3.5 ${isOrganic ? 'text-[#16A34A]' : 'text-[#E11D48]'}`}
                     />
-                    <span>ঢাকার ভেতরে: ৳৭০ | ঢাকার বাইরে: ৳১২০</span>
+                    <span>ঢাকা: ৳70 | ঢাকার বাইরে: ৳120</span>
                   </div>
-                  <span className="text-emerald-700 font-bold flex items-center gap-1">
-                    ✓ ডেলিভারি ম্যানের সামনে দেখে পেমেন্ট
+                  <span className="text-emerald-700 font-extrabold flex items-center gap-1">
+                    ✓ চেক করে পেমেন্ট
                   </span>
                 </div>
               </div>
@@ -2450,6 +2574,39 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
             SUGGESTED & RELATED PRODUCTS SECTION (সাজেস্টেড প্রোডাক্ট — একই ক্যাটাগরির পণ্য)
             ============================================================================ */}
         {renderSuggestedCategoryProducts(false)}
+
+        {/* Full-Screen Preview Modal for Customer Uploaded Screenshot */}
+        {previewScreenshotModal && customerScreenshot && (
+          <div
+            onClick={() => setPreviewScreenshotModal(false)}
+            className="fixed inset-0 z-50 bg-stone-950/80 backdrop-blur-xs flex items-center justify-center p-4"
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white rounded-3xl border border-rose-200 max-w-lg w-full p-4 sm:p-5 shadow-2xl space-y-3"
+            >
+              <div className="flex items-center justify-between border-b border-stone-200 pb-2.5">
+                <h4 className="text-xs sm:text-sm font-extrabold text-stone-900">
+                  📷 আপনার আপলোডকৃত পেজ/প্রোফাইল স্ক্রিনশট (ফুল ভিউ)
+                </h4>
+                <button
+                  type="button"
+                  onClick={() => setPreviewScreenshotModal(false)}
+                  className="px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-bold cursor-pointer"
+                >
+                  ✕ বন্ধ করুন
+                </button>
+              </div>
+              <div className="max-h-[70vh] overflow-auto rounded-2xl bg-stone-950 flex items-center justify-center p-2">
+                <img
+                  src={customerScreenshot}
+                  alt="কাস্টমার স্ক্রিনশট ফুল ভিউ"
+                  className="max-w-full max-h-[65vh] object-contain rounded-xl"
+                />
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
