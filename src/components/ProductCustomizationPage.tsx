@@ -35,8 +35,8 @@ import {
   deleteProductPersisted,
   compressImageFileToDataUrl,
   isBlockedOrErrorProductImageUrl,
+  isProductScreenshotEnabled,
 } from '../lib/storeSync';
-import { BeforeAfterSlider } from './BeforeAfterSlider';
 
 interface ProductCustomizationPageProps {
   product: Product;
@@ -114,6 +114,9 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
   const [comboTriplePrice, setComboTriplePrice] = useState(
     Number(product.comboConfig?.pkg3Price || Math.max(0, Number(product.price) * 3 - 200))
   );
+  const [enableCustomScreenshot, setEnableCustomScreenshot] = useState<boolean>(
+    isProductScreenshotEnabled(product)
+  );
 
   const buildCurrentProductPayload = (
     overrides?: Partial<{
@@ -137,6 +140,7 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
       pkg3Title: string;
       comboDoublePrice: number;
       comboTriplePrice: number;
+      enableCustomScreenshot: boolean;
     }>
   ): Product => {
     const effNameBn = overrides?.nameBn !== undefined ? overrides.nameBn : nameBn;
@@ -165,6 +169,10 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
     const effTriple = Number(
       overrides?.comboTriplePrice !== undefined ? overrides.comboTriplePrice : comboTriplePrice
     );
+    const effScreenshot =
+      overrides?.enableCustomScreenshot !== undefined
+        ? overrides.enableCustomScreenshot
+        : enableCustomScreenshot;
 
     return {
       ...product,
@@ -184,6 +192,7 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
         colors: effColors,
         sizes: effSizes,
       },
+      enableCustomScreenshot: effScreenshot,
       offerMode: effOfferMode,
       comboConfig: {
         offerMode: effOfferMode,
@@ -852,19 +861,6 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
               </div>
             </div>
 
-            {/* Dedicated Before & After Product Comparison Slider Editor */}
-            <BeforeAfterSlider
-              product={product}
-              isAdmin={true}
-              compact={true}
-              onSaveProduct={async (updatedProd) => {
-                const saved = await saveProductPersisted(updatedProd);
-                onProductUpdated(saved);
-                setToastMessage('✅ Before & After ছবি লাইফটাইম ডাটাবেজে সেভ হয়েছে!');
-                setTimeout(() => setToastMessage(''), 4000);
-              }}
-            />
-
             {/* Smart Auto-Product Import matching image_7747cc85.png */}
             <div className="bg-white rounded-2xl border border-rose-100 p-5 shadow-xs space-y-3">
               <div className="flex items-center justify-between">
@@ -1156,6 +1152,66 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
                   + Add
                 </button>
               </form>
+            </div>
+
+            {/* Custom Screenshot Upload ON/OFF Control per Product */}
+            <div className="bg-white rounded-2xl border-2 border-rose-200 p-5 shadow-xs space-y-3">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div>
+                  <h3 className="text-sm font-extrabold text-stone-900 flex items-center gap-1.5">
+                    <span>📷 কাস্টমার স্ক্রিনশট আপলোড অপশন (ON / OFF)</span>
+                  </h3>
+                  <p className="text-[11px] text-stone-500 mt-0.5">
+                    অন (ON) করলে প্রোডাক্ট পেজে স্ক্রিনশট আপলোড বক্স দেখাবে এবং অর্ডার করতে স্ক্রিনশট দেওয়া আবশ্যক থাকবে। অফ (OFF) করলে প্রোডাক্ট পেজ থেকে স্ক্রিনশট বক্স সম্পূর্ণ লুকানো থাকবে।
+                  </p>
+                </div>
+                <span
+                  className={`px-2.5 py-1 rounded-full text-[11px] font-extrabold ${
+                    enableCustomScreenshot
+                      ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                      : 'bg-stone-100 text-stone-600 border border-stone-300'
+                  }`}
+                >
+                  {enableCustomScreenshot ? '✓ ON (চালু ও আবশ্যক)' : '✕ OFF (বন্ধ / হাইড)'}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEnableCustomScreenshot(true);
+                    autoSaveLiveChange(
+                      { enableCustomScreenshot: true },
+                      '✅ এই প্রোডাক্টে স্ক্রিনশট আপলোড চালু (ON - আবশ্যক) ও ফায়ারবেসে সেভ হয়েছে!'
+                    );
+                  }}
+                  className={`py-2.5 px-3 rounded-xl border text-xs font-extrabold transition-all cursor-pointer ${
+                    enableCustomScreenshot
+                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                      : 'bg-stone-50 text-stone-700 border-stone-200 hover:border-emerald-300'
+                  }`}
+                >
+                  ✓ ON (স্ক্রিনশট আবশ্যক রাখুন)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEnableCustomScreenshot(false);
+                    autoSaveLiveChange(
+                      { enableCustomScreenshot: false },
+                      '✅ এই প্রোডাক্টে স্ক্রিনশট আপলোড বন্ধ (OFF - লুকানো) ও ফায়ারবেসে সেভ হয়েছে!'
+                    );
+                  }}
+                  className={`py-2.5 px-3 rounded-xl border text-xs font-extrabold transition-all cursor-pointer ${
+                    !enableCustomScreenshot
+                      ? 'bg-stone-800 text-white border-stone-800 shadow-xs'
+                      : 'bg-stone-50 text-stone-700 border-stone-200 hover:border-stone-400'
+                  }`}
+                >
+                  ✕ OFF (স্ক্রিনশট অপশন বন্ধ রাখুন)
+                </button>
+              </div>
             </div>
 
             {/* Pricing & 3 Combo / Size Offers (Supports BOTH Piece Mode & Size Mode) */}

@@ -45,10 +45,10 @@ import {
   compressImageFileToDataUrl,
   enrichProductFields,
   cleanProductVideos,
+  isProductScreenshotEnabled,
 } from '../lib/storeSync';
 import { Product, Order, OFFICIAL_CATEGORIES } from '../types';
 import { ProductCard } from './ProductCard';
-import { BeforeAfterSlider } from './BeforeAfterSlider';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -220,11 +220,32 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   const [isUploadingScreenshot, setIsUploadingScreenshot] = useState(false);
   const [isOrdering, setIsOrdering] = useState(false);
   const [orderError, setOrderError] = useState('');
+  const [screenshotError, setScreenshotError] = useState('');
+  const isScreenshotEnabled = isProductScreenshotEnabled(product);
+
+  const handleAdminToggleScreenshotOption = async (enabled: boolean) => {
+    setScreenshotError('');
+    const updatedProd: Product = {
+      ...product,
+      enableCustomScreenshot: enabled,
+      updatedAt: Date.now(),
+    };
+    const saved = await saveProductPersisted(updatedProd);
+    if (onProductUpdated) onProductUpdated(saved);
+    setRefreshToast(
+      enabled
+        ? '✅ এই প্রোডাক্টে কাস্টমার স্ক্রিনশট আপলোড অপশন চালু (ON - আবশ্যক) করে ফায়ারবেসে সেভ করা হয়েছে!'
+        : '✅ এই প্রোডাক্টে কাস্টমার স্ক্রিনশট আপলোড অপশন বন্ধ (OFF - লুকানো) করে ফায়ারবেসে সেভ করা হয়েছে!'
+    );
+    setTimeout(() => setRefreshToast(''), 3500);
+  };
 
   const handleCustomerScreenshotUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setIsUploadingScreenshot(true);
+    setScreenshotError('');
+    setOrderError('');
     try {
       const fileName = file.name || 'custom-profile-screenshot.jpg';
       // High-resolution printable quality (960px, 0.78 JPEG ~90-150KB, fits inside Firestore 1MB document for lifetime persistence)
@@ -590,6 +611,13 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
 
   // Navigate directly to the separate Order Form / Instant Checkout Page
   const handleGoToInstantCheckout = () => {
+    if (isScreenshotEnabled && !customerScreenshot) {
+      setScreenshotError(
+        '⚠️ অর্ডার করার জন্য অনুগ্রহ করে আপনার পেজ/প্রোফাইল স্ক্রিনশট বা কাস্টম ডিজাইনের ছবি আপলোড করুন (আবশ্যক)।'
+      );
+      return;
+    }
+    setScreenshotError('');
     try {
       window.history.pushState(
         null,
@@ -607,6 +635,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   const handleDirectOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     setOrderError('');
+    setScreenshotError('');
 
     if (!customerName.trim()) {
       setOrderError('অনুগ্রহ করে আপনার নাম লিখুন।');
@@ -619,6 +648,13 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     }
     if (!customerAddress.trim()) {
       setOrderError('সম্পূর্ণ ডেলিভারি ঠিকানা লিখুন (বাসা/রোড/থানা/জেলা)।');
+      return;
+    }
+    if (isScreenshotEnabled && !customerScreenshot) {
+      const msg =
+        'অনুগ্রহ করে আপনার পেজ/প্রোফাইল স্ক্রিনশট বা কাস্টম ডিজাইনের ছবি আপলোড করুন (আবশ্যক)।';
+      setOrderError(msg);
+      setScreenshotError(`⚠️ ${msg}`);
       return;
     }
 
@@ -657,7 +693,8 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
         paymentMethod: 'cod',
         status: 'pending',
         userId: firebaseUser?.uid || null,
-        customerScreenshot: customerScreenshot || undefined,
+        customerScreenshot:
+          isScreenshotEnabled && customerScreenshot ? customerScreenshot : undefined,
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
@@ -1618,67 +1655,80 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                   </button>
                 </div>
 
-                {/* Customer Profile / Custom Design Screenshot Upload Box on Order Form */}
-                <div className="p-3.5 rounded-2xl bg-[#FFFDF9] border-2 border-dashed border-stone-800 space-y-2.5">
-                  <label className="block text-xs sm:text-sm font-extrabold text-stone-900 flex items-center gap-1.5">
-                    <span>📷 আপনার পেজ/প্রোফাইল স্ক্রিনশট বা কাস্টম ডিজাইনের ছবি আপলোড করুন:</span>
-                  </label>
-
-                  <div className="flex items-center justify-between gap-2.5 flex-wrap">
-                    <label className="inline-flex items-center gap-2.5 cursor-pointer text-xs">
-                      <span className="px-3 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-900 font-bold rounded-lg border border-stone-300 transition-colors">
-                        {isUploadingScreenshot ? 'আপলোড হচ্ছে...' : 'Choose File'}
+                {/* Customer Profile / Custom Design Screenshot Upload Box on Order Form (Only shown when enabled for this product!) */}
+                {isScreenshotEnabled && (
+                  <div className="p-3.5 rounded-2xl bg-[#FFFDF9] border-2 border-dashed border-stone-800 space-y-2.5">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <label className="block text-xs sm:text-sm font-extrabold text-stone-900 flex items-center gap-1.5">
+                        <span>📷 আপনার পেজ/প্রোফাইল স্ক্রিনশট বা কাস্টম ডিজাইনের ছবি আপলোড করুন: *</span>
+                      </label>
+                      <span className="px-2 py-0.5 rounded-full bg-rose-100 text-[#E11D48] text-[10px] font-extrabold border border-rose-200">
+                        আবশ্যক (Required)
                       </span>
-                      <span className="text-stone-600 font-medium truncate max-w-[200px] sm:max-w-xs">
-                        {customerScreenshot
-                          ? customerScreenshotName || 'স্ক্রিনশট যুক্ত হয়েছে ✓'
-                          : 'No file chosen'}
-                      </span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={handleCustomerScreenshotUpload}
-                        className="hidden"
-                      />
-                    </label>
+                    </div>
 
-                    {customerScreenshot && (
-                      <div className="flex items-center gap-2">
-                        <img
-                          src={customerScreenshot}
-                          alt="কাস্টমার স্ক্রিনশট"
-                          onClick={() => setPreviewScreenshotModal(true)}
-                          className="w-11 h-11 rounded-lg object-cover border-2 border-[#E11D48] cursor-pointer shrink-0"
-                          title="বড় করে দেখতে ক্লিক করুন"
+                    <div className="flex items-center justify-between gap-2.5 flex-wrap">
+                      <label className="inline-flex items-center gap-2.5 cursor-pointer text-xs">
+                        <span className="px-3 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-900 font-bold rounded-lg border border-stone-300 transition-colors">
+                          {isUploadingScreenshot ? 'আপলোড হচ্ছে...' : 'Choose File'}
+                        </span>
+                        <span className="text-stone-600 font-medium truncate max-w-[200px] sm:max-w-xs">
+                          {customerScreenshot
+                            ? customerScreenshotName || 'স্ক্রিনশট যুক্ত হয়েছে ✓'
+                            : 'No file chosen'}
+                        </span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleCustomerScreenshotUpload}
+                          className="hidden"
                         />
-                        <button
-                          type="button"
-                          onClick={() => setPreviewScreenshotModal(true)}
-                          className="px-2.5 py-1 text-[11px] font-extrabold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg cursor-pointer"
-                        >
-                          🔍 ফুল ভিউ
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleClearCustomerScreenshot}
-                          className="px-2.5 py-1 text-[11px] font-bold text-rose-700 bg-rose-100 rounded-lg cursor-pointer"
-                        >
-                          ✕ মুছুন
-                        </button>
+                      </label>
+
+                      {customerScreenshot && (
+                        <div className="flex items-center gap-2">
+                          <img
+                            src={customerScreenshot}
+                            alt="কাস্টমার স্ক্রিনশট"
+                            onClick={() => setPreviewScreenshotModal(true)}
+                            className="w-11 h-11 rounded-lg object-cover border-2 border-[#E11D48] cursor-pointer shrink-0"
+                            title="বড় করে দেখতে ক্লিক করুন"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setPreviewScreenshotModal(true)}
+                            className="px-2.5 py-1 text-[11px] font-extrabold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg cursor-pointer"
+                          >
+                            🔍 ফুল ভিউ
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleClearCustomerScreenshot}
+                            className="px-2.5 py-1 text-[11px] font-bold text-rose-700 bg-rose-100 rounded-lg cursor-pointer"
+                          >
+                            ✕ মুছুন
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {screenshotError && (
+                      <div className="p-2 rounded-lg bg-rose-100 border border-rose-300 text-rose-900 text-xs font-extrabold">
+                        {screenshotError}
                       </div>
                     )}
-                  </div>
 
-                  {customerScreenshot ? (
-                    <p className="text-[11px] font-bold text-emerald-700">
-                      ✅ আপনার স্ক্রিনশট যুক্ত হয়েছে — অর্ডার কনফার্ম করলে এটি সরাসরি আমাদের অ্যাডমিন প্যানেলে প্রিন্টিংয়ের জন্য চলে যাবে।
-                    </p>
-                  ) : (
-                    <p className="text-[10.5px] text-stone-500">
-                      কাস্টমাইজড মিরর বা কাস্টম প্রোডাক্টের জন্য আপনার ফেসবুক/ইনস্টাগ্রাম/টিকটক প্রোফাইল স্ক্রিনশট বা লোগো এখানে দিন।
-                    </p>
-                  )}
-                </div>
+                    {customerScreenshot ? (
+                      <p className="text-[11px] font-bold text-emerald-700">
+                        ✅ আপনার স্ক্রিনশট যুক্ত হয়েছে — অর্ডার কনফার্ম করলে এটি সরাসরি আমাদের অ্যাডমিন প্যানেলে প্রিন্টিংয়ের জন্য চলে যাবে।
+                      </p>
+                    ) : (
+                      <p className="text-[10.5px] text-stone-500">
+                        কাস্টমাইজড মিরর বা কাস্টম প্রোডাক্টের জন্য আপনার ফেসবুক/ইনস্টাগ্রাম/টিকটক প্রোফাইল স্ক্রিনশট বা লোগো এখানে দিন।
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 {/* Compact Total Summary */}
                 <div
@@ -2198,35 +2248,67 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                     </span>
                   </div>
 
-                  {/* Admin Real-Time Offer Mode Toggle (Piece vs Size) */}
+                  {/* Admin Real-Time Offer Mode Toggle (Piece vs Size) & Screenshot Upload ON/OFF Toggle */}
                   {isAdmin && (
-                    <div className="p-2 rounded-xl bg-white border border-rose-200 flex items-center justify-between gap-2 flex-wrap">
-                      <span className="text-[11px] font-extrabold text-rose-950">
-                        ⚙️ অ্যাডমিন অফার মোড (রিয়েল-টাইম সেভ):
-                      </span>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => handleAdminSwitchOfferMode('piece')}
-                          className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition-all cursor-pointer ${
-                            activeOfferMode === 'piece'
-                              ? 'bg-[#E11D48] text-white shadow-2xs'
-                              : 'bg-stone-50 text-stone-700 border border-stone-200 hover:border-rose-300'
-                          }`}
-                        >
-                          📦 পিস অনুযায়ী (১, ২, ৩ পিস)
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleAdminSwitchOfferMode('size')}
-                          className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition-all cursor-pointer ${
-                            activeOfferMode === 'size'
-                              ? 'bg-[#E11D48] text-white shadow-2xs'
-                              : 'bg-stone-50 text-stone-700 border border-stone-200 hover:border-rose-300'
-                          }`}
-                        >
-                          📏 সাইজ অনুযায়ী (Small, Medium, Full Body)
-                        </button>
+                    <div className="space-y-2">
+                      <div className="p-2 rounded-xl bg-white border border-rose-200 flex items-center justify-between gap-2 flex-wrap">
+                        <span className="text-[11px] font-extrabold text-rose-950">
+                          ⚙️ অ্যাডমিন অফার মোড (রিয়েল-টাইম সেভ):
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleAdminSwitchOfferMode('piece')}
+                            className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition-all cursor-pointer ${
+                              activeOfferMode === 'piece'
+                                ? 'bg-[#E11D48] text-white shadow-2xs'
+                                : 'bg-stone-50 text-stone-700 border border-stone-200 hover:border-rose-300'
+                            }`}
+                          >
+                            📦 পিস অনুযায়ী (১, ২, ৩ পিস)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleAdminSwitchOfferMode('size')}
+                            className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition-all cursor-pointer ${
+                              activeOfferMode === 'size'
+                                ? 'bg-[#E11D48] text-white shadow-2xs'
+                                : 'bg-stone-50 text-stone-700 border border-stone-200 hover:border-rose-300'
+                            }`}
+                          >
+                            📏 সাইজ অনুযায়ী (Small, Medium, Full Body)
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="p-2 rounded-xl bg-white border border-rose-200 flex items-center justify-between gap-2 flex-wrap">
+                        <span className="text-[11px] font-extrabold text-stone-900">
+                          📷 কাস্টমার স্ক্রিনশট আপলোড বক্স (শুধু কাস্টম প্রোডাক্টের জন্য):
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleAdminToggleScreenshotOption(true)}
+                            className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition-all cursor-pointer ${
+                              isScreenshotEnabled
+                                ? 'bg-emerald-600 text-white shadow-2xs'
+                                : 'bg-stone-50 text-stone-700 border border-stone-200 hover:border-emerald-300'
+                            }`}
+                          >
+                            ✓ ON (চালু ও আবশ্যক)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleAdminToggleScreenshotOption(false)}
+                            className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition-all cursor-pointer ${
+                              !isScreenshotEnabled
+                                ? 'bg-stone-800 text-white shadow-2xs'
+                                : 'bg-stone-50 text-stone-700 border border-stone-200 hover:border-stone-400'
+                            }`}
+                          >
+                            ✕ OFF (বন্ধ / হাইড)
+                          </button>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -2312,63 +2394,76 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                   </div>
                 </div>
 
-                {/* CUSTOMER PROFILE / CUSTOM DESIGN SCREENSHOT UPLOAD BOX ON PRODUCT PAGE (Exact Match to Screenshot!) */}
-                <div className="p-3.5 sm:p-4 rounded-2xl bg-[#FFFDF9] border-2 border-dashed border-stone-800 space-y-2">
-                  <label className="block text-xs sm:text-sm font-extrabold text-stone-900">
-                    📷 আপনার পেজ/প্রোফাইল স্ক্রিনশট বা কাস্টম ডিজাইনের ছবি আপলোড করুন:
-                  </label>
-
-                  <div className="flex items-center justify-between gap-3 flex-wrap">
-                    <label className="inline-flex items-center gap-2.5 cursor-pointer text-xs sm:text-sm">
-                      <span className="px-3 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-900 font-semibold rounded-lg border border-stone-300 transition-colors">
-                        {isUploadingScreenshot ? 'আপলোড হচ্ছে...' : 'Choose File'}
+                {/* CUSTOMER PROFILE / CUSTOM DESIGN SCREENSHOT UPLOAD BOX ON PRODUCT PAGE (ONLY SHOWN WHEN ENABLED FOR THIS PRODUCT!) */}
+                {isScreenshotEnabled && (
+                  <div className="p-3.5 sm:p-4 rounded-2xl bg-[#FFFDF9] border-2 border-dashed border-stone-800 space-y-2">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <label className="block text-xs sm:text-sm font-extrabold text-stone-900">
+                        📷 আপনার পেজ/প্রোফাইল স্ক্রিনশট বা কাস্টম ডিজাইনের ছবি আপলোড করুন: *
+                      </label>
+                      <span className="px-2 py-0.5 rounded-full bg-rose-100 text-[#E11D48] text-[10px] font-extrabold border border-rose-200">
+                        আবশ্যক (Required)
                       </span>
-                      <span className="text-stone-600 font-medium truncate max-w-[180px] sm:max-w-xs">
-                        {customerScreenshot
-                          ? customerScreenshotName || 'স্ক্রিনশট যুক্ত হয়েছে ✓'
-                          : 'No file chosen'}
-                      </span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={handleCustomerScreenshotUpload}
-                        className="hidden"
-                      />
-                    </label>
+                    </div>
 
-                    {customerScreenshot && (
-                      <div className="flex items-center gap-2">
-                        <img
-                          src={customerScreenshot}
-                          alt="আপলোডকৃত প্রোফাইল স্ক্রিনশট"
-                          onClick={() => setPreviewScreenshotModal(true)}
-                          className="w-11 h-11 rounded-lg object-cover border-2 border-[#E11D48] cursor-pointer shrink-0 shadow-2xs"
-                          title="বড় করে দেখতে ক্লিক করুন"
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                      <label className="inline-flex items-center gap-2.5 cursor-pointer text-xs sm:text-sm">
+                        <span className="px-3 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-900 font-semibold rounded-lg border border-stone-300 transition-colors">
+                          {isUploadingScreenshot ? 'আপলোড হচ্ছে...' : 'Choose File'}
+                        </span>
+                        <span className="text-stone-600 font-medium truncate max-w-[180px] sm:max-w-xs">
+                          {customerScreenshot
+                            ? customerScreenshotName || 'স্ক্রিনশট যুক্ত হয়েছে ✓'
+                            : 'No file chosen'}
+                        </span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleCustomerScreenshotUpload}
+                          className="hidden"
                         />
-                        <button
-                          type="button"
-                          onClick={() => setPreviewScreenshotModal(true)}
-                          className="px-2.5 py-1 text-[11px] font-extrabold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg cursor-pointer"
-                        >
-                          🔍 ফুল ভিউ
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleClearCustomerScreenshot}
-                          className="px-2.5 py-1 text-[11px] font-bold text-rose-700 bg-rose-100 hover:bg-rose-200 rounded-lg cursor-pointer"
-                        >
-                          ✕ মুছুন
-                        </button>
+                      </label>
+
+                      {customerScreenshot && (
+                        <div className="flex items-center gap-2">
+                          <img
+                            src={customerScreenshot}
+                            alt="আপলোডকৃত প্রোফাইল স্ক্রিনশট"
+                            onClick={() => setPreviewScreenshotModal(true)}
+                            className="w-11 h-11 rounded-lg object-cover border-2 border-[#E11D48] cursor-pointer shrink-0 shadow-2xs"
+                            title="বড় করে দেখতে ক্লিক করুন"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setPreviewScreenshotModal(true)}
+                            className="px-2.5 py-1 text-[11px] font-extrabold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg cursor-pointer"
+                          >
+                            🔍 ফুল ভিউ
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleClearCustomerScreenshot}
+                            className="px-2.5 py-1 text-[11px] font-bold text-rose-700 bg-rose-100 hover:bg-rose-200 rounded-lg cursor-pointer"
+                          >
+                            ✕ মুছুন
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {screenshotError && (
+                      <div className="p-2 rounded-lg bg-rose-100 border border-rose-300 text-rose-900 text-xs font-extrabold">
+                        {screenshotError}
                       </div>
                     )}
-                  </div>
 
-                  {customerScreenshot && (
-                    <p className="text-[11px] font-bold text-emerald-700 pt-0.5">
-                      ✅ আপনার প্রোফাইল/ডিজাইন স্ক্রিনশট যুক্ত হয়েছে! অর্ডার কনফার্ম করলে এটি সরাসরি আমাদের কাছে চলে যাবে।
-                    </p>
-                  )}
-                </div>
+                    {customerScreenshot && (
+                      <p className="text-[11px] font-bold text-emerald-700 pt-0.5">
+                        ✅ আপনার প্রোফাইল/ডিজাইন স্ক্রিনশট যুক্ত হয়েছে! অর্ডার কনফার্ম করলে এটি সরাসরি আমাদের কাছে চলে যাবে।
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 {/* Selected Package/Size & Subtotal Bar (Matching Screenshot!) */}
                 <div className="px-3.5 py-2.5 rounded-xl bg-rose-50/60 border border-rose-200/80 flex items-center justify-between gap-2 flex-wrap">
@@ -2508,16 +2603,6 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                 <GuaranteeBadgesRow />
               </div>
             </div>
-
-            {/* Dedicated Reusable 'Before & After' Product Comparison Slider */}
-            <BeforeAfterSlider
-              product={product}
-              isAdmin={isAdmin}
-              onSaveProduct={async (updatedProd) => {
-                const saved = await saveProductPersisted(updatedProd);
-                if (onProductUpdated) onProductUpdated(saved);
-              }}
-            />
 
             {/* Complete Full Product Details, Specifications & Features Section */}
             <div className="bg-white rounded-2xl border border-stone-200 p-4 sm:p-6 shadow-xs space-y-4">

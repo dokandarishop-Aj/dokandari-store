@@ -9,7 +9,11 @@ import { doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Product, OFFICIAL_CATEGORIES } from '../types';
 import { parseEmbedVideoUrl } from '../lib/gemini';
-import { saveProductPersisted, deleteProductPersisted } from '../lib/storeSync';
+import {
+  saveProductPersisted,
+  deleteProductPersisted,
+  isProductScreenshotEnabled,
+} from '../lib/storeSync';
 
 interface ProductEditModalProps {
   product: Product | null;
@@ -36,6 +40,9 @@ export const ProductEditModal: React.FC<ProductEditModalProps> = ({
   const [videoUrl, setVideoUrl] = useState(product.videos?.[0] || '');
   const [colorsStr, setColorsStr] = useState(product.variants?.colors?.join(', ') || '');
   const [sizesStr, setSizesStr] = useState(product.variants?.sizes?.join(', ') || '');
+  const [enableCustomScreenshot, setEnableCustomScreenshot] = useState<boolean>(
+    isProductScreenshotEnabled(product)
+  );
   const [description, setDescription] = useState(product.description);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState('');
@@ -72,6 +79,7 @@ export const ProductEditModal: React.FC<ProductEditModalProps> = ({
         colors,
         sizes,
       },
+      enableCustomScreenshot,
       comboConfig: product.comboConfig
         ? {
             ...product.comboConfig,
@@ -245,6 +253,42 @@ export const ProductEditModal: React.FC<ProductEditModalProps> = ({
                 placeholder="34 (M), 36 (L), 38 (XL)..."
                 className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-lg"
               />
+            </div>
+          </div>
+
+          {/* Custom Screenshot Upload ON/OFF Toggle */}
+          <div className="p-3 rounded-xl bg-rose-50/50 border border-rose-200 flex items-center justify-between gap-2 flex-wrap">
+            <div>
+              <span className="font-bold text-stone-900 block">
+                📷 কাস্টমার স্ক্রিনশট আপলোড অপশন (ON / OFF)
+              </span>
+              <span className="text-[11px] text-stone-500">
+                অন করলে এই প্রোডাক্টে স্ক্রিনশট দেওয়া আবশ্যক থাকবে, অফ করলে লুকানো থাকবে।
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setEnableCustomScreenshot(true)}
+                className={`px-3 py-1.5 rounded-lg font-extrabold text-xs cursor-pointer ${
+                  enableCustomScreenshot
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-white text-stone-700 border border-stone-300'
+                }`}
+              >
+                ✓ ON
+              </button>
+              <button
+                type="button"
+                onClick={() => setEnableCustomScreenshot(false)}
+                className={`px-3 py-1.5 rounded-lg font-extrabold text-xs cursor-pointer ${
+                  !enableCustomScreenshot
+                    ? 'bg-stone-800 text-white'
+                    : 'bg-white text-stone-700 border border-stone-300'
+                }`}
+              >
+                ✕ OFF
+              </button>
             </div>
           </div>
 

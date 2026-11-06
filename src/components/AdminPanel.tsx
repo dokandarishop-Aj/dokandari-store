@@ -158,6 +158,7 @@ import {
   restoreAllRealCatalogProducts,
   saveAllStoreDataLifetime,
   downloadCustomerScreenshot,
+  isProductScreenshotEnabled,
 } from '../lib/storeSync';
 import {
   OfficialWhatsAppIcon,
@@ -4974,6 +4975,39 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             {p.inStock ? 'স্টকে আছে' : 'স্টক আউট'}
                           </span>
                         </div>
+
+                        {/* 1-Click Screenshot Upload Requirement ON/OFF Toggle */}
+                        <div className="pt-1">
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const nextEnabled = !isProductScreenshotEnabled(p);
+                              const updatedProd: Product = {
+                                ...p,
+                                enableCustomScreenshot: nextEnabled,
+                                updatedAt: Date.now(),
+                              };
+                              onAddProduct(updatedProd);
+                              await saveProductPersisted(updatedProd);
+                              setFeedback(
+                                nextEnabled
+                                  ? `✅ "${p.name}" প্রোডাক্টে স্ক্রিনশট আপলোড চালু (ON - আবশ্যক) করা হয়েছে!`
+                                  : `✅ "${p.name}" প্রোডাক্টে স্ক্রিনশট আপলোড বন্ধ (OFF - হাইড) করা হয়েছে!`
+                              );
+                              setTimeout(() => setFeedback(''), 3500);
+                            }}
+                            className={`w-full py-1.5 px-2.5 rounded-lg text-[10.5px] font-extrabold border flex items-center justify-between transition-colors cursor-pointer ${
+                              isProductScreenshotEnabled(p)
+                                ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
+                                : 'bg-stone-50 text-stone-600 border-stone-200 hover:bg-stone-100'
+                            }`}
+                          >
+                            <span>📷 স্ক্রিনশট আপলোড:</span>
+                            <span>
+                              {isProductScreenshotEnabled(p) ? '✓ ON (আবশ্যক)' : '✕ OFF (বন্ধ)'}
+                            </span>
+                          </button>
+                        </div>
                       </div>
 
                       <div className="pt-2 flex items-center gap-1.5">
@@ -5089,6 +5123,39 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         <span className="text-[10px] font-sans text-stone-500">
                           {OFFICIAL_CATEGORIES.find((c) => c.id === p.category)?.nameBn || p.category}
                         </span>
+                      </div>
+
+                      {/* 1-Click Screenshot Upload Requirement ON/OFF Toggle */}
+                      <div className="pt-1">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const nextEnabled = !isProductScreenshotEnabled(p);
+                            const updatedProd: Product = {
+                              ...p,
+                              enableCustomScreenshot: nextEnabled,
+                              updatedAt: Date.now(),
+                            };
+                            onAddProduct(updatedProd);
+                            await saveProductPersisted(updatedProd);
+                            setFeedback(
+                              nextEnabled
+                                ? `✅ "${p.name}" প্রোডাক্টে স্ক্রিনশট আপলোড চালু (ON - আবশ্যক) করা হয়েছে!`
+                                : `✅ "${p.name}" প্রোডাক্টে স্ক্রিনশট আপলোড বন্ধ (OFF - হাইড) করা হয়েছে!`
+                            );
+                            setTimeout(() => setFeedback(''), 3500);
+                          }}
+                          className={`w-full py-1 px-2 rounded-lg text-[10px] font-extrabold border flex items-center justify-between transition-colors cursor-pointer ${
+                            isProductScreenshotEnabled(p)
+                              ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
+                              : 'bg-stone-50 text-stone-600 border-stone-200 hover:bg-stone-100'
+                          }`}
+                        >
+                          <span>📷 স্ক্রিনশট:</span>
+                          <span>
+                            {isProductScreenshotEnabled(p) ? '✓ ON (আবশ্যক)' : '✕ OFF (বন্ধ)'}
+                          </span>
+                        </button>
                       </div>
 
                       {/* Unique Domain Product & Image Links */}

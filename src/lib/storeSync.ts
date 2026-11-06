@@ -10,6 +10,7 @@ import {
   setDoc,
   getDoc,
   deleteDoc,
+  writeBatch,
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { INITIAL_PRODUCTS } from '../data/initialCatalog';
@@ -1638,6 +1639,20 @@ export function handleProductImageError(
   }
 }
 
+export function isProductScreenshotEnabled(product?: Product | null): boolean {
+  if (!product) return false;
+  if (typeof product.enableCustomScreenshot === 'boolean') {
+    return product.enableCustomScreenshot;
+  }
+  return (
+    product.id === 'dkd-1793610538096-571' ||
+    (product.category === 'home_decor' &&
+      /প্রোফাইল থিম কাস্টম|কাস্টমাইজড আয়না|custom.*profile.*mirror|ব্র্যান্ডের নামে কাস্টমাইজড/i.test(
+        `${product.name || ''} ${product.titleEn || ''}`
+      ))
+  );
+}
+
 /**
  * Ensures every product has complete Bengali description, fabric/specification, features, and variants
  * so ProductDetailPage is always 100% rich and populated.
@@ -1685,6 +1700,7 @@ export function enrichProductFields(p: Product): Product {
     features,
     offerMode: p.offerMode || p.comboConfig?.offerMode,
     comboConfig: p.comboConfig,
+    enableCustomScreenshot: isProductScreenshotEnabled(p),
     variants: {
       colors,
       sizes,
@@ -3006,6 +3022,7 @@ export async function saveProductPersisted(product: Product): Promise<Product> {
           pkg1Price: cleanPrice,
         }
       : undefined,
+    enableCustomScreenshot: isProductScreenshotEnabled(product),
     variants: {
       colors: Array.isArray(cleanedProduct.variants?.colors)
         ? cleanedProduct.variants.colors.filter(
@@ -3072,17 +3089,19 @@ export async function saveProductPersisted(product: Product): Promise<Product> {
     console.warn('localStorage product save note:', e);
   }
 
-  // 2. Save to Firestore & Server Mirror in parallel (awaited so live server mirror and Firestore are 100% synced immediately)
+  // 2. Save atomically to Firestore via writeBatch & Server Mirror in parallel
   const firestoreSafe = sanitizeForFirestore(ensureFirestoreSafeProductPayload(normalized));
+  const batch = writeBatch(db);
+  batch.set(doc(db, 'products', normalized.id), firestoreSafe);
+  if (updatedDeletedArray !== null) {
+    batch.set(
+      doc(db, 'settings', 'deleted_products'),
+      { ids: updatedDeletedArray, updatedAt: Date.now() },
+      { merge: true }
+    );
+  }
   await Promise.allSettled([
-    setDoc(doc(db, 'products', normalized.id), firestoreSafe),
-    updatedDeletedArray !== null
-      ? setDoc(
-          doc(db, 'settings', 'deleted_products'),
-          { ids: updatedDeletedArray, updatedAt: Date.now() },
-          { merge: true }
-        )
-      : Promise.resolve(),
+    batch.commit(),
     fetch('/api/catalog/sync-mirror', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -3186,13 +3205,16 @@ export async function deleteProductPersisted(productId: string): Promise<void> {
     console.warn('localStorage delete product note:', e);
   }
 
+  const deleteBatch = writeBatch(db);
+  deleteBatch.delete(doc(db, 'products', productId));
+  deleteBatch.set(
+    doc(db, 'settings', 'deleted_products'),
+    { ids: deletedList, updatedAt: Date.now() },
+    { merge: true }
+  );
+
   await Promise.allSettled([
-    deleteDoc(doc(db, 'products', productId)),
-    setDoc(
-      doc(db, 'settings', 'deleted_products'),
-      { ids: deletedList, updatedAt: Date.now() },
-      { merge: true }
-    ),
+    deleteBatch.commit(),
     fetch('/api/catalog/delete-mirror', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

@@ -169,6 +169,7 @@ export interface Product {
   variants: ProductVariant;
   offerMode?: 'piece' | 'size';
   comboConfig?: ProductComboConfig;
+  enableCustomScreenshot?: boolean;
   inStock: boolean;
   stock?: number;
   costPrice?: number;
