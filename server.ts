@@ -6445,15 +6445,26 @@ Return strict JSON with 100% complete, rich Bengali product details:
     try {
       const mirror = readLocalCatalogMirror();
       const deletedSet = new Set(mirror.deletedIds);
+      const isExplicitAdminSave =
+        Boolean(req.body?.isExplicitAdminSave) || Boolean(req.body?.product && req.body.product.id);
       const incoming: any[] = [];
       if (req.body?.product && req.body.product.id) {
         incoming.push(req.body.product);
-      }
-      if (Array.isArray(req.body?.products)) {
+      } else if (Array.isArray(req.body?.products)) {
         incoming.push(...req.body.products.filter((p: any) => p && p.id));
       }
       const writePromises: Promise<any>[] = [];
       for (const prod of incoming) {
+        if (!isExplicitAdminSave) {
+          // Background bulk seed from an older client tab: NEVER resurrect deleted products or overwrite existing products!
+          if (
+            deletedSet.has(prod.id) ||
+            mirror.products[prod.id] ||
+            cachedFirestoreProducts.some((cp) => cp?.id === prod.id)
+          ) {
+            continue;
+          }
+        }
         mirror.products[prod.id] = prod;
         deletedSet.delete(prod.id);
         const existingIdx = cachedFirestoreProducts.findIndex((cp) => cp?.id === prod.id);

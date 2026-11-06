@@ -57,12 +57,16 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
     product.name.includes('|') ? product.name.split('|')[0].trim() : product.name
   );
   const [category, setCategory] = useState<ProductCategory>(product.category);
-  const [price, setPrice] = useState(product.price);
-  const [originalPrice, setOriginalPrice] = useState(product.originalPrice || product.price + 400);
-  const [fabric, setFabric] = useState(product.fabric || 'এইচডি ফ্লোট গ্লাস / হাই-গ্রেড মেটেরিয়াল');
-  const [description, setDescription] = useState(product.description);
+  const [price, setPrice] = useState(Number(product.price) || 0);
+  const [originalPrice, setOriginalPrice] = useState(
+    Number.isFinite(Number(product.originalPrice))
+      ? Number(product.originalPrice)
+      : Number(product.price) || 0
+  );
+  const [fabric, setFabric] = useState(product.fabric || '');
+  const [description, setDescription] = useState(product.description || '');
   const [skuCode, setSkuCode] = useState(product.sku || `DKD-${Math.floor(1000 + Math.random() * 9000)}`);
-  const [inStock, setInStock] = useState(product.inStock);
+  const [inStock, setInStock] = useState(product.inStock !== false);
   const [productStatus, setProductStatus] = useState<'published' | 'draft'>(product.status || 'published');
 
   // Gallery images & videos (strip any blocked/founder images automatically)
@@ -76,18 +80,14 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
   const [videos, setVideos] = useState<string[]>(product.videos || []);
   const [newVideoUrl, setNewVideoUrl] = useState('');
 
-  // Variants: Colors & Sizes
+  // Variants: Colors & Sizes (NEVER inject locked fallback defaults when empty!)
   const [colors, setColors] = useState<string[]>(
-    product.variants.colors && product.variants.colors.length > 0
-      ? product.variants.colors
-      : ['Standard Edition (স্ট্যান্ডার্ড)', 'Silver / Beveled Edge', 'Gold / Black']
+    Array.isArray(product.variants?.colors) ? product.variants.colors : []
   );
   const [newColorInput, setNewColorInput] = useState('');
 
   const [sizes, setSizes] = useState<string[]>(
-    product.variants.sizes && product.variants.sizes.length > 0
-      ? product.variants.sizes
-      : ['Standard Size (স্ট্যান্ডার্ড সাইজ)']
+    Array.isArray(product.variants?.sizes) ? product.variants.sizes : []
   );
   const [newSizeInput, setNewSizeInput] = useState('');
 
@@ -107,27 +107,148 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
     product.comboConfig?.pkg3Title ||
       (product.offerMode === 'size' ? 'Full Body (বড় সাইজ)' : '৩ টি (মেগা সেভার)')
   );
-  const [comboSinglePrice, setComboSinglePrice] = useState(
-    Number(product.comboConfig?.pkg1Price || product.price)
-  );
+  const [comboSinglePrice, setComboSinglePrice] = useState(Number(product.price) || 0);
   const [comboDoublePrice, setComboDoublePrice] = useState(
-    Number(product.comboConfig?.pkg2Price || product.price * 2 - 100)
+    Number(product.comboConfig?.pkg2Price || Math.max(0, Number(product.price) * 2 - 100))
   );
   const [comboTriplePrice, setComboTriplePrice] = useState(
-    Number(product.comboConfig?.pkg3Price || product.price * 3 - 200)
+    Number(product.comboConfig?.pkg3Price || Math.max(0, Number(product.price) * 3 - 200))
   );
+
+  const buildCurrentProductPayload = (
+    overrides?: Partial<{
+      nameBn: string;
+      nameEn: string;
+      category: ProductCategory;
+      price: number;
+      originalPrice: number;
+      description: string;
+      fabric: string;
+      skuCode: string;
+      inStock: boolean;
+      productStatus: 'published' | 'draft';
+      images: string[];
+      videos: string[];
+      colors: string[];
+      sizes: string[];
+      offerMode: 'piece' | 'size';
+      pkg1Title: string;
+      pkg2Title: string;
+      pkg3Title: string;
+      comboDoublePrice: number;
+      comboTriplePrice: number;
+    }>
+  ): Product => {
+    const effNameBn = overrides?.nameBn !== undefined ? overrides.nameBn : nameBn;
+    const effNameEn = overrides?.nameEn !== undefined ? overrides.nameEn : nameEn;
+    const effCategory = overrides?.category !== undefined ? overrides.category : category;
+    const effPrice = Number(overrides?.price !== undefined ? overrides.price : price) || 0;
+    const effOrigPrice = Number(
+      overrides?.originalPrice !== undefined ? overrides.originalPrice : originalPrice
+    );
+    const effDesc = overrides?.description !== undefined ? overrides.description : description;
+    const effFabric = overrides?.fabric !== undefined ? overrides.fabric : fabric;
+    const effSku = overrides?.skuCode !== undefined ? overrides.skuCode : skuCode;
+    const effInStock = overrides?.inStock !== undefined ? overrides.inStock : inStock;
+    const effStatus = overrides?.productStatus !== undefined ? overrides.productStatus : productStatus;
+    const effImages = overrides?.images !== undefined ? overrides.images : images;
+    const effVideos = overrides?.videos !== undefined ? overrides.videos : videos;
+    const effColors = overrides?.colors !== undefined ? overrides.colors : colors;
+    const effSizes = overrides?.sizes !== undefined ? overrides.sizes : sizes;
+    const effOfferMode = overrides?.offerMode !== undefined ? overrides.offerMode : offerMode;
+    const effPkg1Title = overrides?.pkg1Title !== undefined ? overrides.pkg1Title : pkg1Title;
+    const effPkg2Title = overrides?.pkg2Title !== undefined ? overrides.pkg2Title : pkg2Title;
+    const effPkg3Title = overrides?.pkg3Title !== undefined ? overrides.pkg3Title : pkg3Title;
+    const effDouble = Number(
+      overrides?.comboDoublePrice !== undefined ? overrides.comboDoublePrice : comboDoublePrice
+    );
+    const effTriple = Number(
+      overrides?.comboTriplePrice !== undefined ? overrides.comboTriplePrice : comboTriplePrice
+    );
+
+    return {
+      ...product,
+      name: cleanProductTitle(effNameBn),
+      titleEn: effNameEn,
+      category: effCategory,
+      price: effPrice,
+      originalPrice: Number.isFinite(effOrigPrice) && effOrigPrice >= 0 ? effOrigPrice : effPrice,
+      description: effDesc,
+      fabric: effFabric,
+      sku: effSku,
+      inStock: effInStock,
+      status: effStatus,
+      images: effImages,
+      videos: effVideos,
+      variants: {
+        colors: effColors,
+        sizes: effSizes,
+      },
+      offerMode: effOfferMode,
+      comboConfig: {
+        offerMode: effOfferMode,
+        pkg1Title: effPkg1Title,
+        pkg1Sub: effOfferMode === 'size' ? 'রেগুলার সাইজ' : 'সাধারণ মূল্য',
+        pkg1Price: effPrice,
+        pkg2Title: effPkg2Title,
+        pkg2Sub: `${Math.max(0, effPrice * 2 - effDouble)}৳ নগদ সাশ্রয়!`,
+        pkg2Price: effDouble,
+        pkg2Discount: Math.max(0, effPrice * 2 - effDouble),
+        pkg2Badge: '🔥 সবচেয়ে জনপ্রিয়',
+        pkg3Title: effPkg3Title,
+        pkg3Sub: `${Math.max(0, effPrice * 3 - effTriple)}৳ ছাড় + ০৳ ডেলিভারি`,
+        pkg3Price: effTriple,
+        pkg3Discount: Math.max(0, effPrice * 3 - effTriple),
+        pkg3Badge: '🚚 ফ্রি ডেলিভারি!',
+        pkg3FreeDelivery: true,
+      },
+      updatedAt: Date.now(),
+    };
+  };
+
+  const autoSaveLiveChange = async (
+    overrides?: Parameters<typeof buildCurrentProductPayload>[0],
+    customToast?: string
+  ) => {
+    try {
+      const payload = buildCurrentProductPayload(overrides);
+      const saved = await saveProductPersisted(payload);
+      onProductUpdated(saved);
+      if (customToast) {
+        setToastMessage(customToast);
+        setTimeout(() => setToastMessage(''), 2500);
+      }
+    } catch (err) {
+      console.warn('Auto-save note:', err);
+    }
+  };
 
   const handleToggleOfferMode = (mode: 'piece' | 'size') => {
     setOfferMode(mode);
     if (mode === 'size') {
-      setPkg1Title('Small Size (ছোট সাইজ)');
-      setPkg2Title('Medium Size (মিডিয়াম সাইজ)');
-      setPkg3Title('Full Body (বড় সাইজ)');
-      setSizes(['Small Size (ছোট সাইজ)', 'Medium Size (মিডিয়াম সাইজ)', 'Full Body (বড় সাইজ)']);
+      const p1 = 'Small Size (ছোট সাইজ)';
+      const p2 = 'Medium Size (মিডিয়াম সাইজ)';
+      const p3 = 'Full Body (বড় সাইজ)';
+      const nextSz = [p1, p2, p3];
+      setPkg1Title(p1);
+      setPkg2Title(p2);
+      setPkg3Title(p3);
+      setSizes(nextSz);
+      autoSaveLiveChange(
+        { offerMode: 'size', pkg1Title: p1, pkg2Title: p2, pkg3Title: p3, sizes: nextSz },
+        '✅ সাইজ অফার মোড ফায়ারবেসে সেভ হয়েছে!'
+      );
     } else {
-      setPkg1Title('১ টি (স্ট্যান্ডার্ড)');
-      setPkg2Title('২ টি (কম্বো প্যাক)');
-      setPkg3Title('৩ টি (মেগা সেভার)');
+      const p1 = '১ টি (স্ট্যান্ডার্ড)';
+      const p2 = '২ টি (কম্বো প্যাক)';
+      const p3 = '৩ টি (মেগা সেভার)';
+      setPkg1Title(p1);
+      setPkg2Title(p2);
+      setPkg3Title(p3);
+      autoSaveLiveChange(
+        { offerMode: 'piece', pkg1Title: p1, pkg2Title: p2, pkg3Title: p3 },
+        '✅ পিস অফার মোড ফায়ারবেসে সেভ হয়েছে!'
+      );
     }
   };
 
@@ -319,8 +440,10 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
     const [selected] = reordered.splice(index, 1);
     reordered.unshift(selected);
     setImages(reordered);
-    setToastMessage('মেইন কভার ছবি সফলভাবে সেট করা হয়েছে!');
-    setTimeout(() => setToastMessage(''), 2500);
+    autoSaveLiveChange(
+      { images: reordered },
+      '✅ মেইন কভার ছবি সফলভাবে সেট ও ফায়ারবেসে সেভ হয়েছে!'
+    );
   };
 
   const handleDeleteImage = (index: number) => {
@@ -329,14 +452,18 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
       setTimeout(() => setToastMessage(''), 3000);
       return;
     }
-    setImages(images.filter((_, i) => i !== index));
+    const nextImages = images.filter((_, i) => i !== index);
+    setImages(nextImages);
+    autoSaveLiveChange({ images: nextImages }, '🗑️ ছবি ডিলিট ও ফায়ারবেসে সেভ হয়েছে!');
   };
 
   const handleAddImageUrl = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newImageUrl.trim()) return;
-    setImages([...images, newImageUrl.trim()]);
+    const nextImages = [...images, newImageUrl.trim()];
+    setImages(nextImages);
     setNewImageUrl('');
+    autoSaveLiveChange({ images: nextImages }, '✅ নতুন ছবি যুক্ত ও ফায়ারবেসে সেভ হয়েছে!');
   };
 
   // Local file upload support with automatic canvas compression & instant Firestore persistence for 5+ photos
@@ -354,25 +481,10 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
       if (uploadedUrls.length > 0) {
         const mergedGallery = [...uploadedUrls, ...images];
         setImages(mergedGallery);
-        const autoSaved = await saveProductPersisted({
-          ...product,
-          name: cleanProductTitle(nameBn),
-          titleEn: nameEn,
-          category,
-          price: Number(price),
-          originalPrice: Number(originalPrice),
-          description,
-          fabric,
-          sku: skuCode,
-          inStock,
-          status: productStatus,
-          images: mergedGallery,
-          videos,
-          variants: { colors, sizes },
-          updatedAt: Date.now(),
-        });
-        onProductUpdated(autoSaved);
-        setToastMessage(`✅ ${uploadedUrls.length}টি ছবি সফলভাবে গ্যালারি ও ফায়ারবেস লাইভ ডাটাবেজে সেভ হয়েছে!`);
+        await autoSaveLiveChange(
+          { images: mergedGallery },
+          `✅ ${uploadedUrls.length}টি ছবি সফলভাবে গ্যালারি ও ফায়ারবেস লাইভ ডাটাবেজে সেভ হয়েছে!`
+        );
       }
     } catch (err) {
       console.warn('File upload error:', err);
@@ -383,32 +495,52 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
     }
   };
 
-  // Color handlers
+  // Color handlers (immediately persists to Firestore!)
   const handleAddColor = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newColorInput.trim()) return;
-    if (!colors.includes(newColorInput.trim())) {
-      setColors([...colors, newColorInput.trim()]);
+    const val = newColorInput.trim();
+    if (!val) return;
+    if (!colors.includes(val)) {
+      const nextColors = [...colors, val];
+      setColors(nextColors);
+      autoSaveLiveChange({ colors: nextColors }, `✅ কালার "${val}" ফায়ারবেসে সেভ হয়েছে!`);
     }
     setNewColorInput('');
   };
 
   const handleRemoveColor = (col: string) => {
-    setColors(colors.filter((c) => c !== col));
+    const nextColors = colors.filter((c) => c !== col);
+    setColors(nextColors);
+    autoSaveLiveChange({ colors: nextColors }, `🗑️ কালার "${col}" ডিলিট ও ফায়ারবেসে সেভ হয়েছে!`);
   };
 
-  // Size handlers
+  const handleClearAllColors = () => {
+    setColors([]);
+    autoSaveLiveChange({ colors: [] }, '🗑️ সব কালার ভ্যারিয়েশন ডিলিট ও ফায়ারবেসে সেভ হয়েছে!');
+  };
+
+  // Size handlers (immediately persists to Firestore!)
   const handleAddSize = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newSizeInput.trim()) return;
-    if (!sizes.includes(newSizeInput.trim())) {
-      setSizes([...sizes, newSizeInput.trim()]);
+    const val = newSizeInput.trim();
+    if (!val) return;
+    if (!sizes.includes(val)) {
+      const nextSizes = [...sizes, val];
+      setSizes(nextSizes);
+      autoSaveLiveChange({ sizes: nextSizes }, `✅ সাইজ "${val}" ফায়ারবেসে সেভ হয়েছে!`);
     }
     setNewSizeInput('');
   };
 
   const handleRemoveSize = (sz: string) => {
-    setSizes(sizes.filter((s) => s !== sz));
+    const nextSizes = sizes.filter((s) => s !== sz);
+    setSizes(nextSizes);
+    autoSaveLiveChange({ sizes: nextSizes }, `🗑️ সাইজ "${sz}" ডিলিট ও ফায়ারবেসে সেভ হয়েছে!`);
+  };
+
+  const handleClearAllSizes = () => {
+    setSizes([]);
+    autoSaveLiveChange({ sizes: [] }, '🗑️ সব সাইজ ভ্যারিয়েশন ডিলিট ও ফায়ারবেসে সেভ হয়েছে!');
   };
 
   // Save to Firestore & Store
@@ -416,44 +548,7 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
     setSaving(true);
     setToastMessage('ফায়ারবেস লাইভ ডাটাবেজে সেভ হচ্ছে...');
 
-    const updatedProduct: Product = {
-      ...product,
-      name: cleanProductTitle(nameBn),
-      titleEn: nameEn,
-      category,
-      price: Number(price),
-      originalPrice: Number(originalPrice),
-      description,
-      fabric,
-      sku: skuCode,
-      inStock,
-      status: productStatus,
-      images,
-      videos,
-      variants: {
-        colors,
-        sizes,
-      },
-      offerMode,
-      comboConfig: {
-        offerMode,
-        pkg1Title,
-        pkg1Sub: offerMode === 'size' ? 'রেগুলার সাইজ' : 'সাধারণ মূল্য',
-        pkg1Price: Number(comboSinglePrice || price),
-        pkg2Title,
-        pkg2Sub: `${Math.max(0, Number(price) * 2 - Number(comboDoublePrice))}৳ নগদ সাশ্রয়!`,
-        pkg2Price: Number(comboDoublePrice),
-        pkg2Discount: Math.max(0, Number(price) * 2 - Number(comboDoublePrice)),
-        pkg2Badge: '🔥 সবচেয়ে জনপ্রিয়',
-        pkg3Title,
-        pkg3Sub: `${Math.max(0, Number(price) * 3 - Number(comboTriplePrice))}৳ ছাড় + ০৳ ডেলিভারি`,
-        pkg3Price: Number(comboTriplePrice),
-        pkg3Discount: Math.max(0, Number(price) * 3 - Number(comboTriplePrice)),
-        pkg3Badge: '🚚 ফ্রি ডেলিভারি!',
-        pkg3FreeDelivery: true,
-      },
-      updatedAt: Date.now(),
-    };
+    const updatedProduct = buildCurrentProductPayload();
 
     try {
       const persisted = await saveProductPersisted(updatedProduct);
@@ -952,8 +1047,8 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
                 <div className="flex items-center gap-2 text-[11px]">
                   <button
                     type="button"
-                    onClick={() => setColors([])}
-                    className="text-stone-400 hover:text-stone-600 underline cursor-pointer"
+                    onClick={handleClearAllColors}
+                    className="text-rose-600 hover:text-rose-800 font-bold underline cursor-pointer"
                   >
                     Clear All
                   </button>
@@ -963,21 +1058,27 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
 
               {/* Color chips */}
               <div className="flex flex-wrap gap-2 pt-1">
-                {colors.map((color) => (
-                  <span
-                    key={color}
-                    className="inline-flex items-center gap-1.5 px-3 py-1 bg-stone-100 hover:bg-rose-50 text-stone-800 text-xs font-medium rounded-full border border-stone-200"
-                  >
-                    <span>{color}</span>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveColor(color)}
-                      className="text-stone-400 hover:text-rose-600 cursor-pointer"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
+                {colors.length === 0 ? (
+                  <span className="text-[11px] text-stone-400 italic">
+                    কোনো কালার ভ্যারিয়েশন নেই (প্রোডাক্ট পেইজে কালার অপশন হাইড থাকবে)
                   </span>
-                ))}
+                ) : (
+                  colors.map((color) => (
+                    <span
+                      key={color}
+                      className="inline-flex items-center gap-1.5 px-3 py-1 bg-stone-100 hover:bg-rose-50 text-stone-800 text-xs font-medium rounded-full border border-stone-200"
+                    >
+                      <span>{color}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveColor(color)}
+                        className="text-stone-400 hover:text-rose-600 cursor-pointer"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))
+                )}
               </div>
 
               {/* Add color input */}
@@ -1004,25 +1105,40 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
                 <h3 className="text-sm font-bold text-stone-900">
                   উপলব্ধ সাইজসমূহ (Available Sizes)
                 </h3>
-                <span className="text-[11px] text-stone-500">{sizes.length} টি সাইজ</span>
+                <div className="flex items-center gap-2 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={handleClearAllSizes}
+                    className="text-rose-600 hover:text-rose-800 font-bold underline cursor-pointer"
+                  >
+                    Clear All
+                  </button>
+                  <span className="text-stone-500">{sizes.length} টি সাইজ</span>
+                </div>
               </div>
 
               <div className="flex flex-wrap gap-2 pt-1">
-                {sizes.map((sz) => (
-                  <span
-                    key={sz}
-                    className="inline-flex items-center gap-1.5 px-3 py-1 bg-rose-50 text-rose-800 text-xs font-semibold rounded-full border border-rose-200"
-                  >
-                    <span>{sz}</span>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveSize(sz)}
-                      className="text-rose-400 hover:text-rose-700 cursor-pointer"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
+                {sizes.length === 0 ? (
+                  <span className="text-[11px] text-stone-400 italic">
+                    কোনো সাইজ ভ্যারিয়েশন নেই (প্রোডাক্ট পেইজে সাইজ অপশন হাইড থাকবে)
                   </span>
-                ))}
+                ) : (
+                  sizes.map((sz) => (
+                    <span
+                      key={sz}
+                      className="inline-flex items-center gap-1.5 px-3 py-1 bg-rose-50 text-rose-800 text-xs font-semibold rounded-full border border-rose-200"
+                    >
+                      <span>{sz}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveSize(sz)}
+                        className="text-rose-400 hover:text-rose-700 cursor-pointer"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))
+                )}
               </div>
 
               <form onSubmit={handleAddSize} className="flex gap-2 pt-1">
@@ -1087,6 +1203,12 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
                       type="text"
                       value={pkg1Title}
                       onChange={(e) => setPkg1Title(e.target.value)}
+                      onBlur={(e) =>
+                        autoSaveLiveChange(
+                          { pkg1Title: e.target.value },
+                          '✅ প্যাকেজ ১ টাইটেল ফায়ারবেসে সেভ হয়েছে!'
+                        )
+                      }
                       className="flex-1 px-2.5 py-1 bg-white border border-rose-200 rounded-lg font-extrabold text-stone-900 text-xs"
                     />
                     <span className="text-[10px] text-stone-500 font-medium shrink-0">প্যাকেজ ১</span>
@@ -1101,8 +1223,21 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
                           const val = Number(e.target.value);
                           setPrice(val);
                           setComboSinglePrice(val);
-                          setComboDoublePrice(val * 2 - 100);
-                          setComboTriplePrice(val * 3 - 200);
+                          setComboDoublePrice(Math.max(0, val * 2 - 100));
+                          setComboTriplePrice(Math.max(0, val * 3 - 200));
+                        }}
+                        onBlur={(e) => {
+                          const val = Number(e.target.value) || 0;
+                          const nextDbl = Math.max(0, val * 2 - 100);
+                          const nextTrp = Math.max(0, val * 3 - 200);
+                          autoSaveLiveChange(
+                            {
+                              price: val,
+                              comboDoublePrice: nextDbl,
+                              comboTriplePrice: nextTrp,
+                            },
+                            `✅ নতুন বিক্রয় মূল্য ৳${val} ফায়ারবেসে সেভ হয়েছে!`
+                          );
                         }}
                         className="w-full px-3 py-1.5 bg-white border border-stone-300 rounded-lg font-mono font-bold text-[#E11D48]"
                       />
@@ -1113,6 +1248,13 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
                         type="number"
                         value={originalPrice}
                         onChange={(e) => setOriginalPrice(Number(e.target.value))}
+                        onBlur={(e) => {
+                          const val = Number(e.target.value) || 0;
+                          autoSaveLiveChange(
+                            { originalPrice: val },
+                            `✅ পূর্বের মূল্য ৳${val} ফায়ারবেসে সেভ হয়েছে!`
+                          );
+                        }}
                         className="w-full px-3 py-1.5 bg-white border border-stone-300 rounded-lg font-mono text-stone-500"
                       />
                     </div>
@@ -1126,6 +1268,12 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
                       type="text"
                       value={pkg2Title}
                       onChange={(e) => setPkg2Title(e.target.value)}
+                      onBlur={(e) =>
+                        autoSaveLiveChange(
+                          { pkg2Title: e.target.value },
+                          '✅ প্যাকেজ ২ টাইটেল ফায়ারবেসে সেভ হয়েছে!'
+                        )
+                      }
                       className="flex-1 px-2.5 py-1 bg-white border border-stone-300 rounded-lg font-extrabold text-stone-900 text-xs"
                     />
                     <span className="text-[10px] font-bold text-[#E11D48] bg-rose-100 px-2 py-0.5 rounded-full shrink-0">সবচেয়ে জনপ্রিয়</span>
@@ -1136,6 +1284,13 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
                       type="number"
                       value={comboDoublePrice}
                       onChange={(e) => setComboDoublePrice(Number(e.target.value))}
+                      onBlur={(e) => {
+                        const val = Number(e.target.value) || 0;
+                        autoSaveLiveChange(
+                          { comboDoublePrice: val },
+                          `✅ প্যাকেজ ২ মূল্য ৳${val} ফায়ারবেসে সেভ হয়েছে!`
+                        );
+                      }}
                       className="w-full px-3 py-1.5 bg-white border border-stone-300 rounded-lg font-mono font-bold text-[#E11D48]"
                     />
                   </div>
@@ -1148,6 +1303,12 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
                       type="text"
                       value={pkg3Title}
                       onChange={(e) => setPkg3Title(e.target.value)}
+                      onBlur={(e) =>
+                        autoSaveLiveChange(
+                          { pkg3Title: e.target.value },
+                          '✅ প্যাকেজ ৩ টাইটেল ফায়ারবেসে সেভ হয়েছে!'
+                        )
+                      }
                       className="flex-1 px-2.5 py-1 bg-white border border-stone-300 rounded-lg font-extrabold text-stone-900 text-xs"
                     />
                     <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full shrink-0">ফ্রি ডেলিভারি</span>
@@ -1158,6 +1319,13 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
                       type="number"
                       value={comboTriplePrice}
                       onChange={(e) => setComboTriplePrice(Number(e.target.value))}
+                      onBlur={(e) => {
+                        const val = Number(e.target.value) || 0;
+                        autoSaveLiveChange(
+                          { comboTriplePrice: val },
+                          `✅ প্যাকেজ ৩ মূল্য ৳${val} ফায়ারবেসে সেভ হয়েছে!`
+                        );
+                      }}
                       className="w-full px-3 py-1.5 bg-white border border-stone-300 rounded-lg font-mono font-bold text-emerald-700"
                     />
                   </div>

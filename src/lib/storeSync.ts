@@ -1644,25 +1644,15 @@ export function handleProductImageError(
  */
 export function enrichProductFields(p: Product): Product {
   const name = (p.name || 'প্রিমিয়াম কালেকশন').trim();
-  const rawDesc = (p.description || '').trim();
   const description =
-    rawDesc.length >= 25
-      ? rawDesc
-      : `${name} — Dokandari অফিশিয়াল স্টোরের ১০০% অরিজিনাল ও প্রিমিয়াম কোয়ালিটি পণ্য। আধুনিক ডিজাইন, দীর্ঘস্থায়ী ফিনিশিং এবং দৈনন্দিন ব্যবহারে সর্বোচ্চ মানের নিশ্চয়তা। সারা বাংলাদেশে ক্যাশ অন ডেলিভারি এবং ডেলিভারি ম্যানের সামনে পার্সেল খুলে দেখে মূল্য পরিশোধের সুবিধা রয়েছে।`;
+    typeof p.description === 'string'
+      ? p.description.trim()
+      : `${name} — Dokandari অফিশিয়াল স্টোরের ১০০% অরিজিনাল ও প্রিমিয়াম কোয়ালিটি পণ্য।`;
 
-  const fabric =
-    p.fabric && p.fabric.trim().length > 2
-      ? p.fabric.trim()
-      : p.category === 'beauty_personal_care'
-      ? '১০০% অথেনটিক ও ডার্মাটোলজিক্যালি টেস্টেড ফর্মুলা'
-      : p.category === 'gadgets_electronics' || p.category === 'mobile_accessories'
-      ? 'প্রিমিয়াম গ্রেড এবিএস পলিমার ও স্মার্ট সার্কিট প্রোটেকশন'
-      : p.category === 'fashion_clothing'
-      ? '১০০% প্রিমিয়াম এক্সপোর্ট কোয়ালিটি কম্ফোর্ট ফেব্রিক'
-      : '১০০% অরিজিনাল ইমপোর্টেড হাই-গ্রেড মেটেরিয়াল';
+  const fabric = typeof p.fabric === 'string' ? p.fabric.trim() : '';
 
   const features =
-    Array.isArray(p.features) && p.features.length >= 3
+    Array.isArray(p.features) && p.features.length > 0
       ? p.features
       : [
           '১০০% অরিজিনাল ও বাছাইকৃত প্রিমিয়াম কোয়ালিটি পণ্য',
@@ -1671,21 +1661,19 @@ export function enrichProductFields(p: Product): Product {
           '৭ দিনের সহজ রিটার্ন ও ইনস্ট্যান্ট এক্সচেঞ্জ গ্যারান্টি',
         ];
 
-  const colors =
-    p.variants?.colors && p.variants.colors.length > 0
-      ? p.variants.colors
-      : ['অরিজিনাল কালার (Original Picture Color)'];
+  const colors = Array.isArray(p.variants?.colors)
+    ? p.variants.colors.filter((c) => typeof c === 'string' && c.trim().length > 0)
+    : [];
 
-  const sizes =
-    p.variants?.sizes && p.variants.sizes.length > 0
-      ? p.variants.sizes
-      : ['স্ট্যান্ডার্ড সাইজ (Standard Pack)'];
+  const sizes = Array.isArray(p.variants?.sizes)
+    ? p.variants.sizes.filter((s) => typeof s === 'string' && s.trim().length > 0)
+    : [];
 
-  const price = Number(p.price) || 990;
+  const parsedPrice = Number(p.price);
+  const price = Number.isFinite(parsedPrice) && parsedPrice >= 0 ? parsedPrice : 0;
+  const parsedOrig = Number(p.originalPrice);
   const originalPrice =
-    Number(p.originalPrice) && Number(p.originalPrice) > price
-      ? Number(p.originalPrice)
-      : Math.round(price * 1.25);
+    Number.isFinite(parsedOrig) && parsedOrig >= 0 ? parsedOrig : price;
 
   return {
     ...p,
@@ -1731,39 +1719,6 @@ const INITIAL_PRODUCT_MAP = new Map<string, Product>(INITIAL_PRODUCTS.map((ip) =
 
 function normalizeProductImages(p: Product): Product {
   const enriched = enrichProductFields(p);
-  const initMatch = INITIAL_PRODUCT_MAP.get(enriched.id);
-
-  // Heal flagship Custom Social Media Profile Full-Length Mirror if an older duplicate entry overwrote its name or images
-  if (enriched.id === 'dkd-1793610538096-571') {
-    if (
-      !enriched.name ||
-      enriched.name.includes('ব্যবসা এবং বাড়ির সাজসজ্জার জন্য')
-    ) {
-      enriched.name =
-        initMatch?.name ||
-        'ফেসবুক ও ইনস্টাগ্রাম প্রোফাইল থিম কাস্টম ফুল-লেংথ মিরর (আপনার ব্র্যান্ডের নামে কাস্টমাইজড আয়না)';
-    }
-    if (!enriched.offerMode) {
-      enriched.offerMode = 'size';
-    }
-    if (!enriched.comboConfig && initMatch?.comboConfig) {
-      enriched.comboConfig = {
-        ...initMatch.comboConfig,
-        pkg1Price: Number(enriched.price) || initMatch.comboConfig.pkg1Price,
-      };
-    }
-    if (
-      !Array.isArray(enriched.images) ||
-      enriched.images.length === 0 ||
-      enriched.images.some(
-        (u) =>
-          typeof u === 'string' &&
-          (u.includes('dkd-1793610538096-571-') || u.includes('scraped-'))
-      )
-    ) {
-      enriched.images = [...VW_CUSTOM_MIRROR_REAL_IMAGES];
-    }
-  }
 
   // Keep comboConfig.pkg1Price synced with product.price so editing product.price immediately reflects on the product page
   if (enriched.comboConfig && Number(enriched.price) > 0) {
@@ -1773,16 +1728,7 @@ function normalizeProductImages(p: Product): Product {
     };
   }
 
-  let rawCandidateList = Array.isArray(enriched.images) ? enriched.images : [];
-
-  // If an initial catalog item has real /uploads/product/ photos in INITIAL_PRODUCTS, but Firestore still has old Unsplash placeholders, restore the real /uploads/product/ photos!
-  if (
-    initMatch &&
-    initMatch.images?.[0]?.startsWith('/uploads/product/') &&
-    rawCandidateList[0]?.includes('images.unsplash.com')
-  ) {
-    rawCandidateList = initMatch.images;
-  }
+  const rawCandidateList = Array.isArray(enriched.images) ? enriched.images : [];
 
   const nonEmptyRaw = rawCandidateList.filter(
     (img) =>
@@ -1806,20 +1752,9 @@ function normalizeProductImages(p: Product): Product {
       ? nonEmptyRaw
       : isImportedOrCustom
       ? []
-      : [
-          getFallbackProductImage(enriched, 0),
-          getFallbackProductImage(enriched, 1),
-          getFallbackProductImage(enriched, 2),
-        ];
+      : [getFallbackProductImage(enriched, 0)];
 
   const safeImages = baseList.map((img, idx) => resolveSafeProductImageUrl(img, enriched, idx));
-
-  // Only pad initial catalog items to 3 images; for imported/custom products keep ONLY their real images
-  if (!isImportedOrCustom) {
-    while (safeImages.length < 3) {
-      safeImages.push(safeImages[0] || getFallbackProductImage(enriched, safeImages.length));
-    }
-  }
 
   return {
     ...enriched,
@@ -2802,13 +2737,37 @@ export function mergeCatalogProducts(remoteProducts?: Product[]): Product[] {
 
   if (remoteProducts && remoteProducts.length > 0) {
     // AUTHORITATIVE FIRESTORE / SERVER CATALOG MODE:
-    // Use remoteProducts directly as the source of truth so stale localStorage entries never revert edits or resurrect deleted items.
+    // Use remoteProducts directly as the source of truth, while respecting any local edit saved in the last 60s so in-flight responses never revert an active edit.
     const nextCustomMap: Record<string, Product> = {};
     for (const p of remoteProducts) {
       if (p && p.id && !deletedIds.has(p.id) && !BLOCKED_DUPLICATE_IDS.has(p.id)) {
-        const normalizedRemote = normalizeProductImages(p);
-        map.set(p.id, normalizedRemote);
-        nextCustomMap[p.id] = normalizedRemote;
+        const localSaved = customMap[p.id];
+        const remoteTs = Number(p.updatedAt || p.lifetimeSavedAt || 0);
+        const localTs = Number(localSaved?.updatedAt || localSaved?.lifetimeSavedAt || 0);
+        const isFreshLocalEdit =
+          Boolean(localSaved) &&
+          localTs > remoteTs &&
+          Date.now() - localTs < 60000;
+        const chosen = normalizeProductImages(isFreshLocalEdit ? localSaved : p);
+        map.set(p.id, chosen);
+        nextCustomMap[p.id] = chosen;
+      }
+    }
+    // Also preserve any newly created product saved locally within the last 60s before Firestore snapshot arrives
+    for (const [localId, localProd] of Object.entries(customMap)) {
+      if (
+        localProd &&
+        localId &&
+        !map.has(localId) &&
+        !deletedIds.has(localId) &&
+        !BLOCKED_DUPLICATE_IDS.has(localId)
+      ) {
+        const localTs = Number(localProd.updatedAt || localProd.lifetimeSavedAt || 0);
+        if (Date.now() - localTs < 60000) {
+          const normalizedLocal = normalizeProductImages(localProd);
+          map.set(localId, normalizedLocal);
+          nextCustomMap[localId] = normalizedLocal;
+        }
       }
     }
     try {
@@ -3015,14 +2974,21 @@ export async function saveProductPersisted(product: Product): Promise<Product> {
     comboConfig: product.comboConfig,
   });
 
+  const cleanPrice = Number.isFinite(Number(cleanedProduct.price))
+    ? Number(cleanedProduct.price)
+    : 0;
+  const cleanOriginalPrice =
+    Number.isFinite(Number(cleanedProduct.originalPrice)) &&
+    Number(cleanedProduct.originalPrice) >= 0
+      ? Number(cleanedProduct.originalPrice)
+      : cleanPrice;
+
   const normalized: Product = sanitizeForFirestore({
     ...cleanedProduct,
     id: targetId,
     name: (cleanedProduct.name || 'নতুন প্রোডাক্ট').trim(),
-    price: Number(cleanedProduct.price) || 0,
-    originalPrice:
-      Number(cleanedProduct.originalPrice) ||
-      Math.round((Number(cleanedProduct.price) || 0) * 1.25),
+    price: cleanPrice,
+    originalPrice: cleanOriginalPrice,
     category: cleanedProduct.category || 'home_decor',
     description: cleanedProduct.description || cleanedProduct.name || '',
     features: Array.isArray(cleanedProduct.features) ? cleanedProduct.features : [],
@@ -3034,14 +3000,23 @@ export async function saveProductPersisted(product: Product): Promise<Product> {
     afterLabel: cleanedProduct.afterLabel || undefined,
     beforeAfterTitle: cleanedProduct.beforeAfterTitle || undefined,
     offerMode: cleanedProduct.offerMode || cleanedProduct.comboConfig?.offerMode || undefined,
-    comboConfig: cleanedProduct.comboConfig || undefined,
+    comboConfig: cleanedProduct.comboConfig
+      ? {
+          ...cleanedProduct.comboConfig,
+          pkg1Price: cleanPrice,
+        }
+      : undefined,
     variants: {
-      colors: cleanedProduct.variants?.colors?.length
-        ? cleanedProduct.variants.colors
-        : ['Standard Color'],
-      sizes: cleanedProduct.variants?.sizes?.length
-        ? cleanedProduct.variants.sizes
-        : ['Standard Size'],
+      colors: Array.isArray(cleanedProduct.variants?.colors)
+        ? cleanedProduct.variants.colors.filter(
+            (c) => typeof c === 'string' && c.trim().length > 0
+          )
+        : [],
+      sizes: Array.isArray(cleanedProduct.variants?.sizes)
+        ? cleanedProduct.variants.sizes.filter(
+            (s) => typeof s === 'string' && s.trim().length > 0
+          )
+        : [],
     },
     inStock: cleanedProduct.inStock !== false,
     rating: Number(cleanedProduct.rating) || 4.9,
@@ -3111,7 +3086,11 @@ export async function saveProductPersisted(product: Product): Promise<Product> {
     fetch('/api/catalog/sync-mirror', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ products: [firestoreSafe] }),
+      body: JSON.stringify({
+        product: firestoreSafe,
+        products: [firestoreSafe],
+        isExplicitAdminSave: true,
+      }),
     }),
   ]);
 

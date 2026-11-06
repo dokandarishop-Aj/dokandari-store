@@ -1049,7 +1049,7 @@ function StoreMain() {
                   : [withTs, ...prev];
               });
               setDetailedProduct((curr) => (curr?.id === withTs.id ? withTs : curr));
-              setEditingProduct(null);
+              setEditingProduct((curr) => (curr?.id === withTs.id ? withTs : curr));
             }}
             onProductDeleted={(id) => {
               setProducts((prev) => prev.filter((p) => p.id !== id));

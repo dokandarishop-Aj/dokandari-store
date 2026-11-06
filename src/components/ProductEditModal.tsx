@@ -54,11 +54,14 @@ export const ProductEditModal: React.FC<ProductEditModalProps> = ({
       .map((s) => s.trim())
       .filter(Boolean);
 
+    const numPrice = Number(price) || 0;
+    const numOrig = Number.isFinite(Number(originalPrice)) ? Number(originalPrice) : numPrice;
+
     const updatedProduct: Product = {
       ...product,
       name,
-      price: Number(price),
-      originalPrice: Number(originalPrice),
+      price: numPrice,
+      originalPrice: numOrig,
       category: category as any,
       fabric,
       inStock,
@@ -66,9 +69,17 @@ export const ProductEditModal: React.FC<ProductEditModalProps> = ({
       images: imageUrl ? [imageUrl, ...product.images.slice(1)] : product.images,
       videos: videoUrl.trim() ? [videoUrl.trim(), ...(product.videos?.slice(1) || [])] : [],
       variants: {
-        colors: colors.length > 0 ? colors : product.variants?.colors || [],
-        sizes: sizes.length > 0 ? sizes : product.variants?.sizes || [],
+        colors,
+        sizes,
       },
+      comboConfig: product.comboConfig
+        ? {
+            ...product.comboConfig,
+            pkg1Price: numPrice,
+            pkg2Price: Math.max(numPrice, numPrice * 2 - Number(product.comboConfig.pkg2Discount ?? 100)),
+            pkg3Price: Math.max(numPrice, numPrice * 3 - Number(product.comboConfig.pkg3Discount ?? 200)),
+          }
+        : undefined,
       updatedAt: Date.now(),
     };
 
