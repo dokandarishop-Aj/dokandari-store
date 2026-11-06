@@ -139,6 +139,7 @@ import {
   resolveSafeProductImageUrl,
   handleProductImageError,
   getPersistedOrders,
+  syncOrdersToLocalCache,
   saveOrderPersisted,
   deleteOrderPersisted,
   deleteOrdersBulkPersisted,
@@ -606,42 +607,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [expenses, setExpenses] = useState<BusinessExpense[]>(() => {
     try {
       const cached = localStorage.getItem('dokandari_expenses_backup_v1');
-      if (cached) {
+      if (cached !== null) {
         const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed)) return parsed;
       }
     } catch {
       // ignore
     }
-    return [
-      {
-        id: 'exp-init-1',
-        date: new Date().toISOString().slice(0, 10),
-        category: 'ad_cost',
-        categoryLabel: 'মেটা ও টিকটক অ্যাড স্পেন্ড',
-        amount: 1500,
-        note: 'হোম ডেকোর ও আনব্রেকেবল মিরর ফেসবুক ক্যাম্পেইন',
-        createdAt: Date.now() - 3600 * 12 * 1000,
-      },
-      {
-        id: 'exp-init-2',
-        date: new Date().toISOString().slice(0, 10),
-        category: 'transport_fare',
-        categoryLabel: 'রিকশা / গাড়ি / যাতায়াত ভাড়া',
-        amount: 250,
-        note: 'চকবাজার ও ইসলামপুর মার্কেট সোর্সিং রিকশা ও যাতায়াত',
-        createdAt: Date.now() - 3600 * 20 * 1000,
-      },
-      {
-        id: 'exp-init-3',
-        date: new Date().toISOString().slice(0, 10),
-        category: 'packaging',
-        categoryLabel: 'বক্স ও প্যাকেজিং খরচ',
-        amount: 600,
-        note: 'বাবল র‍্যাপ ও কুরিয়ার প্যাকিং বক্স ৫০ পিস',
-        createdAt: Date.now() - 3600 * 30 * 1000,
-      },
-    ];
+    return [];
   });
   const [expenseRange, setExpenseRange] = useState<'today' | 'week' | 'month' | 'all'>('month');
   const [newExpenseCategory, setNewExpenseCategory] = useState<BusinessExpense['category']>('ad_cost');
@@ -660,16 +633,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           snap.forEach((d) => {
             loaded.push({ id: d.id, ...(d.data() as any) });
           });
-          if (loaded.length > 0) {
-            loaded.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-            setExpenses(loaded);
-            try {
-              localStorage.setItem('dokandari_expenses_backup_v1', JSON.stringify(loaded));
-            } catch {
-              // ignore
-            }
-          } else if (snap.empty) {
-            // keep existing or cached if any, but don't crash
+          loaded.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+          setExpenses(loaded);
+          try {
+            localStorage.setItem('dokandari_expenses_backup_v1', JSON.stringify(loaded));
+          } catch {
+            // ignore
           }
         },
         (err) => console.warn('Expenses listener notice:', err)
@@ -725,48 +694,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               // ignore
             }
           } else {
-            const alreadySeeded =
-              localStorage.getItem('dokandari_courier_returns_seeded_v1') === 'true' ||
-              deletedIds.has('ret-init-1045');
-            if (!alreadySeeded) {
-              // Seed initial sample return ONLY once on fresh store; never re-seed after admin deletes it
-              try {
-                localStorage.setItem('dokandari_courier_returns_seeded_v1', 'true');
-              } catch {
-                // ignore
-              }
-              const sampleProd = products[0];
-              const sampleReturn: CourierReturn = {
-                id: 'ret-init-1045',
-                orderId: '1045',
-                customerName: 'তানভীর আহমেদ',
-                customerPhone: '01711223344',
-                productId: sampleProd?.id || 'dkd-1',
-                productName:
-                  sampleProd?.name ||
-                  'খিলান আকৃতির আনব্রেকেবল সেলফ-অ্যাডহেসিভ অ্যাক্রিলিক ওয়াল মিরর',
-                sku: sampleProd?.sku || 'MIRROR-ARCH-01',
-                quantity: 1,
-                courierName: 'Steadfast',
-                courierTracking: 'STDF-89472',
-                returnCharge: 120,
-                returnReason: 'কাস্টমার ফোন রিসিভ করেনি',
-                productCondition: 'sellable',
-                damageLoss: 0,
-                status: 'restocked',
-                stockAdjusted: true,
-                expenseRecorded: true,
-                returnDate: new Date().toISOString().slice(0, 10),
-                notes: 'পণ্য সম্পূর্ণ ফ্রেশ অবস্থায় গুদামে জমা হয়েছে এবং স্টকে অটো-যুক্ত হয়েছে।',
-                createdAt: Date.now() - 3600 * 24 * 1000,
-                updatedAt: Date.now() - 3600 * 20 * 1000,
-              };
-              setCourierReturns([sampleReturn]);
-              saveCourierReturnPersisted(sampleReturn).catch(() => null);
-            } else {
-              setCourierReturns([]);
-              syncCourierReturnsToLocalCache([]);
-            }
+            setCourierReturns([]);
+            syncCourierReturnsToLocalCache([]);
           }
         },
         (err) => console.warn('Courier returns listener notice:', err)
@@ -793,7 +722,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     } catch {
       // ignore
     }
-  }, [products]);
+  }, []);
 
   // Core Auto Stock Adjustment & Expense Automation Engine
   const executeStockAndExpenseAdjustment = async (
@@ -1288,35 +1217,32 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       try {
         checkGeminiServerStatus().then((st) => setGeminiStatus(st));
 
-        // 1. Fetch authoritative server mirror orders first (/api/orders -> data/orders_mirror.json)
+        // 1. Sync deleted order IDs from Firestore `settings/deleted_orders` FIRST so deleted orders never resurrect
+        try {
+          const delOrdDoc = await getDoc(doc(db, 'settings', 'deleted_orders'));
+          if (delOrdDoc.exists() && Array.isArray(delOrdDoc.data()?.ids)) {
+            delOrdDoc.data()!.ids.forEach((id: string) => {
+              if (id) addDeletedOrderId(id);
+            });
+          }
+        } catch {
+          // ignore
+        }
+
+        const deletedOrderSet = getDeletedOrderIds();
+
+        // 2. Fetch server mirror orders (/api/orders -> data/orders_mirror.json), filtering out any deleted IDs
         let serverMirrorOrders: Order[] = [];
         try {
           const srvOrdRes = await fetch('/api/orders');
           if (srvOrdRes.ok) {
             const srvOrdJson = await srvOrdRes.json();
             if (Array.isArray(srvOrdJson?.orders)) {
-              serverMirrorOrders = srvOrdJson.orders.filter((o: any) => o && o.id);
+              serverMirrorOrders = srvOrdJson.orders.filter(
+                (o: any) => o && o.id && !deletedOrderSet.has(o.id)
+              );
               serverOrdersRef.current = serverMirrorOrders;
             }
-          }
-        } catch {
-          // ignore
-        }
-
-        const activeMirrorIdSet = new Set(serverMirrorOrders.map((o) => o.id));
-        if (activeMirrorIdSet.size > 0) {
-          removeDeletedOrderIds(Array.from(activeMirrorIdSet));
-        }
-
-        // Sync deleted order IDs (excluding any active order present in the authoritative server mirror)
-        try {
-          const delOrdDoc = await getDoc(doc(db, 'settings', 'deleted_orders'));
-          if (delOrdDoc.exists() && Array.isArray(delOrdDoc.data()?.ids)) {
-            delOrdDoc.data()!.ids.forEach((id: string) => {
-              if (!activeMirrorIdSet.has(id)) {
-                addDeletedOrderId(id);
-              }
-            });
           }
         } catch {
           // ignore
@@ -1473,17 +1399,41 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     };
     loadData();
 
+    // Realtime live listener for deleted orders so deleted orders stay suppressed across all tabs/sessions
+    const unsubDeletedOrders = onSnapshot(
+      doc(db, 'settings', 'deleted_orders'),
+      (snap) => {
+        if (snap.exists() && Array.isArray(snap.data()?.ids)) {
+          const ids = snap.data()!.ids as string[];
+          ids.forEach((id) => {
+            if (id) addDeletedOrderId(id);
+          });
+          const delSet = getDeletedOrderIds();
+          serverOrdersRef.current = serverOrdersRef.current.filter((o) => !delSet.has(o.id));
+          setOrders((prev) => {
+            const next = prev.filter((o) => !delSet.has(o.id));
+            syncOrdersToLocalCache(next);
+            return next;
+          });
+        }
+      },
+      () => {}
+    );
+
     // Realtime live listener for customer orders (merges localStorage + serverMirrorOrders + Firestore orders)
     const unsubOrders = onSnapshot(
       collection(db, 'orders'),
       (snap) => {
+        const delSet = getDeletedOrderIds();
         const firestoreOrders: Order[] = [];
         snap.forEach((d) => {
           const data = d.data() as Order;
-          if (data && data.id) {
-            firestoreOrders.push(data);
+          const id = data?.id || d.id;
+          if (data && id && !delSet.has(id)) {
+            firestoreOrders.push({ ...data, id });
           }
         });
+        serverOrdersRef.current = serverOrdersRef.current.filter((o) => !delSet.has(o.id));
         const list = mergeAndPersistAllOrders({
           localOrders: getPersistedOrders(),
           serverMirrorOrders: serverOrdersRef.current,
@@ -1574,6 +1524,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     );
 
     return () => {
+      unsubDeletedOrders();
       unsubOrders();
       unsubPurchases();
       unsubLeads();
@@ -1582,21 +1533,22 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   }, []);
 
   const handleUpdateOrderStatus = async (orderId: string, status: OrderStatus) => {
+    const now = Date.now();
     try {
-      await updateDoc(doc(db, 'orders', orderId), { status, updatedAt: Date.now() });
       setOrders((prev) => {
-        const next = prev.map((o) => (o.id === orderId ? { ...o, status } : o));
-        try {
-          localStorage.setItem('dokandari_orders_backup_v1', JSON.stringify(next));
-        } catch {
-          // ignore
+        const next = prev.map((o) => (o.id === orderId ? { ...o, status, updatedAt: now } : o));
+        syncOrdersToLocalCache(next);
+        const updatedOrd = next.find((o) => o.id === orderId);
+        if (updatedOrd) {
+          saveOrderPersisted(updatedOrd).catch(() => null);
         }
         return next;
       });
+      await updateDoc(doc(db, 'orders', orderId), { status, updatedAt: now });
       setFeedback(`অর্ডার ${orderId} স্ট্যাটাস ${status.toUpperCase()}-এ আপডেট হয়েছে!`);
       setTimeout(() => setFeedback(''), 3000);
     } catch {
-      setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, status } : o)));
+      setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, status, updatedAt: now } : o)));
     }
   };
 
@@ -1604,12 +1556,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const handleDeleteOrder = async (order: Order) => {
     const deductedAmount = Number(order.total) || 0;
     try {
-      await deleteOrderPersisted(order.id);
-      setOrders((prev) => prev.filter((o) => o.id !== order.id));
+      addDeletedOrderId(order.id);
+      serverOrdersRef.current = serverOrdersRef.current.filter((o) => o.id !== order.id);
+      setOrders((prev) => {
+        const next = prev.filter((o) => o.id !== order.id);
+        syncOrdersToLocalCache(next);
+        return next;
+      });
       if (selectedOrderForView?.id === order.id) setSelectedOrderForView(null);
       if (selectedOrderForInvoice?.id === order.id) setSelectedOrderForInvoice(null);
+      if (selectedOrderScreenshotModal?.id === order.id) setSelectedOrderScreenshotModal(null);
+
+      await deleteOrderPersisted(order.id);
+
       setFeedback(
-        `🗑️ অর্ডার #${order.id} (${order.customer.name} — ৳${deductedAmount.toLocaleString()}) ডাটাবেজ থেকে স্থায়ীভাবে ডিলিট হয়েছে এবং সেলস অ্যানালাইসিস থেকে সাথে সাথে -৳${deductedAmount.toLocaleString()} মাইনাস হয়েছে!`
+        `🗑️ অর্ডার #${order.id} (${order.customer.name} — ৳${deductedAmount.toLocaleString()}) ফায়ারস্টোর ডাটাবেজ থেকে স্থায়ীভাবে ডিলিট হয়েছে এবং সেলস অ্যানালাইসিস থেকে সাথে সাথে -৳${deductedAmount.toLocaleString()} মাইনাস হয়েছে!`
       );
       setTimeout(() => setFeedback(''), 5500);
     } catch (err) {
@@ -1627,11 +1588,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
     const totalDeducted = targetOrders.reduce((sum, o) => sum + (Number(o.total) || 0), 0);
     const ids = targetOrders.map((o) => o.id);
-    await deleteOrdersBulkPersisted(ids);
     const idSet = new Set(ids);
-    setOrders((prev) => prev.filter((o) => !idSet.has(o.id)));
+    ids.forEach((id) => addDeletedOrderId(id));
+    serverOrdersRef.current = serverOrdersRef.current.filter((o) => !idSet.has(o.id));
+    setOrders((prev) => {
+      const next = prev.filter((o) => !idSet.has(o.id));
+      syncOrdersToLocalCache(next);
+      return next;
+    });
+    await deleteOrdersBulkPersisted(ids);
     setFeedback(
-      `🗑️ মোট ${ids.length}টি বাতিল/ডেমো অর্ডার (মোট ৳${totalDeducted.toLocaleString()}) ডাটাবেজ ও সেলস অ্যানালাইটিক্স থেকে স্থায়ীভাবে মুছে ফেলা হয়েছে!`
+      `🗑️ মোট ${ids.length}টি বাতিল/ডেমো অর্ডার (মোট ৳${totalDeducted.toLocaleString()}) ফায়ারস্টোর ডাটাবেজ ও সেলস অ্যানালাইটিক্স থেকে স্থায়ীভাবে মুছে ফেলা হয়েছে!`
     );
     setTimeout(() => setFeedback(''), 5500);
   };
@@ -6030,7 +5997,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       </p>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => window.print()}
+                        className="px-3.5 py-2 rounded-xl bg-stone-900 hover:bg-stone-800 text-white text-xs sm:text-sm font-extrabold flex items-center gap-1.5 shadow-sm cursor-pointer"
+                      >
+                        <Printer className="w-4 h-4" />
+                        <span>🖨️ প্রিন্ট করুন</span>
+                      </button>
+
                       <button
                         type="button"
                         onClick={() =>

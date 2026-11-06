@@ -4512,20 +4512,6 @@ Return strict JSON.
   // 6.1b 1-Click Automatic Pixel-Based Catalog Sync Endpoint (Zero Manual Link Needed)
   app.post('/api/pixel/auto-catalog-sync', async (req, res) => {
     try {
-      // Persist any incoming client products directly into the server catalog mirror so feed.xml / feed.csv / feed.json have all 59+ products!
-      if (Array.isArray(req.body?.products) && req.body.products.length > 0) {
-        const mirror = readLocalCatalogMirror();
-        const deletedSet = new Set(mirror.deletedIds);
-        for (const incomingProd of req.body.products) {
-          if (incomingProd && incomingProd.id && !deletedSet.has(incomingProd.id)) {
-            mirror.products[incomingProd.id] = {
-              ...(mirror.products[incomingProd.id] || {}),
-              ...incomingProd,
-            };
-          }
-        }
-        writeLocalCatalogMirror(mirror);
-      }
 
       const reqOrigin =
         req.body?.origin ||
@@ -6369,24 +6355,64 @@ Return strict JSON with 100% complete, rich Bengali product details:
     const deletedSet = new Set(mirror.deletedIds);
     const now = Date.now();
 
-    if (forceFresh || now - lastFirestoreFetchMs > 12000 || cachedFirestoreProducts.length === 0) {
+    if (forceFresh || now - lastFirestoreFetchMs > 2000 || cachedFirestoreProducts.length === 0) {
       try {
-        const snap = await withTimeout(
-          getDocs(collection(serverDb, 'products')),
-          4500,
-          'Firestore products fetch'
-        );
+        const [snap, delProdSnap] = await Promise.all([
+          withTimeout(
+            getDocs(collection(serverDb, 'products')),
+            4500,
+            'Firestore products fetch'
+          ),
+          withTimeout(
+            getDoc(doc(serverDb, 'settings', 'deleted_products')),
+            3000,
+            'Firestore deleted_products fetch'
+          ).catch(() => null),
+        ]);
+
+        if (delProdSnap && delProdSnap.exists()) {
+          const remoteDelIds = delProdSnap.data()?.ids;
+          if (Array.isArray(remoteDelIds)) {
+            let mirrorDelChanged = false;
+            for (const dId of remoteDelIds) {
+              if (dId && !deletedSet.has(dId)) {
+                deletedSet.add(dId);
+                mirrorDelChanged = true;
+              }
+              if (mirror.products[dId]) {
+                delete mirror.products[dId];
+                mirrorDelChanged = true;
+              }
+            }
+            if (mirrorDelChanged) {
+              mirror.deletedIds = Array.from(deletedSet);
+              writeLocalCatalogMirror(mirror);
+            }
+          }
+        }
+
         if (!snap.empty) {
           const parsed: any[] = [];
           snap.forEach((d) => {
             const data = d.data();
             if (data) {
-              parsed.push({ ...data, id: data.id || d.id });
+              const id = data.id || d.id;
+              if (!deletedSet.has(id)) {
+                parsed.push({ ...data, id });
+              }
             }
           });
           if (parsed.length > 0) {
             cachedFirestoreProducts = parsed;
             lastFirestoreFetchMs = now;
+            // Sync mirror to match authoritative Firestore products
+            const nextMirrorProds: Record<string, any> = {};
+            for (const fp of parsed) {
+              nextMirrorProds[fp.id] = fp;
+            }
+            mirror.products = nextMirrorProds;
+            mirror.deletedIds = Array.from(deletedSet);
+            writeLocalCatalogMirror(mirror);
           }
         }
       } catch (_err) {
@@ -6394,27 +6420,28 @@ Return strict JSON with 100% complete, rich Bengali product details:
       }
     }
 
+    // When live Firestore products are loaded, Firestore is the authoritative source of truth
+    if (cachedFirestoreProducts.length > 0) {
+      return cachedFirestoreProducts.filter((p) => p && p.id && !deletedSet.has(p.id));
+    }
+
+    // Fallback only if Firestore has not responded yet
     const mergedMap = new Map<string, any>();
     for (const p of INITIAL_PRODUCTS) {
       if (p && p.id && !deletedSet.has(p.id)) {
-        mergedMap.set(p.id, { ...p, published: true });
-      }
-    }
-    for (const p of cachedFirestoreProducts) {
-      if (p && p.id && !deletedSet.has(p.id)) {
-        mergedMap.set(p.id, { ...(mergedMap.get(p.id) || {}), ...p });
+        mergedMap.set(p.id, { ...p, published: true, updatedAt: 0 });
       }
     }
     for (const [id, p] of Object.entries(mirror.products)) {
       if (p && id && !deletedSet.has(id)) {
-        mergedMap.set(id, { ...(mergedMap.get(id) || {}), ...p });
+        mergedMap.set(id, { ...p, id });
       }
     }
 
     return Array.from(mergedMap.values());
   }
 
-  app.post('/api/catalog/sync-mirror', (req, res) => {
+  app.post('/api/catalog/sync-mirror', async (req, res) => {
     try {
       const mirror = readLocalCatalogMirror();
       const deletedSet = new Set(mirror.deletedIds);
@@ -6425,19 +6452,29 @@ Return strict JSON with 100% complete, rich Bengali product details:
       if (Array.isArray(req.body?.products)) {
         incoming.push(...req.body.products.filter((p: any) => p && p.id));
       }
+      const writePromises: Promise<any>[] = [];
       for (const prod of incoming) {
         mirror.products[prod.id] = prod;
         deletedSet.delete(prod.id);
+        const existingIdx = cachedFirestoreProducts.findIndex((cp) => cp?.id === prod.id);
+        if (existingIdx >= 0) {
+          cachedFirestoreProducts[existingIdx] = prod;
+        } else {
+          cachedFirestoreProducts.unshift(prod);
+        }
+        writePromises.push(setDoc(doc(serverDb, 'products', prod.id), prod).catch(() => {}));
       }
       mirror.deletedIds = Array.from(deletedSet);
       writeLocalCatalogMirror(mirror);
+      await Promise.allSettled(writePromises);
+      lastFirestoreFetchMs = Date.now();
       res.json({ success: true, count: Object.keys(mirror.products).length });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err?.message || 'Sync error' });
     }
   });
 
-  app.post('/api/catalog/delete-mirror', (req, res) => {
+  app.post('/api/catalog/delete-mirror', async (req, res) => {
     try {
       const productId = String(req.body?.productId || '').trim();
       if (productId) {
@@ -6448,6 +6485,15 @@ Return strict JSON with 100% complete, rich Bengali product details:
         }
         writeLocalCatalogMirror(mirror);
         cachedFirestoreProducts = cachedFirestoreProducts.filter((p) => p?.id !== productId);
+        await Promise.allSettled([
+          deleteDoc(doc(serverDb, 'products', productId)),
+          setDoc(
+            doc(serverDb, 'settings', 'deleted_products'),
+            { ids: mirror.deletedIds, updatedAt: Date.now() },
+            { merge: true }
+          ),
+        ]);
+        lastFirestoreFetchMs = Date.now();
       }
       res.json({ success: true });
     } catch (err: any) {
@@ -6494,6 +6540,35 @@ Return strict JSON with 100% complete, rich Bengali product details:
     try {
       const mirror = readLocalOrdersMirror();
       const deletedSet = new Set(mirror.deletedIds);
+      let updatedMirror = false;
+
+      // 1. Always sync deleted order IDs from Firestore `settings/deleted_orders` first so deleted orders never resurrect
+      try {
+        const delSnap = await withTimeout(
+          getDoc(doc(serverDb, 'settings', 'deleted_orders')),
+          3000,
+          'Firestore deleted_orders fetch'
+        );
+        if (delSnap.exists()) {
+          const remoteDelIds = delSnap.data()?.ids;
+          if (Array.isArray(remoteDelIds)) {
+            for (const dId of remoteDelIds) {
+              if (dId && !deletedSet.has(dId)) {
+                deletedSet.add(dId);
+                updatedMirror = true;
+              }
+              if (mirror.orders[dId]) {
+                delete mirror.orders[dId];
+                updatedMirror = true;
+              }
+            }
+            mirror.deletedIds = Array.from(deletedSet);
+          }
+        }
+      } catch {
+        // ignore
+      }
+
       const orderMap = new Map<string, any>();
 
       for (const [id, ord] of Object.entries(mirror.orders)) {
@@ -6502,63 +6577,33 @@ Return strict JSON with 100% complete, rich Bengali product details:
         }
       }
 
-      let updatedMirror = false;
       try {
         const snap = await withTimeout(
           getDocs(collection(serverDb, 'orders')),
           4000,
           'Firestore orders fetch'
         );
-        const firestoreOrderIds = new Set<string>();
         snap.forEach((d) => {
           const data = d.data();
           const id = data?.id || d.id;
           if (data && id && !deletedSet.has(id)) {
-            firestoreOrderIds.add(id);
             const fullOrd: any = { ...data, id };
-            orderMap.set(id, fullOrd);
-            if (!mirror.orders[id] || mirror.orders[id].status !== fullOrd.status) {
+            const existing = orderMap.get(id);
+            const incTime = Number(fullOrd.updatedAt || fullOrd.createdAt || 0);
+            const exTime = Number(existing?.updatedAt || existing?.createdAt || 0);
+            if (!existing || incTime >= exTime) {
+              orderMap.set(id, fullOrd);
               mirror.orders[id] = fullOrd;
               updatedMirror = true;
             }
           }
         });
-        if (updatedMirror) {
-          writeLocalOrdersMirror(mirror);
-        }
-
-        // Automatically restore any active mirror orders that were missing from Firestore
-        const missingFromFirestore = Array.from(orderMap.entries()).filter(
-          ([id]) => !firestoreOrderIds.has(id)
-        );
-        if (missingFromFirestore.length > 0) {
-          Promise.all(
-            missingFromFirestore.map(([id, ord]) =>
-              setDoc(doc(serverDb, 'orders', id), ord, { merge: true }).catch(() => {})
-            )
-          ).catch(() => {});
-          // Also ensure those active order IDs are cleared from settings/deleted_orders
-          getDoc(doc(serverDb, 'settings', 'deleted_orders'))
-            .then((delSnap) => {
-              if (delSnap.exists()) {
-                const rawIds = delSnap.data()?.ids;
-                if (Array.isArray(rawIds)) {
-                  const activeMirrorIds = new Set(orderMap.keys());
-                  const cleanedIds = rawIds.filter((x: string) => !activeMirrorIds.has(x));
-                  if (cleanedIds.length !== rawIds.length) {
-                    setDoc(
-                      doc(serverDb, 'settings', 'deleted_orders'),
-                      { ids: cleanedIds, updatedAt: Date.now() },
-                      { merge: true }
-                    ).catch(() => {});
-                  }
-                }
-              }
-            })
-            .catch(() => {});
-        }
       } catch {
         // fallback to local mirror
+      }
+
+      if (updatedMirror) {
+        writeLocalOrdersMirror(mirror);
       }
 
       const list = Array.from(orderMap.values()).sort(
@@ -6600,21 +6645,35 @@ Return strict JSON with 100% complete, rich Bengali product details:
 
   app.post('/api/orders/delete', async (req, res) => {
     try {
-      const orderId = String(req.body?.orderId || '').trim();
-      if (orderId) {
+      const singleId = String(req.body?.orderId || '').trim();
+      const batchIds: string[] = Array.isArray(req.body?.orderIds)
+        ? req.body.orderIds.map((x: any) => String(x || '').trim()).filter(Boolean)
+        : [];
+      const idsToDelete = Array.from(new Set([...(singleId ? [singleId] : []), ...batchIds]));
+
+      if (idsToDelete.length > 0) {
         const mirror = readLocalOrdersMirror();
-        delete mirror.orders[orderId];
-        if (!mirror.deletedIds.includes(orderId)) {
-          mirror.deletedIds.push(orderId);
+        for (const id of idsToDelete) {
+          delete mirror.orders[id];
+          if (!mirror.deletedIds.includes(id)) {
+            mirror.deletedIds.push(id);
+          }
         }
         writeLocalOrdersMirror(mirror);
         try {
-          await deleteDoc(doc(serverDb, 'orders', orderId));
+          await Promise.allSettled([
+            ...idsToDelete.map((id) => deleteDoc(doc(serverDb, 'orders', id))),
+            setDoc(
+              doc(serverDb, 'settings', 'deleted_orders'),
+              { ids: mirror.deletedIds, updatedAt: Date.now() },
+              { merge: true }
+            ),
+          ]);
         } catch {
           // ignore
         }
       }
-      return res.json({ success: true });
+      return res.json({ success: true, deletedIds: idsToDelete });
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err?.message || 'Order delete error' });
     }
@@ -7180,8 +7239,7 @@ Return strict JSON with 100% complete, rich Bengali product details:
         (aliasTarget ? list.find((p) => p.id === aliasTarget) : null) ||
         list.find((p) => String(p.id || '').toLowerCase() === lower) ||
         list.find((p) => String(p.sku || '').toLowerCase() === lower) ||
-        (tsPrefix ? list.find((p) => String(p.id || '').toLowerCase().startsWith(tsPrefix)) : null) ||
-        list[0];
+        (tsPrefix ? list.find((p) => String(p.id || '').toLowerCase().startsWith(tsPrefix)) : null);
 
       if (!prod) return rawHtml;
 

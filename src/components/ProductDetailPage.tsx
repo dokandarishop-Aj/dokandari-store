@@ -127,7 +127,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   const [quantity, setQuantity] = useState(1);
   const [linkCopied, setLinkCopied] = useState(false);
 
-  // Sync initialStep & reset video facade states when product changes
+  // Sync initialStep, variants & reset video facade states when product changes or is edited
   useEffect(() => {
     if (initialCompletedOrder && initialStep === 'thank_you') {
       setCompletedOrder(initialCompletedOrder);
@@ -139,6 +139,17 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     setSelectedVideoInHero(null);
     setActivatedVideos({});
   }, [initialStep, initialCompletedOrder, product.id]);
+
+  useEffect(() => {
+    const validColors = product.variants?.colors || [];
+    if (validColors.length > 0 && !validColors.includes(selectedColor)) {
+      setSelectedColor(validColors[0]);
+    }
+    const validSizes = product.variants?.sizes || [];
+    if (validSizes.length > 0 && !validSizes.includes(selectedSize)) {
+      setSelectedSize(validSizes[0]);
+    }
+  }, [product.id, product.updatedAt, product.variants]);
 
   // In-place 1-click URL refresh, multi-photo upload & AI Photo Auto-Fill state
   const [showRefreshBar, setShowRefreshBar] = useState(false);

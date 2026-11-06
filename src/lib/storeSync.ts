@@ -1368,7 +1368,10 @@ function resolveVerifiedLocalUploadPath(
   if (fname.toLowerCase().includes('scraped-c916ac6efc0985') || fname.toLowerCase().includes('founder')) {
     return getFallbackProductImage(product, index);
   }
-  if (product?.id === 'dkd-1793610538096-571' && fname.startsWith('scraped-')) {
+  if (
+    product?.id === 'dkd-1793610538096-571' &&
+    (fname.startsWith('scraped-') || fname.startsWith('dkd-1793610538096-571'))
+  ) {
     return VW_CUSTOM_MIRROR_REAL_IMAGES[index % VW_CUSTOM_MIRROR_REAL_IMAGES.length];
   }
   if (
@@ -1729,6 +1732,46 @@ const INITIAL_PRODUCT_MAP = new Map<string, Product>(INITIAL_PRODUCTS.map((ip) =
 function normalizeProductImages(p: Product): Product {
   const enriched = enrichProductFields(p);
   const initMatch = INITIAL_PRODUCT_MAP.get(enriched.id);
+
+  // Heal flagship Custom Social Media Profile Full-Length Mirror if an older duplicate entry overwrote its name or images
+  if (enriched.id === 'dkd-1793610538096-571') {
+    if (
+      !enriched.name ||
+      enriched.name.includes('ব্যবসা এবং বাড়ির সাজসজ্জার জন্য')
+    ) {
+      enriched.name =
+        initMatch?.name ||
+        'ফেসবুক ও ইনস্টাগ্রাম প্রোফাইল থিম কাস্টম ফুল-লেংথ মিরর (আপনার ব্র্যান্ডের নামে কাস্টমাইজড আয়না)';
+    }
+    if (!enriched.offerMode) {
+      enriched.offerMode = 'size';
+    }
+    if (!enriched.comboConfig && initMatch?.comboConfig) {
+      enriched.comboConfig = {
+        ...initMatch.comboConfig,
+        pkg1Price: Number(enriched.price) || initMatch.comboConfig.pkg1Price,
+      };
+    }
+    if (
+      !Array.isArray(enriched.images) ||
+      enriched.images.length === 0 ||
+      enriched.images.some(
+        (u) =>
+          typeof u === 'string' &&
+          (u.includes('dkd-1793610538096-571-') || u.includes('scraped-'))
+      )
+    ) {
+      enriched.images = [...VW_CUSTOM_MIRROR_REAL_IMAGES];
+    }
+  }
+
+  // Keep comboConfig.pkg1Price synced with product.price so editing product.price immediately reflects on the product page
+  if (enriched.comboConfig && Number(enriched.price) > 0) {
+    enriched.comboConfig = {
+      ...enriched.comboConfig,
+      pkg1Price: Number(enriched.price),
+    };
+  }
 
   let rawCandidateList = Array.isArray(enriched.images) ? enriched.images : [];
 
@@ -2573,38 +2616,31 @@ export function resolveProductByIdOrAlias(
   if (!cleanId) return undefined;
 
   const lower = cleanId.toLowerCase();
+  const deletedIds = getDeletedProductIds();
+  if (deletedIds.has(cleanId)) return undefined;
 
-  // 0. Check if server SSR injected the exact product for this route at 0ms
-  if (typeof window !== 'undefined' && (window as any).__DOKANDARI_SSR_PRODUCT__) {
-    const ssrProd = (window as any).__DOKANDARI_SSR_PRODUCT__ as Product;
-    if (
-      ssrProd &&
-      ssrProd.id &&
-      (ssrProd.id === cleanId || ssrProd.id.toLowerCase() === lower)
-    ) {
-      return normalizeProductImages(ssrProd);
-    }
-  }
-
-  // 1. Exact ID match on published products (primary fast path — 0ms)
-  const exactPub = productList.find((p) => p && p.id === cleanId && p.status !== 'draft');
+  // 1. Exact ID match on published products in live productList (primary fast path — 0ms)
+  const exactPub = productList.find(
+    (p) => p && p.id === cleanId && !deletedIds.has(p.id) && p.status !== 'draft'
+  );
   if (exactPub) return exactPub;
 
-  // 2. Exact ID match including draft products (when opened directly via shared link)
-  const exactAny = productList.find((p) => p && p.id === cleanId);
+  // 2. Exact ID match including draft products in live productList
+  const exactAny = productList.find((p) => p && p.id === cleanId && !deletedIds.has(p.id));
   if (exactAny) return exactAny;
 
   // 3. Case-insensitive ID or SKU match
   const caseOrSku = productList.find(
     (p) =>
       p &&
+      !deletedIds.has(p.id) &&
       (p.id.toLowerCase() === lower || (p.sku && p.sku.toLowerCase() === lower))
   );
   if (caseOrSku) return caseOrSku;
 
   // 4. Legacy or duplicate campaign alias resolution
   const aliasTarget = LEGACY_PRODUCT_ID_ALIASES[cleanId] || LEGACY_PRODUCT_ID_ALIASES[lower];
-  if (aliasTarget) {
+  if (aliasTarget && !deletedIds.has(aliasTarget)) {
     const aliased = productList.find((p) => p && p.id === aliasTarget);
     if (aliased) return aliased;
   }
@@ -2615,7 +2651,7 @@ export function resolveProductByIdOrAlias(
   const trailingNumberMatch = lower.match(/-(\d{1,3})$/)?.[1];
 
   const fuzzyMatch = productList.find((p) => {
-    if (!p) return false;
+    if (!p || deletedIds.has(p.id)) return false;
     const pIdLower = p.id.toLowerCase();
     if (dkdTimestampPrefix && pIdLower.startsWith(dkdTimestampPrefix)) {
       if (!trailingNumberMatch || pIdLower.endsWith(`-${trailingNumberMatch}`)) {
@@ -2634,9 +2670,22 @@ export function resolveProductByIdOrAlias(
   // 6. Secondary timestamp prefix match if trailing suffix wasn't exact
   if (dkdTimestampPrefix) {
     const anyTimestampMatch = productList.find(
-      (p) => p && p.id.toLowerCase().startsWith(dkdTimestampPrefix)
+      (p) => p && !deletedIds.has(p.id) && p.id.toLowerCase().startsWith(dkdTimestampPrefix)
     );
     if (anyTimestampMatch) return anyTimestampMatch;
+  }
+
+  // 7. Fallback to SSR-injected product ONLY if not found in live productList and not deleted
+  if (typeof window !== 'undefined' && (window as any).__DOKANDARI_SSR_PRODUCT__) {
+    const ssrProd = (window as any).__DOKANDARI_SSR_PRODUCT__ as Product;
+    if (
+      ssrProd &&
+      ssrProd.id &&
+      !deletedIds.has(ssrProd.id) &&
+      (ssrProd.id === cleanId || ssrProd.id.toLowerCase() === lower)
+    ) {
+      return normalizeProductImages(ssrProd);
+    }
   }
 
   return undefined;
@@ -2679,20 +2728,25 @@ export function resolveOrSynthesizeProductForUrl(
     )
   );
 
+  const deletedIds = getDeletedProductIds();
   for (const cid of candidateIds) {
+    if (deletedIds.has(cid)) continue;
+
     // Check live productList first
     const resolvedLive = resolveProductByIdOrAlias(productList, cid);
     if (resolvedLive) return resolvedLive;
 
     // Check custom persisted products in localStorage
     const customMap = getCustomPersistedProductsMap();
-    if (customMap[cid]) {
+    if (customMap[cid] && !deletedIds.has(cid)) {
       return normalizeProductImages(customMap[cid]);
     }
 
     // Check INITIAL_PRODUCTS directly (e.g., dkd-1793610538096-571)
     const resolvedInit = resolveProductByIdOrAlias(INITIAL_PRODUCTS, cid);
-    if (resolvedInit) return normalizeProductImages(resolvedInit);
+    if (resolvedInit && !deletedIds.has(resolvedInit.id)) {
+      return normalizeProductImages(resolvedInit);
+    }
   }
 
   // NEVER fall back to `sameCategoryProduct` or `INITIAL_PRODUCTS[0]` — return undefined so App.tsx fetches the exact product from Firestore/API!
@@ -2702,12 +2756,11 @@ export function resolveOrSynthesizeProductForUrl(
 /**
  * Merges INITIAL_PRODUCTS + cached live catalog + remote Firestore products + local Admin custom/edited products,
  * while removing any product IDs deleted by the Admin, deduplicating identical products, and preserving real product images.
+ * When `remoteProducts` (from Firestore or `/api/catalog/products`) is provided and non-empty, Firestore is treated as the
+ * authoritative source of truth so stale `localStorage` entries never revert Admin edits or resurrect deleted products.
  */
 export function mergeCatalogProducts(remoteProducts?: Product[]): Product[] {
   const deletedIds = getDeletedProductIds();
-  // Never allow the flagship custom social media mirror to be accidentally hidden by stale deletedIds
-  deletedIds.delete('dkd-1793610538096-571');
-
   const customMap = getCustomPersistedProductsMap();
   const map = new Map<string, Product>();
 
@@ -2731,105 +2784,89 @@ export function mergeCatalogProducts(remoteProducts?: Product[]): Product[] {
     'dkd-unisex-heavyweight-hoodie',
   ]);
 
-  // 1. Start with initial products (if not deleted)
-  for (const p of INITIAL_PRODUCTS) {
-    if (!deletedIds.has(p.id) && !BLOCKED_DUPLICATE_IDS.has(p.id)) {
-      map.set(p.id, normalizeProductImages(p));
+  const putIfNewer = (candidate: Product | null | undefined) => {
+    if (!candidate || !candidate.id) return;
+    if (deletedIds.has(candidate.id) || BLOCKED_DUPLICATE_IDS.has(candidate.id)) return;
+    const normalized = normalizeProductImages(candidate);
+    const existing = map.get(normalized.id);
+    if (!existing) {
+      map.set(normalized.id, normalized);
+      return;
     }
-  }
+    const incomingTime = Number(normalized.updatedAt || normalized.lifetimeSavedAt || 0);
+    const existingTime = Number(existing.updatedAt || existing.lifetimeSavedAt || 0);
+    if (incomingTime >= existingTime) {
+      map.set(normalized.id, normalized);
+    }
+  };
 
-  // 1.2 Overlay any SSR-injected product or catalog from server.ts at 0ms
-  if (typeof window !== 'undefined') {
-    const ssrCatalog = (window as any).__DOKANDARI_SSR_CATALOG__;
-    if (Array.isArray(ssrCatalog)) {
-      for (const sp of ssrCatalog) {
-        if (sp && sp.id && !deletedIds.has(sp.id) && !BLOCKED_DUPLICATE_IDS.has(sp.id)) {
-          map.set(sp.id, normalizeProductImages(sp));
-        }
+  if (remoteProducts && remoteProducts.length > 0) {
+    // AUTHORITATIVE FIRESTORE / SERVER CATALOG MODE:
+    // Use remoteProducts directly as the source of truth so stale localStorage entries never revert edits or resurrect deleted items.
+    const nextCustomMap: Record<string, Product> = {};
+    for (const p of remoteProducts) {
+      if (p && p.id && !deletedIds.has(p.id) && !BLOCKED_DUPLICATE_IDS.has(p.id)) {
+        const normalizedRemote = normalizeProductImages(p);
+        map.set(p.id, normalizedRemote);
+        nextCustomMap[p.id] = normalizedRemote;
       }
     }
-    const ssrProd = (window as any).__DOKANDARI_SSR_PRODUCT__;
-    if (ssrProd && ssrProd.id && !deletedIds.has(ssrProd.id) && !BLOCKED_DUPLICATE_IDS.has(ssrProd.id)) {
-      map.set(ssrProd.id, normalizeProductImages(ssrProd));
+    try {
+      localStorage.setItem(LS_CUSTOM_PRODUCTS_KEY, JSON.stringify(nextCustomMap));
+      if (typeof window !== 'undefined' && (window as any).__DOKANDARI_SSR_PRODUCT__) {
+        const ssrId = (window as any).__DOKANDARI_SSR_PRODUCT__?.id;
+        if (ssrId && map.has(ssrId)) {
+          (window as any).__DOKANDARI_SSR_PRODUCT__ = map.get(ssrId);
+        } else if (ssrId && deletedIds.has(ssrId)) {
+          delete (window as any).__DOKANDARI_SSR_PRODUCT__;
+        }
+      }
+    } catch {
+      // ignore storage quota
     }
-  }
+  } else {
+    // 0ms BOOT FALLBACK MODE (before Firestore / API responds):
+    // 1. Start with initial products (updatedAt = 0, so any cached/edited version always wins)
+    for (const p of INITIAL_PRODUCTS) {
+      putIfNewer({ ...p, updatedAt: 0 });
+    }
 
-  // 1.5 Overlay any cached live catalog items from localStorage for 0ms startup before Firestore snapshot arrives
-  if (!remoteProducts || remoteProducts.length === 0) {
+    // 1.2 Overlay any SSR-injected product or catalog from server.ts at 0ms
+    if (typeof window !== 'undefined') {
+      const ssrCatalog = (window as any).__DOKANDARI_SSR_CATALOG__;
+      if (Array.isArray(ssrCatalog)) {
+        for (const sp of ssrCatalog) {
+          putIfNewer(sp);
+        }
+      }
+      const ssrProd = (window as any).__DOKANDARI_SSR_PRODUCT__;
+      if (ssrProd && ssrProd.id) {
+        putIfNewer(ssrProd);
+      }
+    }
+
+    // 1.5 Overlay any cached live catalog items from localStorage
     try {
       const cachedRaw = localStorage.getItem(LS_LIVE_CATALOG_CACHE_KEY);
       if (cachedRaw) {
         const cachedList = JSON.parse(cachedRaw) as Product[];
         if (Array.isArray(cachedList)) {
           for (const cp of cachedList) {
-            if (cp && cp.id && !deletedIds.has(cp.id) && !BLOCKED_DUPLICATE_IDS.has(cp.id)) {
-              map.set(cp.id, normalizeProductImages(cp));
-            }
+            putIfNewer(cp);
           }
         }
       }
     } catch {
       // ignore
     }
-  }
 
-  // 2. Overlay remote Firestore products (respecting deletedIds and BLOCKED_DUPLICATE_IDS)
-  const remoteIdSet = new Set<string>();
-  if (remoteProducts && remoteProducts.length > 0) {
-    for (const p of remoteProducts) {
-      if (p && p.id && !deletedIds.has(p.id) && !BLOCKED_DUPLICATE_IDS.has(p.id)) {
-        remoteIdSet.add(p.id);
-        map.set(p.id, normalizeProductImages(p));
-      }
+    // 2. Overlay local custom/edited products
+    for (const [, prod] of Object.entries(customMap)) {
+      putIfNewer(prod);
     }
   }
 
-  // 3. Overlay local custom/edited products ONLY if not yet in remote or if local was edited more recently
-  for (const [id, prod] of Object.entries(customMap)) {
-    if (!deletedIds.has(id) && !BLOCKED_DUPLICATE_IDS.has(id)) {
-      const existing = map.get(id);
-      const localUpdated = prod.updatedAt || 0;
-      const remoteUpdated = existing?.updatedAt || 0;
-      const localImageCount = Array.isArray(prod.images) ? prod.images.length : 0;
-      const remoteImageCount = Array.isArray(existing?.images) ? existing.images.length : 0;
-
-      if (
-        !existing ||
-        !remoteIdSet.has(id) ||
-        localUpdated > remoteUpdated ||
-        (localUpdated === remoteUpdated && localImageCount > remoteImageCount)
-      ) {
-        map.set(id, normalizeProductImages(prod));
-      }
-    }
-  }
-
-  // 4. Deduplicate products with identical normalized title or identical sourceUrl so the same product never appears 2-3 times
-  const seenKeys = new Map<string, Product>();
-  const sortedCandidates = Array.from(map.values()).sort(
-    (a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0)
-  );
-  for (const item of sortedCandidates) {
-    const normTitle = String(item.name || '')
-      .replace(/\|\s*(ভাইরাল ওমেন বিডি|Viral Woman BD|Dokandari|dokandari\.com).*/gi, '')
-      .toLowerCase()
-      .replace(/\s+/g, ' ')
-      .trim();
-    const normSource = (item.sourceUrl || '')
-      .toLowerCase()
-      .replace(/^https?:\/\/(www\.)?/, '')
-      .replace(/\/+$/, '')
-      .trim();
-    const dedupKey = normSource && normSource.length > 12 ? `src:${normSource}` : `title:${normTitle}`;
-    const existing = seenKeys.get(dedupKey);
-    if (!existing) {
-      seenKeys.set(dedupKey, item);
-    } else if (item.id === 'dkd-1793610538096-571' || (item.images?.length || 0) > (existing.images?.length || 0)) {
-      seenKeys.set(dedupKey, item);
-    }
-  }
-
-  const finalCatalog = Array.from(seenKeys.values()).sort(
+  const finalCatalog = Array.from(map.values()).sort(
     (a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0)
   );
 
@@ -2947,7 +2984,11 @@ function ensureFirestoreSafeProductPayload(product: Product): Product {
  * so the product loads in milliseconds across all browsers and ad clicks!
  */
 export async function saveProductPersisted(product: Product): Promise<Product> {
-  const now = Date.now();
+  const prevTs = Math.max(
+    Number(product.updatedAt || 0),
+    Number(product.lifetimeSavedAt || 0)
+  );
+  const now = prevTs >= Date.now() ? prevTs + 1000 : Date.now();
   const targetId = product.id || `prod-${now}`;
   const incomingImages = Array.isArray(product.images) ? [...product.images] : [];
 
@@ -3011,7 +3052,7 @@ export async function saveProductPersisted(product: Product): Promise<Product> {
     lifetimeSavedAt: now,
   });
 
-  // 1. Save to localStorage custom products map & remove from deleted set
+  // 1. Save to localStorage custom products map, live catalog cache, remove from deleted set, and update SSR window globals
   let updatedDeletedArray: string[] | null = null;
   try {
     const deleted = getDeletedProductIds();
@@ -3023,42 +3064,63 @@ export async function saveProductPersisted(product: Product): Promise<Product> {
     const customMap = getCustomPersistedProductsMap();
     customMap[normalized.id] = normalized;
     localStorage.setItem(LS_CUSTOM_PRODUCTS_KEY, JSON.stringify(customMap));
+
+    try {
+      const cachedRaw = localStorage.getItem(LS_LIVE_CATALOG_CACHE_KEY);
+      if (cachedRaw) {
+        const cachedList = JSON.parse(cachedRaw) as Product[];
+        if (Array.isArray(cachedList)) {
+          const existsInCache = cachedList.some((cp) => cp && cp.id === normalized.id);
+          const nextCache = existsInCache
+            ? cachedList.map((cp) => (cp && cp.id === normalized.id ? normalized : cp))
+            : [normalized, ...cachedList];
+          localStorage.setItem(LS_LIVE_CATALOG_CACHE_KEY, JSON.stringify(nextCache));
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    if (typeof window !== 'undefined') {
+      const w = window as any;
+      if (w.__DOKANDARI_SSR_PRODUCT__ && w.__DOKANDARI_SSR_PRODUCT__.id === normalized.id) {
+        w.__DOKANDARI_SSR_PRODUCT__ = normalized;
+      }
+      if (Array.isArray(w.__DOKANDARI_SSR_CATALOG__)) {
+        const existsInSsr = w.__DOKANDARI_SSR_CATALOG__.some((sp: any) => sp?.id === normalized.id);
+        w.__DOKANDARI_SSR_CATALOG__ = existsInSsr
+          ? w.__DOKANDARI_SSR_CATALOG__.map((sp: any) => (sp?.id === normalized.id ? normalized : sp))
+          : [normalized, ...w.__DOKANDARI_SSR_CATALOG__];
+      }
+    }
   } catch (e) {
     console.warn('localStorage product save note:', e);
   }
 
-  // 2. Save to Firestore (guarded for 1MB limit so it 100% succeeds across all browsers and live dokandari.com)
+  // 2. Save to Firestore & Server Mirror in parallel (awaited so live server mirror and Firestore are 100% synced immediately)
   const firestoreSafe = sanitizeForFirestore(ensureFirestoreSafeProductPayload(normalized));
-  try {
-    await setDoc(doc(db, 'products', normalized.id), firestoreSafe, { merge: true });
-    if (updatedDeletedArray !== null) {
-      await setDoc(
-        doc(db, 'settings', 'deleted_products'),
-        { ids: updatedDeletedArray, updatedAt: now },
-        { merge: true }
-      );
-    }
-  } catch (err) {
-    console.warn('Firestore product save warning (saved locally):', err);
-  }
-
-  // 3. Mirror to server disk (`/api/catalog/sync-mirror`) so external/mobile browsers always resolve immediately
-  try {
+  await Promise.allSettled([
+    setDoc(doc(db, 'products', normalized.id), firestoreSafe),
+    updatedDeletedArray !== null
+      ? setDoc(
+          doc(db, 'settings', 'deleted_products'),
+          { ids: updatedDeletedArray, updatedAt: Date.now() },
+          { merge: true }
+        )
+      : Promise.resolve(),
     fetch('/api/catalog/sync-mirror', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ products: [firestoreSafe] }),
-    }).catch(() => null);
-  } catch {
-    // ignore
-  }
+    }),
+  ]);
 
   return normalized;
 }
 
 /**
  * Explicitly syncs all local/Preview products and store settings to Live Firestore
- * and recovers original images from `buy.dokandari.com` / `sourceUrl` if any were overwritten.
+ * without overwriting newer Firestore products, and recovers original images if needed.
  */
 export async function syncAllLocalProductsToFirestore(): Promise<{
   syncedCount: number;
@@ -3070,84 +3132,26 @@ export async function syncAllLocalProductsToFirestore(): Promise<{
   const customMap = getCustomPersistedProductsMap();
 
   try {
-    // 1. Push all local custom products to Firestore
+    // 1. Fetch existing Firestore products first so we NEVER overwrite live Firestore products with stale localStorage data
+    const snap = await getDocs(collection(db, 'products'));
+    const firestoreMap = new Map<string, Product>();
+    snap.forEach((d) => {
+      const data = d.data() as Product;
+      if (data) firestoreMap.set(d.id, { ...data, id: data.id || d.id });
+    });
+
     for (const [id, customProd] of Object.entries(customMap)) {
       if (deletedIds.has(id)) continue;
-      const cleanCustom = sanitizeForFirestore(
-        ensureFirestoreSafeProductPayload(normalizeProductImages(customProd))
-      );
-      await setDoc(doc(db, 'products', id), cleanCustom, { merge: true });
-      syncedCount++;
-    }
-
-    // 2. Ask server to recover any original images from buy.dokandari.com / sourceUrl for Firestore products
-    const snap = await getDocs(collection(db, 'products'));
-    const candidatesForRecovery: { id: string; name: string; titleEn?: string; sourceUrl?: string }[] = [];
-
-    for (const docSnap of snap.docs) {
-      const p = docSnap.data() as Product & { sourceUrl?: string };
-      if (deletedIds.has(p.id)) continue;
-      const localProd = customMap[p.id];
-      if (localProd && hasAuthenticCustomImage(localProd)) {
-        const cleanLocal = sanitizeForFirestore(
-          ensureFirestoreSafeProductPayload(normalizeProductImages(localProd))
+      if (!firestoreMap.has(id)) {
+        const cleanCustom = sanitizeForFirestore(
+          ensureFirestoreSafeProductPayload(normalizeProductImages(customProd))
         );
-        await setDoc(doc(db, 'products', p.id), cleanLocal, { merge: true });
-        recoveredCount++;
-        continue;
-      }
-
-      const firstImg = p.images?.[0] || '';
-      if (
-        isOverwrittenGenericImage(firstImg, p.id) ||
-        firstImg.includes('images.unsplash.com')
-      ) {
-        candidatesForRecovery.push({
-          id: p.id,
-          name: p.name,
-          titleEn: p.titleEn,
-          sourceUrl: p.sourceUrl,
-        });
+        await setDoc(doc(db, 'products', id), cleanCustom, { merge: true });
+        syncedCount++;
       }
     }
 
-    if (candidatesForRecovery.length > 0) {
-      try {
-        const res = await fetch('/api/catalog/recover-real-images', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ products: candidatesForRecovery }),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data?.recovered && typeof data.recovered === 'object') {
-            for (const [prodId, realUrls] of Object.entries(data.recovered as Record<string, string[]>)) {
-              if (Array.isArray(realUrls) && realUrls.length > 0) {
-                const proxiedUrls = realUrls.map((u) =>
-                  u.startsWith('data:')
-                    ? u
-                    : `https://wsrv.nl/?url=${encodeURIComponent(u)}&w=800&output=webp`
-                );
-                await setDoc(
-                  doc(db, 'products', prodId),
-                  { images: proxiedUrls, updatedAt: Date.now() },
-                  { merge: true }
-                );
-                if (customMap[prodId]) {
-                  customMap[prodId] = { ...customMap[prodId], images: proxiedUrls, updatedAt: Date.now() };
-                }
-                recoveredCount++;
-              }
-            }
-            localStorage.setItem(LS_CUSTOM_PRODUCTS_KEY, JSON.stringify(customMap));
-          }
-        }
-      } catch {
-        // ignore recovery network note
-      }
-    }
-
-    // 3. Sync StoreContent (including normalized Bengali Savar addresses) to Firestore
+    // 2. Sync StoreContent to Firestore
     const currentContent = getInitialStoreContent();
     await saveStoreContentPersisted(currentContent);
   } catch (err) {
@@ -3158,7 +3162,7 @@ export async function syncAllLocalProductsToFirestore(): Promise<{
 }
 
 /**
- * Deletes a product permanently from localStorage, prevents re-seeding, and deletes from Firestore
+ * Deletes a product permanently from localStorage, SSR globals, Server Mirror, and Firestore
  */
 export async function deleteProductPersisted(productId: string): Promise<void> {
   let deletedList: string[] = [];
@@ -3174,32 +3178,48 @@ export async function deleteProductPersisted(productId: string): Promise<void> {
       delete customMap[productId];
       localStorage.setItem(LS_CUSTOM_PRODUCTS_KEY, JSON.stringify(customMap));
     }
+
+    try {
+      const cachedRaw = localStorage.getItem(LS_LIVE_CATALOG_CACHE_KEY);
+      if (cachedRaw) {
+        const cachedList = JSON.parse(cachedRaw) as Product[];
+        if (Array.isArray(cachedList)) {
+          const filteredCache = cachedList.filter((cp) => cp && cp.id !== productId);
+          localStorage.setItem(LS_LIVE_CATALOG_CACHE_KEY, JSON.stringify(filteredCache));
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    if (typeof window !== 'undefined') {
+      const w = window as any;
+      if (w.__DOKANDARI_SSR_PRODUCT__ && w.__DOKANDARI_SSR_PRODUCT__.id === productId) {
+        delete w.__DOKANDARI_SSR_PRODUCT__;
+      }
+      if (Array.isArray(w.__DOKANDARI_SSR_CATALOG__)) {
+        w.__DOKANDARI_SSR_CATALOG__ = w.__DOKANDARI_SSR_CATALOG__.filter(
+          (sp: any) => sp && sp.id !== productId
+        );
+      }
+    }
   } catch (e) {
     console.warn('localStorage delete product note:', e);
   }
 
-  try {
-    await Promise.all([
-      deleteDoc(doc(db, 'products', productId)),
-      setDoc(
-        doc(db, 'settings', 'deleted_products'),
-        { ids: deletedList, updatedAt: Date.now() },
-        { merge: true }
-      ),
-    ]);
-  } catch (err) {
-    console.warn('Firestore delete product warning:', err);
-  }
-
-  try {
+  await Promise.allSettled([
+    deleteDoc(doc(db, 'products', productId)),
+    setDoc(
+      doc(db, 'settings', 'deleted_products'),
+      { ids: deletedList, updatedAt: Date.now() },
+      { merge: true }
+    ),
     fetch('/api/catalog/delete-mirror', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ productId }),
-    }).catch(() => null);
-  } catch {
-    // ignore
-  }
+    }),
+  ]);
 }
 
 /**
@@ -3335,53 +3355,52 @@ export function mergeAndPersistAllOrders(sources: {
   const firestoreList = Array.isArray(sources.firestoreOrders) ? sources.firestoreOrders : [];
   const localList = Array.isArray(sources.localOrders) ? sources.localOrders : getPersistedOrders();
 
-  // Any order actively stored in the server mirror (`/api/orders` -> `data/orders_mirror.json`) is a verified real order;
-  // ensure stale localStorage deleted_order_ids never hide it.
-  if (serverList.length > 0) {
-    removeDeletedOrderIds(serverList.map((o) => o?.id).filter(Boolean));
-  }
-
   const deletedIds = getDeletedOrderIds();
   const orderMap = new Map<string, Order>();
 
-  for (const locOrd of localList) {
-    if (locOrd && locOrd.id && !deletedIds.has(locOrd.id)) {
-      orderMap.set(locOrd.id, locOrd);
+  const putOrder = (incoming: Order) => {
+    if (!incoming || !incoming.id || deletedIds.has(incoming.id)) return;
+    const existing = orderMap.get(incoming.id);
+    if (!existing) {
+      orderMap.set(incoming.id, incoming);
+      return;
     }
-  }
-  for (const srvOrd of serverList) {
-    if (srvOrd && srvOrd.id && !deletedIds.has(srvOrd.id)) {
-      const existing = orderMap.get(srvOrd.id);
-      orderMap.set(srvOrd.id, {
-        ...(existing || {}),
-        ...srvOrd,
-        customerScreenshot: srvOrd.customerScreenshot || existing?.customerScreenshot,
+    const incomingUpdated = Number(incoming.updatedAt || incoming.createdAt || 0);
+    const existingUpdated = Number(existing.updatedAt || existing.createdAt || 0);
+    const bestScreenshot =
+      incoming.customerScreenshot && !incoming.customerScreenshot.startsWith('/uploads/')
+        ? incoming.customerScreenshot
+        : existing.customerScreenshot || incoming.customerScreenshot;
+
+    if (incomingUpdated >= existingUpdated) {
+      orderMap.set(incoming.id, {
+        ...existing,
+        ...incoming,
+        customerScreenshot: bestScreenshot,
       });
-    }
-  }
-  for (const fsOrd of firestoreList) {
-    if (fsOrd && fsOrd.id && !deletedIds.has(fsOrd.id)) {
-      const existing = orderMap.get(fsOrd.id);
-      // Prefer data:image or https screenshot over broken local /uploads path
-      const bestScreenshot =
-        fsOrd.customerScreenshot &&
-        !fsOrd.customerScreenshot.startsWith('/uploads/')
-          ? fsOrd.customerScreenshot
-          : existing?.customerScreenshot || fsOrd.customerScreenshot;
-      orderMap.set(fsOrd.id, {
-        ...(existing || {}),
-        ...fsOrd,
+    } else {
+      orderMap.set(incoming.id, {
+        ...incoming,
+        ...existing,
         customerScreenshot: bestScreenshot,
       });
     }
+  };
+
+  for (const locOrd of localList) {
+    putOrder(locOrd);
+  }
+  for (const srvOrd of serverList) {
+    putOrder(srvOrd);
+  }
+  for (const fsOrd of firestoreList) {
+    putOrder(fsOrd);
   }
 
   const merged = Array.from(orderMap.values()).sort(
     (a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)
   );
-  if (merged.length > 0) {
-    syncOrdersToLocalCache(merged);
-  }
+  syncOrdersToLocalCache(merged);
   return merged;
 }
 
@@ -3577,190 +3596,58 @@ export function compressImageFileToDataUrl(
  */
 export async function seedProductsIfEmpty(): Promise<void> {
   try {
+    // 0. Always load settings/deleted_products from Firestore first so deleted products NEVER get re-seeded
+    try {
+      const delSnap = await getDoc(doc(db, 'settings', 'deleted_products'));
+      if (delSnap.exists()) {
+        const remoteIds = delSnap.data()?.ids;
+        if (Array.isArray(remoteIds)) {
+          setRemoteDeletedProductIds(remoteIds);
+        }
+      }
+    } catch {
+      // ignore
+    }
+
     const deletedIds = getDeletedProductIds();
-    const customMap = getCustomPersistedProductsMap();
     const productsCol = collection(db, 'products');
     const snap = await getDocs(productsCol);
-    const existingIds = new Set<string>();
-    const recoveryCandidates: { id: string; name: string; titleEn?: string; sourceUrl?: string }[] = [];
 
-    // 1. Inspect existing Firestore docs: if local customMap has real images while Firestore was overwritten, restore local!
-    for (const docSnap of snap.docs) {
-      const id = docSnap.id;
-      existingIds.add(id);
-      if (deletedIds.has(id)) continue;
-
-      const data = docSnap.data() as Product & { sourceUrl?: string };
-      const localProd = customMap[id];
-
-      if (localProd && hasAuthenticCustomImage(localProd) && !hasAuthenticCustomImage(data)) {
-        const restored = sanitizeForFirestore(
-          ensureFirestoreSafeProductPayload(normalizeProductImages(localProd))
-        );
-        try {
-          await setDoc(doc(db, 'products', id), restored, { merge: true });
-        } catch {
-          // ignore
+    // 1. If Firestore already has products, NEVER overwrite them from localStorage and NEVER re-seed deleted items!
+    //    Only purge any document that is explicitly listed in settings/deleted_products.
+    if (!snap.empty) {
+      for (const docSnap of snap.docs) {
+        if (deletedIds.has(docSnap.id)) {
+          deleteDoc(doc(db, 'products', docSnap.id)).catch(() => null);
         }
-        continue;
       }
-
-      if (isOverwrittenGenericImage(data.images?.[0], id)) {
-        recoveryCandidates.push({
-          id,
-          name: data.name,
-          titleEn: data.titleEn,
-          sourceUrl: data.sourceUrl,
-        });
-      }
-
-      const healed = normalizeProductImages(data);
-      const origImagesJson = JSON.stringify(data.images || []);
-      const healedImagesJson = JSON.stringify(healed.images || []);
-      const origVideosJson = JSON.stringify(data.videos || []);
-      const healedVideosJson = JSON.stringify(healed.videos || []);
-
-      if (
-        origImagesJson !== healedImagesJson ||
-        origVideosJson !== healedVideosJson ||
-        !data.status ||
-        !data.description ||
-        !data.fabric
-      ) {
-        try {
-          await setDoc(
-            doc(db, 'products', id),
-            sanitizeForFirestore(ensureFirestoreSafeProductPayload(healed)),
-            { merge: true }
+    } else {
+      // 2. Only if Firestore `products` collection is completely empty (0 docs), seed INITIAL_PRODUCTS (excluding deletedIds)
+      const mirrorBatch: Product[] = [];
+      for (const prod of INITIAL_PRODUCTS) {
+        if (!deletedIds.has(prod.id)) {
+          const cleanProd = sanitizeForFirestore(
+            ensureFirestoreSafeProductPayload(normalizeProductImages(prod))
           );
-        } catch {
-          // ignore individual doc heal warning
+          mirrorBatch.push(cleanProd);
+          await setDoc(doc(db, 'products', prod.id), cleanProd, { merge: true });
         }
       }
-
-      // If an imported product (dkd-17...) still has external http/alicdn/wsrv.nl image URLs instead of self-contained data: URLs, inline them automatically!
-      if (
-        id.startsWith('dkd-17') &&
-        Array.isArray(healed.images) &&
-        healed.images.some((u) => u.startsWith('http') && !u.includes('images.unsplash.com'))
-      ) {
-        fetch('/api/catalog/inline-product-media', {
+      if (mirrorBatch.length > 0) {
+        fetch('/api/catalog/sync-mirror', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            images: healed.images,
-            videos: healed.videos || [],
-            sourceUrl: data.sourceUrl || '',
-          }),
-        })
-          .then((r) => (r.ok ? r.json() : null))
-          .then((inlined) => {
-            if (inlined && Array.isArray(inlined.images) && inlined.images.length > 0) {
-              setDoc(
-                doc(db, 'products', id),
-                sanitizeForFirestore({
-                  images: inlined.images,
-                  videos: Array.isArray(inlined.videos) ? inlined.videos : healed.videos || [],
-                  updatedAt: Date.now(),
-                }),
-                { merge: true }
-              ).catch(() => null);
-            }
-          })
-          .catch(() => null);
+          body: JSON.stringify({ products: mirrorBatch }),
+        }).catch(() => null);
       }
     }
 
-    // 2. Seed missing items from initial catalog ONLY if not deleted by Admin
-    const mirrorBatch: Product[] = [];
-    for (const prod of INITIAL_PRODUCTS) {
-      if (!existingIds.has(prod.id) && !deletedIds.has(prod.id)) {
-        const cleanProd = sanitizeForFirestore(
-          ensureFirestoreSafeProductPayload(normalizeProductImages(customMap[prod.id] || prod))
-        );
-        mirrorBatch.push(cleanProd);
-        await setDoc(doc(db, 'products', prod.id), cleanProd, { merge: true });
-      }
-    }
-
-    // 3. Push any locally created/edited custom products to Firestore
-    for (const [id, customProd] of Object.entries(customMap)) {
-      if (deletedIds.has(id)) continue;
-      const cleanCustom = sanitizeForFirestore(
-        ensureFirestoreSafeProductPayload(normalizeProductImages(customProd))
-      );
-      mirrorBatch.push(cleanCustom);
-      if (!existingIds.has(id) || hasAuthenticCustomImage(customProd)) {
-        await setDoc(doc(db, 'products', id), cleanCustom, { merge: true });
-      }
-    }
-
-    if (mirrorBatch.length > 0) {
-      fetch('/api/catalog/sync-mirror', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ products: mirrorBatch }),
-      }).catch(() => null);
-    }
-
-    // 4. If any products had overwritten generic images, recover their real images from buy.dokandari.com / sourceUrl
-    if (recoveryCandidates.length > 0) {
-      try {
-        const res = await fetch('/api/catalog/recover-real-images', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ products: recoveryCandidates }),
-        });
-        if (res.ok) {
-          const recData = await res.json();
-          if (recData?.recovered && typeof recData.recovered === 'object') {
-            for (const [prodId, realUrls] of Object.entries(recData.recovered as Record<string, string[]>)) {
-              if (Array.isArray(realUrls) && realUrls.length > 0) {
-                const proxied = realUrls.map((u) =>
-                  u.startsWith('data:')
-                    ? u
-                    : `https://wsrv.nl/?url=${encodeURIComponent(u)}&w=800&output=webp`
-                );
-                await setDoc(doc(db, 'products', prodId), { images: proxied }, { merge: true });
-              }
-            }
-          }
-        }
-      } catch {
-        // ignore background recovery note
-      }
-    }
-
-    // 5. Ensure store_content exists or auto-migrates legacy social links / hotline in Firestore
+    // 3. Ensure store_content exists in Firestore
     const contentRef = doc(db, 'settings', 'store_content');
     const contentSnap = await getDoc(contentRef);
     if (!contentSnap.exists()) {
       const initialContent = getInitialStoreContent();
       await setDoc(contentRef, sanitizeForFirestore(initialContent));
-    } else {
-      const existingData = contentSnap.data() as Partial<StoreContent>;
-      const normalized = mergeStoreContent(DEFAULT_STORE_CONTENT, existingData);
-      const needsMigration =
-        existingData.hotlineNumber !== normalized.hotlineNumber ||
-        existingData.whatsappNumber !== normalized.whatsappNumber ||
-        existingData.socialLinks?.facebook !== normalized.socialLinks?.facebook ||
-        existingData.socialLinks?.instagram !== normalized.socialLinks?.instagram ||
-        existingData.socialLinks?.tiktok !== normalized.socialLinks?.tiktok ||
-        existingData.socialLinks?.youtube !== normalized.socialLinks?.youtube ||
-        existingData.founder?.phone !== normalized.founder.phone;
-      if (needsMigration) {
-        await setDoc(
-          contentRef,
-          sanitizeForFirestore({
-            whatsappNumber: normalized.whatsappNumber,
-            hotlineNumber: normalized.hotlineNumber,
-            socialLinks: normalized.socialLinks,
-            founder: normalized.founder,
-            updatedAt: Date.now(),
-          }),
-          { merge: true }
-        );
-      }
     }
   } catch (err) {
     console.warn('Seeding check note', err);

@@ -74,7 +74,7 @@ function normalizeCategoryId(cat: string, productName = ''): string {
 
 function StoreMain() {
   const initialStore = useMemo(() => getInitialStoreContent(), []);
-  const [products, setProducts] = useState<Product[]>(() => mergeCatalogProducts(INITIAL_PRODUCTS));
+  const [products, setProducts] = useState<Product[]>(() => mergeCatalogProducts());
   const initialUrlProdRoute = useMemo(() => extractUrlProductRoute(), []);
   const initialUrlCatRoute = useMemo(() => extractUrlCatalogRoute(), []);
   const [activeCategory, setActiveCategory] = useState<ProductCategory>(() =>
@@ -83,7 +83,7 @@ function StoreMain() {
   const [searchQuery, setSearchQuery] = useState('');
   const [detailedProduct, setDetailedProduct] = useState<Product | null>(() => {
     if (initialUrlProdRoute.rawProdId) {
-      const initialList = mergeCatalogProducts(INITIAL_PRODUCTS);
+      const initialList = mergeCatalogProducts();
       return (
         resolveProductByIdOrAlias(initialList, initialUrlProdRoute.rawProdId) ||
         resolveOrSynthesizeProductForUrl(initialList, initialUrlProdRoute.rawProdId) ||
@@ -228,28 +228,29 @@ function StoreMain() {
   const hasFounderProfileDocRef = useRef(false);
   const hasAutoSyncedPixelCatalogRef = useRef(false);
 
-  // Automatically emit full catalog Schema.org ItemList + Product Microdata to connected Meta & TikTok Pixels
-  useEffect(() => {
-    if (products.length > 0 && !hasAutoSyncedPixelCatalogRef.current) {
-      hasAutoSyncedPixelCatalogRef.current = true;
-      syncAutoCatalogWithPixels(products, { forceFullBroadcast: false }).catch(() => null);
-    }
-  }, [products]);
-
   // Attach real-time Firestore listeners + Server Catalog Mirror fallback for 100% external/mobile browser reliability
   useEffect(() => {
-    let latestRemoteList: Product[] = INITIAL_PRODUCTS;
+    let latestRemoteList: Product[] = [];
     let hasSeededThisSession = false;
+    let hasFirestoreSnapshotArrived = false;
 
-    // 0. Always fetch `/api/catalog/products` so external/mobile browsers get all live products even if WebChannel is slow/restricted
+    // 0. Fetch `/api/catalog/products` so external/mobile browsers get live products if WebChannel is still connecting
     fetch('/api/catalog/products')
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (data && Array.isArray(data.products) && data.products.length > 0) {
-          const merged = mergeCatalogProducts([...data.products, ...latestRemoteList]);
-          latestRemoteList = merged;
+        if (
+          !hasFirestoreSnapshotArrived &&
+          data &&
+          Array.isArray(data.products) &&
+          data.products.length > 0
+        ) {
+          const merged = mergeCatalogProducts(data.products);
+          latestRemoteList = data.products;
           setProducts(merged);
-          syncAutoCatalogWithPixels(merged, { forceFullBroadcast: false }).catch(() => null);
+          if (!hasAutoSyncedPixelCatalogRef.current) {
+            hasAutoSyncedPixelCatalogRef.current = true;
+            syncAutoCatalogWithPixels(merged, { forceFullBroadcast: false }).catch(() => null);
+          }
           setDetailedProduct((current) => {
             if (!current) {
               const route = extractUrlProductRoute();
@@ -262,7 +263,7 @@ function StoreMain() {
               }
               return null;
             }
-            return resolveProductByIdOrAlias(merged, current.id) || current;
+            return resolveProductByIdOrAlias(merged, current.id) || null;
           });
         }
       })
@@ -276,6 +277,7 @@ function StoreMain() {
           seedProductsIfEmpty().catch(() => null);
         }
         if (!snap.empty) {
+          hasFirestoreSnapshotArrived = true;
           const list: Product[] = [];
           snap.forEach((docSnap) => {
             const data = docSnap.data() as Product;
@@ -284,6 +286,10 @@ function StoreMain() {
           latestRemoteList = list;
           const merged = mergeCatalogProducts(list);
           setProducts(merged);
+          if (!hasAutoSyncedPixelCatalogRef.current) {
+            hasAutoSyncedPixelCatalogRef.current = true;
+            syncAutoCatalogWithPixels(merged, { forceFullBroadcast: false }).catch(() => null);
+          }
           setDetailedProduct((current) => {
             if (!current) {
               const route = extractUrlProductRoute();
@@ -297,11 +303,11 @@ function StoreMain() {
               return null;
             }
             const updated = resolveProductByIdOrAlias(merged, current.id);
-            return updated || current;
+            return updated || null;
           });
         } else {
-          latestRemoteList = INITIAL_PRODUCTS;
-          setProducts(mergeCatalogProducts(INITIAL_PRODUCTS));
+          latestRemoteList = [];
+          setProducts(mergeCatalogProducts());
         }
       },
       (err) => {
@@ -362,8 +368,10 @@ function StoreMain() {
         // 1. Deleted products
         if (docsMap.deleted_products && Array.isArray(docsMap.deleted_products.ids)) {
           setRemoteDeletedProductIds(docsMap.deleted_products.ids);
-          const merged = mergeCatalogProducts(latestRemoteList);
+          const delSet = new Set(docsMap.deleted_products.ids);
+          const merged = mergeCatalogProducts(latestRemoteList.length > 0 ? latestRemoteList : undefined);
           setProducts(merged);
+          setDetailedProduct((curr) => (curr && delSet.has(curr.id) ? null : curr));
         }
 
         // 2. Founder profile (process before store_content so hasFounderProfileDocRef is set)
@@ -805,15 +813,22 @@ function StoreMain() {
   };
 
   const handleAddProduct = async (newProd: Product) => {
+    const withTimestamp: Product = { ...newProd, updatedAt: newProd.updatedAt || Date.now() };
     setProducts((prev) => {
-      const exists = prev.some((p) => p.id === newProd.id);
-      if (exists) return prev.map((p) => (p.id === newProd.id ? newProd : p));
-      return [newProd, ...prev];
+      const exists = prev.some((p) => p.id === withTimestamp.id);
+      if (exists) return prev.map((p) => (p.id === withTimestamp.id ? withTimestamp : p));
+      return [withTimestamp, ...prev];
     });
-    if (detailedProduct?.id === newProd.id) {
-      setDetailedProduct(newProd);
+    if (detailedProduct?.id === withTimestamp.id) {
+      setDetailedProduct(withTimestamp);
     }
-    await saveProductPersisted(newProd);
+    const saved = await saveProductPersisted(withTimestamp);
+    setProducts((prev) => {
+      const exists = prev.some((p) => p.id === saved.id);
+      if (exists) return prev.map((p) => (p.id === saved.id ? saved : p));
+      return [saved, ...prev];
+    });
+    setDetailedProduct((curr) => (curr?.id === saved.id ? saved : curr));
   };
 
   const handleDeleteProduct = async (productId: string) => {
@@ -1026,10 +1041,14 @@ function StoreMain() {
             product={editingProduct}
             onBack={() => setEditingProduct(null)}
             onProductUpdated={(updated) => {
-              setProducts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
-              if (detailedProduct?.id === updated.id) {
-                setDetailedProduct(updated);
-              }
+              const withTs: Product = { ...updated, updatedAt: updated.updatedAt || Date.now() };
+              setProducts((prev) => {
+                const exists = prev.some((p) => p.id === withTs.id);
+                return exists
+                  ? prev.map((p) => (p.id === withTs.id ? withTs : p))
+                  : [withTs, ...prev];
+              });
+              setDetailedProduct((curr) => (curr?.id === withTs.id ? withTs : curr));
               setEditingProduct(null);
             }}
             onProductDeleted={(id) => {
