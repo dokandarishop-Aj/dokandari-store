@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { Product, ProductCategory, OFFICIAL_CATEGORIES } from '../types';
 import { resolveSafeProductImageUrl, handleProductImageError } from '../lib/storeSync';
+import { SHARED_ADMIN_MENU_ITEMS, AdminTool } from './AdminPanel';
 
 interface MenuDrawerProps {
   isOpen: boolean;
@@ -38,6 +39,8 @@ interface MenuDrawerProps {
   onOpenPrivacy: () => void;
   onOpenAiAssistant: () => void;
   onOpenAdmin: () => void;
+  onSelectAdminTool?: (toolId: AdminTool) => void;
+  activeAdminTool?: AdminTool;
   onSelectCategory: (category: ProductCategory) => void;
   products?: Product[];
   onOpenProductDetail?: (product: Product) => void;
@@ -57,6 +60,8 @@ export const MenuDrawer: React.FC<MenuDrawerProps> = ({
   onOpenPrivacy,
   onOpenAiAssistant,
   onOpenAdmin,
+  onSelectAdminTool,
+  activeAdminTool,
   onSelectCategory,
   products = [],
   onOpenProductDetail,
@@ -143,6 +148,122 @@ export const MenuDrawer: React.FC<MenuDrawerProps> = ({
               <MessageCircle className="w-4 h-4 fill-white" />
               <span>💬 WhatsApp: 01885533437</span>
             </a>
+          </div>
+
+          {/* Shared 18-Module Admin Menu (অ্যাডমিন মেনু ও ফিচারসমূহ — ০১ থেকে ১৮) — Placed at Top for Immediate Mobile Visibility */}
+          <div className="space-y-2 pt-1">
+            <div className="flex items-center justify-between px-1">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-rose-700 flex items-center gap-1.5">
+                <LayoutDashboard className="w-3.5 h-3.5 text-[#E11D48]" />
+                <span>অ্যাডমিন মেনু ও ফিচারসমূহ (মোট ১৮টি মডিউল)</span>
+              </span>
+              <span className="px-2 py-0.5 rounded-full bg-rose-100 text-[#E11D48] text-[9px] font-extrabold">
+                ০১–১৮
+              </span>
+            </div>
+
+            {/* Direct Top Feature #18 Card in Mobile Menu Drawer */}
+            <button
+              type="button"
+              onClick={() => {
+                try {
+                  window.history.pushState({}, '', '/admin?tool=business_command_center');
+                  window.dispatchEvent(
+                    new CustomEvent('dokandari:open-admin-tool', {
+                      detail: { tool: 'business_command_center' },
+                    })
+                  );
+                } catch {
+                  // ignore
+                }
+                if (onSelectAdminTool) {
+                  onSelectAdminTool('business_command_center');
+                } else {
+                  onOpenAdmin();
+                }
+                onClose();
+              }}
+              className="w-full p-3 rounded-2xl bg-gradient-to-r from-amber-600 via-rose-600 to-indigo-700 hover:from-amber-700 hover:to-indigo-800 text-white shadow-sm flex items-center justify-between gap-2.5 text-left transition-all cursor-pointer"
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span className="px-2 py-1 rounded-lg bg-white/20 text-white text-xs font-black shrink-0">
+                  ১৮
+                </span>
+                <div className="min-w-0">
+                  <span className="block text-xs font-extrabold leading-snug break-words">
+                    ১৮ • বিজনেস কমান্ড সেন্টার — অটোমেশন ও ফাইনান্সিয়াল ম্যানেজমেন্ট ড্যাশবোর্ড
+                  </span>
+                </div>
+              </div>
+              <ChevronRight className="w-4 h-4 text-white shrink-0" />
+            </button>
+
+            <div className="grid grid-cols-2 gap-2 bg-rose-50/40 p-2 rounded-2xl border border-rose-200/80">
+              {SHARED_ADMIN_MENU_ITEMS.map((item) => {
+                const isSelected = activeAdminTool === item.id;
+                const isFeature18 = item.id === 'business_command_center';
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => {
+                      try {
+                        window.history.pushState({}, '', `/admin?tool=${item.id}`);
+                        window.dispatchEvent(
+                          new CustomEvent('dokandari:open-admin-tool', {
+                            detail: { tool: item.id },
+                          })
+                        );
+                      } catch {
+                        // ignore
+                      }
+                      if (onSelectAdminTool) {
+                        onSelectAdminTool(item.id);
+                      } else {
+                        onOpenAdmin();
+                      }
+                      onClose();
+                    }}
+                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-1 col-span-1 ${
+                      isSelected
+                        ? 'bg-[#E11D48] text-white border-[#E11D48] shadow-sm ring-2 ring-rose-300'
+                        : isFeature18
+                        ? 'bg-gradient-to-r from-amber-50 via-rose-50 to-indigo-50 border-amber-300 text-stone-900 hover:border-rose-400'
+                        : 'bg-white hover:bg-rose-50/60 border-stone-200/90 text-stone-800'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-1.5 w-full">
+                      <span
+                        className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded-md ${
+                          isSelected
+                            ? 'bg-white/20 text-white'
+                            : item.badgeBg
+                        }`}
+                      >
+                        #{item.serialBn}
+                      </span>
+                      <ChevronRight
+                        className={`w-3.5 h-3.5 shrink-0 ${
+                          isSelected ? 'text-white' : 'text-stone-400'
+                        }`}
+                      />
+                    </div>
+                    <div className="min-w-0">
+                      <span className="font-extrabold text-[11px] leading-snug block break-words">
+                        {item.label}
+                      </span>
+                      <span
+                        className={`text-[9.5px] leading-snug block break-words mt-0.5 ${
+                          isSelected ? 'text-white/90' : 'text-stone-500'
+                        }`}
+                      >
+                        {item.subtitleBn}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* Section 1: মূল পেজসমূহ ও পলিসি (ALL MAIN PAGES & POLICIES) */}
@@ -406,6 +527,44 @@ export const MenuDrawer: React.FC<MenuDrawerProps> = ({
 
         {/* Sticky Bottom Corner Login & Admin Access Bar (নিচের দিকে এক কোণায় লগইন বাটন) */}
         <div className="p-3.5 border-t border-rose-100 bg-rose-50/50 sticky bottom-0 z-20 space-y-2">
+          <button
+            type="button"
+            onClick={() => {
+              try {
+                window.history.pushState({}, '', '/admin?tool=business_command_center');
+                window.dispatchEvent(
+                  new CustomEvent('dokandari:open-admin-tool', {
+                    detail: { tool: 'business_command_center' },
+                  })
+                );
+              } catch {
+                // ignore
+              }
+              if (onSelectAdminTool) {
+                onSelectAdminTool('business_command_center');
+              } else {
+                onOpenAdmin();
+              }
+              onClose();
+            }}
+            className="w-full py-2.5 px-3 bg-gradient-to-r from-amber-600 via-rose-600 to-indigo-700 hover:from-amber-700 hover:to-indigo-800 text-white rounded-xl text-[11px] font-extrabold flex items-center justify-between gap-2 shadow-sm transition-all cursor-pointer text-left"
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="px-1.5 py-0.5 rounded-md bg-white/20 text-white text-[10px] font-black shrink-0">
+                ১৮
+              </span>
+              <div className="min-w-0">
+                <span className="block font-extrabold leading-tight break-words">
+                  বিজনেস কমান্ড সেন্টার
+                </span>
+                <span className="block text-[10px] text-amber-100 font-medium leading-tight break-words">
+                  অটোমেশন ও ফাইনান্সিয়াল ম্যানেজমেন্ট ড্যাশবোর্ড
+                </span>
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 text-white shrink-0" />
+          </button>
+
           <div className="flex items-center justify-between gap-2">
             {/* Customer Login / Account Button */}
             <button

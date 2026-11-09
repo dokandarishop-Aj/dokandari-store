@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { collection, doc, getDoc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db } from './lib/firebase';
-import { AuthProvider } from './context/AuthContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { CartProvider, useCart } from './context/CartContext';
 import { INITIAL_PRODUCTS } from './data/initialCatalog';
 import { Product, ProductCategory, OFFICIAL_CATEGORIES, Order } from './types';
@@ -20,7 +20,7 @@ import { ProductDetailModal } from './components/ProductDetailModal';
 import { CartDrawer } from './components/CartDrawer';
 import { CheckoutModal } from './components/CheckoutModal';
 import { OrderTrackingView } from './components/OrderTrackingView';
-import { AdminPanel } from './components/AdminPanel';
+import { AdminPanel, AdminTool } from './components/AdminPanel';
 import { AdminLoginGate, isAdminSessionValid } from './components/AdminLoginGate';
 import { CategoryDetailPage } from './components/CategoryDetailPage';
 import { AboutPage } from './components/AboutPage';
@@ -166,10 +166,23 @@ function StoreMain() {
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [isTrackingOpen, setIsTrackingOpen] = useState(false);
   const [trackingOrderId, setTrackingOrderId] = useState<string | undefined>(undefined);
+  const { isAdmin: authIsAdmin } = useAuth();
   const [isAdminOpen, setIsAdminOpen] = useState(false);
+  const [selectedAdminTool, setSelectedAdminTool] = useState<AdminTool | undefined>(undefined);
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(() => {
     return isAdminSessionValid();
   });
+
+  useEffect(() => {
+    if (authIsAdmin) {
+      setIsAdminAuthenticated(true);
+      try {
+        localStorage.setItem('dokandari_admin_session', 'active');
+      } catch {
+        // ignore
+      }
+    }
+  }, [authIsAdmin]);
   const [activeCategoryPage, setActiveCategoryPage] = useState<string | null>(() =>
     !initialUrlProdRoute.rawProdId && initialUrlCatRoute && initialUrlCatRoute !== 'all'
       ? initialUrlCatRoute
@@ -689,7 +702,16 @@ function StoreMain() {
         setIsPolicyOpen(false);
         setIsAdminOpen(false);
         return;
-      } else if (normalizedPath === '/admin' || hash === '#/admin') {
+      } else if (
+        normalizedPath === '/admin' ||
+        normalizedPath.startsWith('/admin/') ||
+        hash === '#/admin' ||
+        hash.startsWith('#/admin/')
+      ) {
+        const toolQuery = sp.get('tool') as AdminTool | null;
+        if (toolQuery) {
+          setSelectedAdminTool(toolQuery);
+        }
         setIsAdminOpen(true);
         setDetailedProduct(null);
         setActiveCategoryPage(null);
@@ -1071,9 +1093,10 @@ function StoreMain() {
         ) : isAdminOpen ? (
           isAdminAuthenticated ? (
             <AdminPanel
+              initialTool={selectedAdminTool}
               onBackToStore={() => {
                 setIsAdminOpen(false);
-                setIsAdminAuthenticated(isAdminSessionValid());
+                setIsAdminAuthenticated(isAdminSessionValid() || authIsAdmin);
                 navigateToStoreRoute('/');
               }}
               products={products}
@@ -2079,14 +2102,29 @@ function StoreMain() {
         }}
         onOpenAdmin={() => {
           setIsMenuOpen(false);
-          setIsAdminAuthenticated(isAdminSessionValid());
+          setIsAdminAuthenticated(isAdminSessionValid() || authIsAdmin);
           setIsAdminOpen(true);
           setActiveCategoryPage(null);
           setIsAboutOpen(false);
           setIsVideoGalleryOpen(false);
           setIsPolicyOpen(false);
           setDetailedProduct(null);
+          setIsTrackingOpen(false);
           navigateToStoreRoute('/admin');
+        }}
+        activeAdminTool={selectedAdminTool}
+        onSelectAdminTool={(toolId) => {
+          setSelectedAdminTool(toolId);
+          setIsMenuOpen(false);
+          setIsAdminAuthenticated(isAdminSessionValid() || authIsAdmin);
+          setIsAdminOpen(true);
+          setActiveCategoryPage(null);
+          setIsAboutOpen(false);
+          setIsVideoGalleryOpen(false);
+          setIsPolicyOpen(false);
+          setDetailedProduct(null);
+          setIsTrackingOpen(false);
+          navigateToStoreRoute(`/admin?tool=${toolId}`);
         }}
         onSelectCategory={(cat) => {
           setActiveCategory(cat);

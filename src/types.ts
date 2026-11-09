@@ -224,10 +224,12 @@ export type PaymentMethod = 'cod' | 'bkash' | 'nagad' | 'rocket';
 
 export type OrderStatus =
   | 'pending'
+  | 'processing'
   | 'confirmed'
   | 'packed'
   | 'in_transit'
   | 'delivered'
+  | 'returned'
   | 'cancelled';
 
 export interface CustomerInfo {
@@ -259,6 +261,8 @@ export interface PixelTrackingInfo {
   updatedAt: number;
 }
 
+export type OrderReturnCondition = 'sellable' | 'damaged' | 'pending_inspection';
+
 export interface Order {
   id: string;
   customer: CustomerInfo;
@@ -279,6 +283,42 @@ export interface Order {
   courierStatus?: string;
   customerScreenshot?: string;
   pixelTracking?: PixelTrackingInfo;
+  // Financial & Automation Engine fields
+  cogsTotal?: number;
+  courierExpense?: number;
+  packagingCost?: number;
+  otherOrderExpense?: number;
+  returnCourierLoss?: number;
+  damagedProductLoss?: number;
+  returnCondition?: OrderReturnCondition;
+  netOrderProfit?: number;
+  stockDeducted?: boolean;
+  manualFinancialOverride?: boolean;
+  adminNotes?: string;
+}
+
+export type ExpenseCategoryType =
+  | 'facebook_ads'
+  | 'tiktok_ads'
+  | 'google_ads'
+  | 'courier_expense'
+  | 'packaging_expense'
+  | 'staff_salary'
+  | 'office_rent'
+  | 'utilities'
+  | 'miscellaneous';
+
+export interface OperatingExpense {
+  id: string;
+  date: string; // YYYY-MM-DD
+  category: ExpenseCategoryType;
+  title: string;
+  amount: number;
+  paymentMethod?: string;
+  referenceId?: string;
+  notes?: string;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface UserProfile {

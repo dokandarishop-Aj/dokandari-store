@@ -280,12 +280,19 @@ export function getCatalogShareUrl(categoryId: string): string {
 }
 
 /**
- * Returns a unique domain-relative image URL for a specific product & image index
- * so no two products ever share the same image path (e.g. https://dokandari.com/images/<productId>/1?src=...)
+ * Returns a 100% verified, publicly crawlable static image URL for Meta & TikTok Commerce Manager.
+ * Never returns `/images/<productId>/<index>` (which returns text/html on static hosting) or unverified `scraped-*` paths.
  */
 export function getProductImageDomainUrl(productId: string, index: number, rawImageUrl: string): string {
   const origin = getPublicShareOrigin();
-  return `${origin}/images/${encodeURIComponent(productId)}/${index + 1}?src=${encodeURIComponent(rawImageUrl || '')}`;
+  const safePath = resolveSafeProductImageUrl(rawImageUrl, { id: productId }, index);
+  if (!safePath || safePath.startsWith('data:') || safePath.startsWith('blob:')) {
+    return `${origin}/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg`;
+  }
+  if (safePath.startsWith('http://') || safePath.startsWith('https://')) {
+    return safePath;
+  }
+  return `${origin}${safePath.startsWith('/') ? '' : '/'}${safePath}`;
 }
 
 /**

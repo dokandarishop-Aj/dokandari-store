@@ -14,7 +14,18 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { INITIAL_PRODUCTS } from '../data/initialCatalog';
-import { Product, Order, CustomerUgcCard, PurchaseRecord, CourierReturn, OFFICIAL_CATEGORIES } from '../types';
+import {
+  Product,
+  Order,
+  OrderStatus,
+  OrderReturnCondition,
+  CustomerUgcCard,
+  PurchaseRecord,
+  CourierReturn,
+  InventoryMovement,
+  OperatingExpense,
+  OFFICIAL_CATEGORIES,
+} from '../types';
 
 export const OFFICIAL_WHATSAPP = '01885533437';
 export const OFFICIAL_WHATSAPP_INT = '8801885533437';
@@ -1302,6 +1313,8 @@ export function isBlockedOrErrorProductImageUrl(rawUrl: string | undefined): boo
 
   const badTokens = [
     'scraped-c916ac6efc0985',
+    'scraped-d43e30a22330f8',
+    'scraped-e536719c1d184c',
     'founder-viral-women',
     '/uploads/founder/',
     'founder',
@@ -1366,7 +1379,12 @@ function resolveVerifiedLocalUploadPath(
 ): string {
   const normalized = localPath.replace(/^\/public\/uploads\//, '/uploads/');
   const fname = normalized.replace(/^\/uploads\/product\//, '').split(/[?&]/)[0];
-  if (fname.toLowerCase().includes('scraped-c916ac6efc0985') || fname.toLowerCase().includes('founder')) {
+  if (
+    fname.toLowerCase().includes('scraped-c916ac6efc0985') ||
+    fname.toLowerCase().includes('scraped-d43e30a22330f8') ||
+    fname.toLowerCase().includes('scraped-e536719c1d184c') ||
+    fname.toLowerCase().includes('founder')
+  ) {
     return getFallbackProductImage(product, index);
   }
   if (
@@ -1375,19 +1393,27 @@ function resolveVerifiedLocalUploadPath(
   ) {
     return VW_CUSTOM_MIRROR_REAL_IMAGES[index % VW_CUSTOM_MIRROR_REAL_IMAGES.length];
   }
-  if (
-    VALID_LOCAL_UPLOAD_FILES.has(fname) ||
-    fname.startsWith('dkd-') ||
-    fname.startsWith('prod-') ||
-    fname.startsWith('custom-') ||
-    fname.startsWith('scraped-') ||
-    fname.startsWith('ba-') ||
-    fname.startsWith('ugc-')
-  ) {
+  if (product?.id === 'dkd-1793681110659-381' && fname.startsWith('scraped-')) {
+    return '/uploads/product/dkd-1793611408928-666-0.jpg';
+  }
+  if (VALID_LOCAL_UPLOAD_FILES.has(fname)) {
     return `/uploads/product/${fname}`;
   }
   if (LEGACY_FILENAME_REMAP[fname]) {
     return LEGACY_FILENAME_REMAP[fname];
+  }
+  // Do NOT blindly allow unverified `scraped-*` filenames that are missing from VALID_LOCAL_UPLOAD_FILES on www.dokandari.com
+  if (fname.startsWith('scraped-')) {
+    return getFallbackProductImage(product, index);
+  }
+  if (
+    fname.startsWith('dkd-') ||
+    fname.startsWith('prod-') ||
+    fname.startsWith('custom-') ||
+    fname.startsWith('ba-') ||
+    fname.startsWith('ugc-')
+  ) {
+    return `/uploads/product/${fname}`;
   }
   return getFallbackProductImage(product, index);
 }
@@ -1467,23 +1493,27 @@ export function resolveSafeProductImageUrl(
     return getFallbackProductImage(product, index);
   }
 
-  // 1. Unwrap `/images/:productId/:index?src=...`
-  if (url.includes('/images/') && url.includes('src=')) {
-    try {
-      const parsed = new URL(url, 'https://dokandari.com');
-      const innerSrc = parsed.searchParams.get('src');
-      if (innerSrc) {
-        url = decodeURIComponent(innerSrc).trim();
-      }
-    } catch {
-      const match = url.match(/[?&]src=([^&]+)/);
-      if (match?.[1]) {
-        try {
-          url = decodeURIComponent(match[1]).trim();
-        } catch {
-          // ignore
+  // 1. Unwrap `/images/:productId/:index?src=...` or bare `/images/:productId/:index`
+  if (url.includes('/images/')) {
+    if (url.includes('src=')) {
+      try {
+        const parsed = new URL(url, 'https://dokandari.com');
+        const innerSrc = parsed.searchParams.get('src');
+        if (innerSrc) {
+          url = decodeURIComponent(innerSrc).trim();
+        }
+      } catch {
+        const match = url.match(/[?&]src=([^&]+)/);
+        if (match?.[1]) {
+          try {
+            url = decodeURIComponent(match[1]).trim();
+          } catch {
+            // ignore
+          }
         }
       }
+    } else {
+      return getFallbackProductImage(product, index);
     }
   }
 
@@ -4166,4 +4196,393 @@ export async function deleteCourierReturnPersisted(returnId: string): Promise<vo
     ),
   ]);
 }
+
+/**
+ * ============================================================================
+ * AUTOMATED STATUS-BASED ORDER ENGINE, STOCK MOVEMENT LEDGER & FINANCIAL ACCOUNTING
+ * ============================================================================
+ */
+const LS_STOCK_MOVEMENTS_KEY = 'dokandari_inventory_movements_v1';
+const LS_OPERATING_EXPENSES_KEY = 'dokandari_expenses_backup_v1';
+
+export function getPersistedStockMovements(): InventoryMovement[] {
+  try {
+    const raw = localStorage.getItem(LS_STOCK_MOVEMENTS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function recordStockMovementPersisted(
+  movement: InventoryMovement
+): Promise<InventoryMovement> {
+  const clean = sanitizeForFirestore(movement);
+  try {
+    const existing = getPersistedStockMovements();
+    const next = [clean, ...existing.filter((m) => m.id !== clean.id)].slice(0, 500);
+    localStorage.setItem(LS_STOCK_MOVEMENTS_KEY, JSON.stringify(next));
+  } catch {
+    // ignore
+  }
+  try {
+    await setDoc(doc(db, 'inventory_movements', clean.id), clean, { merge: true });
+  } catch {
+    // ignore
+  }
+  return clean;
+}
+
+export function getPersistedOperatingExpenses(): OperatingExpense[] {
+  try {
+    const raw = localStorage.getItem(LS_OPERATING_EXPENSES_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((e: any) => e && e.id && typeof e.amount === 'number')
+      .map((e: any) => ({
+        id: String(e.id),
+        date: String(e.date || new Date(e.createdAt || Date.now()).toISOString().slice(0, 10)),
+        category: e.category || 'miscellaneous',
+        title: String(e.title || e.description || e.notes || 'ব্যবসায়িক খরচ'),
+        amount: Number(e.amount || 0),
+        paymentMethod: e.paymentMethod || 'Cash',
+        referenceId: e.referenceId || '',
+        notes: e.notes || '',
+        createdAt: Number(e.createdAt || Date.now()),
+        updatedAt: Number(e.updatedAt || Date.now()),
+      }));
+  } catch {
+    return [];
+  }
+}
+
+export async function saveOperatingExpensePersisted(
+  expense: OperatingExpense
+): Promise<OperatingExpense> {
+  const clean = sanitizeForFirestore({
+    ...expense,
+    updatedAt: Date.now(),
+  });
+  try {
+    const existing = getPersistedOperatingExpenses();
+    const next = [clean, ...existing.filter((e) => e.id !== clean.id)];
+    localStorage.setItem(LS_OPERATING_EXPENSES_KEY, JSON.stringify(next));
+  } catch {
+    // ignore
+  }
+  try {
+    await setDoc(doc(db, 'business_expenses', clean.id), clean, { merge: true });
+  } catch {
+    // ignore
+  }
+  return clean;
+}
+
+export async function deleteOperatingExpensePersisted(expenseId: string): Promise<void> {
+  if (!expenseId) return;
+  try {
+    const existing = getPersistedOperatingExpenses();
+    const next = existing.filter((e) => e.id !== expenseId);
+    localStorage.setItem(LS_OPERATING_EXPENSES_KEY, JSON.stringify(next));
+  } catch {
+    // ignore
+  }
+  try {
+    await deleteDoc(doc(db, 'business_expenses', expenseId));
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Calculates exact COGS, Courier Expense, Packaging Cost, Return/Damage Loss, and Net Profit/Loss
+ * for any Order using the live product catalog cost prices.
+ *
+ * Formula (Master Prompt Section 4 & 9):
+ * - Delivered Order:
+ *   Net Order Profit = Order Total - Total COGS - Courier Expense - Packaging Cost - Other Order Expense
+ * - Returned Order:
+ *   Revenue = 0
+ *   Net Order Profit = -(Return Courier Loss + Packaging Cost + Damaged Product Loss + Other Order Expense)
+ * - Cancelled / Pending / Processing / Confirmed / In Transit:
+ *   Realized Net Order Profit = 0 (Expected profit is calculated separately for pipeline preview)
+ */
+export function calculateOrderFinancialBreakdown(
+  order: Order,
+  products: Product[]
+): {
+  cogsTotal: number;
+  courierExpense: number;
+  packagingCost: number;
+  otherOrderExpense: number;
+  returnCourierLoss: number;
+  damagedProductLoss: number;
+  netOrderProfit: number;
+  expectedProfit: number;
+} {
+  const productMap = new Map<string, Product>();
+  for (const p of products) {
+    if (p && p.id) productMap.set(p.id, p);
+  }
+
+  // Calculate COGS from order items
+  let computedCogs = 0;
+  for (const item of order.items || []) {
+    const matched = productMap.get(item.productId) || productMap.get(item.id);
+    const unitCost =
+      matched && typeof matched.costPrice === 'number' && matched.costPrice > 0
+        ? matched.costPrice
+        : Math.round((Number(item.price) || 0) * 0.52);
+    computedCogs += unitCost * (Number(item.quantity) || 1);
+  }
+
+  const cogsTotal =
+    order.manualFinancialOverride && typeof order.cogsTotal === 'number'
+      ? order.cogsTotal
+      : typeof order.cogsTotal === 'number' && order.cogsTotal > 0
+      ? order.cogsTotal
+      : computedCogs;
+
+  const defaultShipping = Number(order.shippingCost) || 80;
+  const courierExpense =
+    typeof order.courierExpense === 'number' ? order.courierExpense : defaultShipping;
+  const packagingCost =
+    typeof order.packagingCost === 'number' ? order.packagingCost : 15;
+  const otherOrderExpense =
+    typeof order.otherOrderExpense === 'number' ? order.otherOrderExpense : 0;
+
+  const expectedProfit =
+    (Number(order.total) || 0) - cogsTotal - courierExpense - packagingCost - otherOrderExpense;
+
+  if (order.status === 'delivered') {
+    const netOrderProfit =
+      order.manualFinancialOverride && typeof order.netOrderProfit === 'number'
+        ? order.netOrderProfit
+        : expectedProfit;
+    return {
+      cogsTotal,
+      courierExpense,
+      packagingCost,
+      otherOrderExpense,
+      returnCourierLoss: 0,
+      damagedProductLoss: 0,
+      netOrderProfit,
+      expectedProfit,
+    };
+  }
+
+  if (order.status === 'returned') {
+    const returnCourierLoss =
+      typeof order.returnCourierLoss === 'number'
+        ? order.returnCourierLoss
+        : courierExpense + Math.round(courierExpense * 0.5);
+    const damagedProductLoss =
+      order.returnCondition === 'damaged'
+        ? typeof order.damagedProductLoss === 'number'
+          ? order.damagedProductLoss
+          : cogsTotal
+        : 0;
+    const netOrderProfit =
+      order.manualFinancialOverride && typeof order.netOrderProfit === 'number'
+        ? order.netOrderProfit
+        : -(returnCourierLoss + packagingCost + damagedProductLoss + otherOrderExpense);
+    return {
+      cogsTotal,
+      courierExpense,
+      packagingCost,
+      otherOrderExpense,
+      returnCourierLoss,
+      damagedProductLoss,
+      netOrderProfit,
+      expectedProfit,
+    };
+  }
+
+  return {
+    cogsTotal,
+    courierExpense,
+    packagingCost,
+    otherOrderExpense,
+    returnCourierLoss: 0,
+    damagedProductLoss: 0,
+    netOrderProfit: 0,
+    expectedProfit,
+  };
+}
+
+/**
+ * Transaction-safe, idempotent Status-Based Order Automation Engine (Master Prompt Section 4).
+ * Handles all transitions cleanly:
+ * - Pending / Processing -> Delivered: Deducts stock once (`stockDeducted = true`), records sale movement, realizes profit.
+ * - Delivered -> Returned:
+ *   - If `sellable`: Restores stock (`stockDeducted = false`), records return restock movement, records return courier loss.
+ *   - If `damaged`: Keeps stock deducted (`stockDeducted = true`), records damage write-off movement, records damaged product loss + courier loss.
+ *   - If `pending_inspection`: Holds stock restoration until inspection completes.
+ * - Any status -> Cancelled:
+ *   - If stock was previously deducted (`stockDeducted === true`), restores stock (`stockDeducted = false`) and reverses revenue/profit.
+ */
+export async function executeOrderStatusAutomation(params: {
+  order: Order;
+  newStatus: OrderStatus;
+  returnCondition?: OrderReturnCondition;
+  manualFinancials?: Partial<
+    Pick<
+      Order,
+      | 'cogsTotal'
+      | 'courierExpense'
+      | 'packagingCost'
+      | 'otherOrderExpense'
+      | 'returnCourierLoss'
+      | 'damagedProductLoss'
+      | 'netOrderProfit'
+      | 'manualFinancialOverride'
+      | 'adminNotes'
+    >
+  >;
+  products: Product[];
+}): Promise<{
+  updatedOrder: Order;
+  updatedProducts: Product[];
+  movements: InventoryMovement[];
+}> {
+  const { order, newStatus, returnCondition, manualFinancials, products } = params;
+  const now = Date.now();
+  const nextProducts = products.map((p) => ({ ...p }));
+  const movements: InventoryMovement[] = [];
+
+  const wasStockDeducted = Boolean(order.stockDeducted);
+  const effectiveReturnCondition: OrderReturnCondition =
+    returnCondition || order.returnCondition || 'sellable';
+
+  // Determine whether stock should be deducted in the target state
+  let shouldStockBeDeducted = wasStockDeducted;
+  if (newStatus === 'delivered') {
+    shouldStockBeDeducted = true;
+  } else if (newStatus === 'returned') {
+    if (effectiveReturnCondition === 'sellable') {
+      shouldStockBeDeducted = false;
+    } else if (effectiveReturnCondition === 'damaged') {
+      shouldStockBeDeducted = true;
+    }
+  } else if (newStatus === 'cancelled' || newStatus === 'pending') {
+    shouldStockBeDeducted = false;
+  }
+
+  // Apply stock delta idempotently
+  if (!wasStockDeducted && shouldStockBeDeducted) {
+    // Deduct stock for each item in the order
+    for (const item of order.items || []) {
+      const pIdx = nextProducts.findIndex(
+        (p) => p.id === item.productId || p.id === item.id
+      );
+      if (pIdx >= 0) {
+        const prod = nextProducts[pIdx];
+        const qty = Math.max(1, Number(item.quantity) || 1);
+        const prevStock = typeof prod.stock === 'number' ? prod.stock : 25;
+        const newStock = Math.max(0, prevStock - qty);
+        nextProducts[pIdx] = {
+          ...prod,
+          stock: newStock,
+          inStock: newStock > 0,
+          updatedAt: now,
+        };
+        const mov: InventoryMovement = {
+          id: `mov-sale-${order.id}-${prod.id}-${now}`,
+          productId: prod.id,
+          productName: prod.name,
+          sku: prod.sku || prod.id,
+          type: newStatus === 'returned' && effectiveReturnCondition === 'damaged' ? 'damage_write_off' : 'sale',
+          quantity: qty,
+          previousStock: prevStock,
+          newStock,
+          referenceId: order.id,
+          notes:
+            newStatus === 'delivered'
+              ? `অর্ডার #${order.id} ডেলিভার্ড — অটো স্টক কর্তন (${qty} পিস)`
+              : `অর্ডার #${order.id} ড্যামেজ রিটার্ন রাইট-অফ (${qty} পিস)`,
+          createdAt: now,
+        };
+        movements.push(mov);
+        await Promise.allSettled([
+          saveProductPersisted(nextProducts[pIdx]),
+          recordStockMovementPersisted(mov),
+        ]);
+      }
+    }
+  } else if (wasStockDeducted && !shouldStockBeDeducted) {
+    // Restore stock for each item in the order
+    for (const item of order.items || []) {
+      const pIdx = nextProducts.findIndex(
+        (p) => p.id === item.productId || p.id === item.id
+      );
+      if (pIdx >= 0) {
+        const prod = nextProducts[pIdx];
+        const qty = Math.max(1, Number(item.quantity) || 1);
+        const prevStock = typeof prod.stock === 'number' ? prod.stock : 0;
+        const newStock = prevStock + qty;
+        nextProducts[pIdx] = {
+          ...prod,
+          stock: newStock,
+          inStock: true,
+          updatedAt: now,
+        };
+        const mov: InventoryMovement = {
+          id: `mov-restock-${order.id}-${prod.id}-${now}`,
+          productId: prod.id,
+          productName: prod.name,
+          sku: prod.sku || prod.id,
+          type: 'return_restock',
+          quantity: qty,
+          previousStock: prevStock,
+          newStock,
+          referenceId: order.id,
+          notes:
+            newStatus === 'returned'
+              ? `অর্ডার #${order.id} বিক্রয়যোগ্য রিটার্ন — অটো স্টকে ফেরত (+${qty} পিস)`
+              : `অর্ডার #${order.id} ক্যানসেল — স্টকে ফেরত (+${qty} পিস)`,
+          createdAt: now,
+        };
+        movements.push(mov);
+        await Promise.allSettled([
+          saveProductPersisted(nextProducts[pIdx]),
+          recordStockMovementPersisted(mov),
+        ]);
+      }
+    }
+  }
+
+  const candidateOrder: Order = {
+    ...order,
+    ...(manualFinancials || {}),
+    status: newStatus,
+    returnCondition: newStatus === 'returned' ? effectiveReturnCondition : order.returnCondition,
+    stockDeducted: shouldStockBeDeducted,
+    updatedAt: now,
+  };
+
+  const fin = calculateOrderFinancialBreakdown(candidateOrder, nextProducts);
+  const finalOrder: Order = {
+    ...candidateOrder,
+    cogsTotal: fin.cogsTotal,
+    courierExpense: fin.courierExpense,
+    packagingCost: fin.packagingCost,
+    otherOrderExpense: fin.otherOrderExpense,
+    returnCourierLoss: fin.returnCourierLoss,
+    damagedProductLoss: fin.damagedProductLoss,
+    netOrderProfit: fin.netOrderProfit,
+  };
+
+  const savedOrder = await saveOrderPersisted(finalOrder);
+
+  return {
+    updatedOrder: savedOrder,
+    updatedProducts: nextProducts,
+    movements,
+  };
+}
+
 

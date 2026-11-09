@@ -67,17 +67,43 @@ export const FloatingAdminButton: React.FC<FloatingAdminButtonProps> = ({
         )}
       </div>
 
-      <button
-        type="button"
-        onClick={onClick}
-        className="group flex items-center gap-2 pl-2 pr-4 py-2 bg-gradient-to-r from-[#E11D48] to-[#BE123C] hover:from-[#BE123C] hover:to-[#9F1239] text-white font-bold text-xs rounded-full shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-105 border border-rose-300/50 cursor-pointer"
-        title="Open Admin Hub"
-      >
-        <div className="w-7 h-7 rounded-full bg-white/20 text-white flex items-center justify-center font-bold text-xs shadow-2xs">
-          <ShieldCheck className="w-4 h-4 text-white" />
-        </div>
-        <span className="font-extrabold tracking-wide">Admin Control</span>
-      </button>
+      <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => {
+            try {
+              window.history.pushState({}, '', '/admin?tool=business_command_center');
+              window.dispatchEvent(
+                new CustomEvent('dokandari:open-admin-tool', {
+                  detail: { tool: 'business_command_center' },
+                })
+              );
+            } catch {
+              // ignore
+            }
+            onClick();
+          }}
+          className="px-3 py-2 bg-gradient-to-r from-amber-600 to-indigo-700 hover:from-amber-700 hover:to-indigo-800 text-white font-extrabold text-[11px] rounded-full shadow-lg flex items-center gap-1.5 cursor-pointer transition-all border border-amber-300/60"
+          title="১৮ • বিজনেস কমান্ড সেন্টার — অটোমেশন ও ফাইনান্সিয়াল ম্যানেজমেন্ট ড্যাশবোর্ড"
+        >
+          <span className="px-1.5 py-0.2 rounded-full bg-white/25 text-white text-[10px] font-black">
+            ১৮
+          </span>
+          <span>বিজনেস কমান্ড সেন্টার</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={onClick}
+          className="group flex items-center gap-2 pl-2 pr-4 py-2 bg-gradient-to-r from-[#E11D48] to-[#BE123C] hover:from-[#BE123C] hover:to-[#9F1239] text-white font-bold text-xs rounded-full shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-105 border border-rose-300/50 cursor-pointer"
+          title="Open Admin Hub"
+        >
+          <div className="w-7 h-7 rounded-full bg-white/20 text-white flex items-center justify-center font-bold text-xs shadow-2xs">
+            <ShieldCheck className="w-4 h-4 text-white" />
+          </div>
+          <span className="font-extrabold tracking-wide">Admin Control</span>
+        </button>
+      </div>
     </aside>
   );
 };

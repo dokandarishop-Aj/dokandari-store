@@ -159,6 +159,7 @@ import {
   saveAllStoreDataLifetime,
   downloadCustomerScreenshot,
   isProductScreenshotEnabled,
+  executeOrderStatusAutomation,
 } from '../lib/storeSync';
 import {
   OfficialWhatsAppIcon,
@@ -169,6 +170,7 @@ import {
 } from './OfficialIcons';
 import { OmniFlowStudio } from './OmniFlowStudio';
 import { PurchaseManagementPanel } from './PurchaseManagementPanel';
+import { EnterpriseDashboardHub } from './EnterpriseDashboardHub';
 
 type HeroSlide = StoreContent['heroSlides'][number];
 
@@ -181,9 +183,10 @@ interface AdminPanelProps {
   categoryOrder?: string[];
   onUpdateCategoryOrder?: (nextOrder: string[]) => void;
   onStoreContentUpdated?: (content: StoreContent) => void;
+  initialTool?: AdminTool;
 }
 
-type AdminTool =
+export type AdminTool =
   | 'omni_flow_studio'
   | 'catalog_studio'
   | 'products'
@@ -200,7 +203,183 @@ type AdminTool =
   | 'campaigns'
   | 'categories'
   | 'security'
-  | 'purchase_management';
+  | 'purchase_management'
+  | 'business_command_center';
+
+export interface AdminNavConfigItem {
+  id: AdminTool;
+  serialBn: string;
+  label: string;
+  subtitleBn: string;
+  icon: any;
+  badgeBg: string;
+  categoryGroup: 'catalog' | 'orders' | 'marketing' | 'settings';
+}
+
+export const SHARED_ADMIN_MENU_ITEMS: AdminNavConfigItem[] = [
+  {
+    id: 'catalog_studio',
+    serialBn: '০১',
+    label: 'এআই প্রোডাক্ট ও স্টোর ইমপোর্টার',
+    subtitleBn: 'লিংক ও CSV থেকে প্রোডাক্ট আপলোড',
+    icon: Palette,
+    badgeBg: 'bg-rose-600 text-white',
+    categoryGroup: 'catalog',
+  },
+  {
+    id: 'products',
+    serialBn: '০২',
+    label: 'সকল প্রোডাক্ট ও লাইভ এডিট',
+    subtitleBn: 'দাম, ছবি ও স্টক ম্যানেজমেন্ট',
+    icon: Tag,
+    badgeBg: 'bg-pink-600 text-white',
+    categoryGroup: 'catalog',
+  },
+  {
+    id: 'categories',
+    serialBn: '০৩',
+    label: '১১টি ক্যাটাগরি সাজানো',
+    subtitleBn: 'ড্র্যাগ অ্যান্ড ড্রপ সিরিয়াল',
+    icon: FolderTree,
+    badgeBg: 'bg-purple-600 text-white',
+    categoryGroup: 'catalog',
+  },
+  {
+    id: 'orders',
+    serialBn: '০৪',
+    label: 'অর্ডার ও কুরিয়ার বুকিং',
+    subtitleBn: 'Steadfast ও Pathao বুকিং',
+    icon: Package,
+    badgeBg: 'bg-emerald-600 text-white',
+    categoryGroup: 'orders',
+  },
+  {
+    id: 'courier_returns',
+    serialBn: '০৫',
+    label: 'কুরিয়ার রিটার্ন ম্যানেজমেন্ট',
+    subtitleBn: 'অটো স্টক অ্যাডজাস্টমেন্ট ও ড্যামেজ ট্র্যাকিং',
+    icon: RotateCcw,
+    badgeBg: 'bg-rose-700 text-white',
+    categoryGroup: 'orders',
+  },
+  {
+    id: 'abandoned_leads',
+    serialBn: '০৬',
+    label: 'অসম্পূর্ণ অর্ডার ও লিড রিকভারি',
+    subtitleBn: 'কাস্টমারের নম্বর ও কার্ট ট্র্যাকিং',
+    icon: PhoneCall,
+    badgeBg: 'bg-amber-500 text-white',
+    categoryGroup: 'orders',
+  },
+  {
+    id: 'customers',
+    serialBn: '০৭',
+    label: 'কাস্টমার ডাটাবেস ও তালিকা',
+    subtitleBn: 'গ্রাহকের ঠিকানা ও অর্ডার হিস্ট্রি',
+    icon: Users,
+    badgeBg: 'bg-teal-600 text-white',
+    categoryGroup: 'orders',
+  },
+  {
+    id: 'pixels',
+    serialBn: '০৮',
+    label: 'পিক্সেল, GTM, GA4 ও SEO সেটআপ',
+    subtitleBn: 'মেটা, টিকটক, হোয়াটসঅ্যাপ ও গুগল ট্যাগ',
+    icon: Activity,
+    badgeBg: 'bg-blue-600 text-white',
+    categoryGroup: 'marketing',
+  },
+  {
+    id: 'campaigns',
+    serialBn: '০৯',
+    label: 'এআই বিজ্ঞাপন ও ক্যাম্পেইন কপি',
+    subtitleBn: 'ফেসবুক ও টিকটক অ্যাড স্ক্রিপ্ট',
+    icon: Megaphone,
+    badgeBg: 'bg-indigo-600 text-white',
+    categoryGroup: 'marketing',
+  },
+  {
+    id: 'banners',
+    serialBn: '১০',
+    label: 'হিরো ব্যানার ও স্লাইডার ডিজাইন',
+    subtitleBn: 'হোমপেজ ব্যানার ও স্লাইড স্পিড',
+    icon: ImageIcon,
+    badgeBg: 'bg-fuchsia-600 text-white',
+    categoryGroup: 'marketing',
+  },
+  {
+    id: 'settings',
+    serialBn: '১১',
+    label: 'ওয়েবসাইট ও ডেলিভারি চার্জ সেটিংস',
+    subtitleBn: 'ঢাকা ৳৭০ / ঢাকার বাইরে ৳১২০ ও নম্বর',
+    icon: Settings,
+    badgeBg: 'bg-cyan-600 text-white',
+    categoryGroup: 'settings',
+  },
+  {
+    id: 'api_integrations',
+    serialBn: '১২',
+    label: 'কুরিয়ার ও পেমেন্ট এপিআই কি',
+    subtitleBn: 'Steadfast, Pathao, bKash ও Nagad',
+    icon: Key,
+    badgeBg: 'bg-orange-600 text-white',
+    categoryGroup: 'settings',
+  },
+  {
+    id: 'analytics',
+    serialBn: '১৩',
+    label: 'সেলস রিপোর্ট ও অ্যানালাইটিক্স',
+    subtitleBn: 'মোট বিক্রি, P&L ও রিটার্ন ক্ষতি',
+    icon: Activity,
+    badgeBg: 'bg-emerald-700 text-white',
+    categoryGroup: 'settings',
+  },
+  {
+    id: 'security',
+    serialBn: '১৪',
+    label: 'অ্যাডমিন পাসওয়ার্ড ও সিকিউরিটি',
+    subtitleBn: 'অ্যাডমিন ইমেইল ও পাসওয়ার্ড পরিবর্তন',
+    icon: Shield,
+    badgeBg: 'bg-red-600 text-white',
+    categoryGroup: 'settings',
+  },
+  {
+    id: 'cache',
+    serialBn: '১৫',
+    label: 'ক্যাশে ও ফায়ারবেস লাইভ সিঙ্ক',
+    subtitleBn: 'ডাটাবেজ স্পিড ও সিঙ্ক চেক',
+    icon: Database,
+    badgeBg: 'bg-violet-600 text-white',
+    categoryGroup: 'settings',
+  },
+  {
+    id: 'omni_flow_studio',
+    serialBn: '১৬',
+    label: 'গুগল ফ্লো এআই স্টুডিও',
+    subtitleBn: 'Veo 3 ভিডিও, ওমিনি, Imagen 3 ও ফর্ম জেনারেটর',
+    icon: Video,
+    badgeBg: 'bg-gradient-to-r from-[#E11D48] to-pink-600 text-white',
+    categoryGroup: 'marketing',
+  },
+  {
+    id: 'purchase_management',
+    serialBn: '১৭',
+    label: 'পণ্য ক্রয় ও স্টক (Purchase Management)',
+    subtitleBn: 'চায়না/বাংলাদেশ সোর্সিং, ক্রয়মূল্য, বাকি ও স্টক হিসাব',
+    icon: ShoppingBag,
+    badgeBg: 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white',
+    categoryGroup: 'orders',
+  },
+  {
+    id: 'business_command_center',
+    serialBn: '১৮',
+    label: 'বিজনেস কমান্ড সেন্টার',
+    subtitleBn: 'অটোমেশন ও ফাইনান্সিয়াল ম্যানেজমেন্ট ড্যাশবোর্ড',
+    icon: TrendingUp,
+    badgeBg: 'bg-gradient-to-r from-amber-600 to-indigo-700 text-white',
+    categoryGroup: 'orders',
+  },
+];
 
 interface SavedCampaign extends AICampaignOutput {
   id: string;
@@ -235,9 +414,71 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   categoryOrder,
   onUpdateCategoryOrder,
   onStoreContentUpdated,
+  initialTool,
 }) => {
   const { signOutUser, userProfile } = useAuth();
-  const [activeTool, setActiveTool] = useState<AdminTool>('catalog_studio');
+  const [activeTool, setActiveTool] = useState<AdminTool>(() => {
+    if (initialTool) return initialTool;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const toolParam = params.get('tool') as AdminTool | null;
+      if (toolParam) return toolParam;
+      const path = window.location.pathname.toLowerCase();
+      const hash = window.location.hash.toLowerCase();
+      if (
+        path.includes('business-command-center') ||
+        path.includes('business_command_center') ||
+        hash.includes('business-command-center') ||
+        hash.includes('business_command_center')
+      ) {
+        return 'business_command_center';
+      }
+    } catch {
+      // ignore
+    }
+    return 'catalog_studio';
+  });
+
+  useEffect(() => {
+    if (initialTool) {
+      setActiveTool(initialTool);
+    }
+  }, [initialTool]);
+
+  const handleSelectAdminTool = (toolId: AdminTool) => {
+    setActiveTool(toolId);
+    try {
+      const url = new URL(window.location.href);
+      if (toolId === 'business_command_center') {
+        url.searchParams.set('tool', 'business_command_center');
+      } else {
+        url.searchParams.delete('tool');
+      }
+      window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+    } catch {
+      // ignore
+    }
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+      setTimeout(() => {
+        const el = document.getElementById('admin-active-tool-viewport');
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 90);
+    }
+  };
+
+  useEffect(() => {
+    const onOpenToolEvent = (e: Event) => {
+      const custom = e as CustomEvent<{ tool?: AdminTool }>;
+      if (custom?.detail?.tool) {
+        handleSelectAdminTool(custom.detail.tool);
+      }
+    };
+    window.addEventListener('dokandari:open-admin-tool', onOpenToolEvent as EventListener);
+    return () =>
+      window.removeEventListener('dokandari:open-admin-tool', onOpenToolEvent as EventListener);
+  }, []);
   const [orders, setOrders] = useState<Order[]>([]);
   const [purchases, setPurchases] = useState<PurchaseRecord[]>(() => getPersistedPurchases());
   const [loading, setLoading] = useState(false);
@@ -1536,6 +1777,24 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const handleUpdateOrderStatus = async (orderId: string, status: OrderStatus) => {
     const now = Date.now();
     try {
+      const targetOrder = orders.find((o) => o.id === orderId);
+      if (targetOrder) {
+        const autoRes = await executeOrderStatusAutomation({
+          order: targetOrder,
+          newStatus: status,
+          products,
+        });
+        setOrders((prev) => {
+          const next = prev.map((o) => (o.id === orderId ? autoRes.updatedOrder : o));
+          syncOrdersToLocalCache(next);
+          return next;
+        });
+        setFeedback(
+          `✅ অর্ডার #${orderId} স্ট্যাটাস "${status.toUpperCase()}" আপডেট হয়েছে এবং স্টক ও লাভ-ক্ষতি স্বয়ংক্রিয়ভাবে সমন্বয় করা হয়েছে!`
+        );
+        setTimeout(() => setFeedback(''), 4000);
+        return;
+      }
       setOrders((prev) => {
         const next = prev.map((o) => (o.id === orderId ? { ...o, status, updatedAt: now } : o));
         syncOrdersToLocalCache(next);
@@ -3526,185 +3785,43 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     return Array.from(map.values());
   }, [orders]);
 
-  // All Official Admin Dashboard Tools — Clean, Colorful, Pure Bengali Labels, with Google Omni at the Very End (Extra Menu)
-  const adminNavList: {
-    id: AdminTool;
-    serialBn: string;
-    label: string;
-    subtitleBn: string;
-    count?: number;
-    icon: any;
-    badgeBg: string;
-    categoryGroup: 'catalog' | 'orders' | 'marketing' | 'settings';
-  }[] = [
-    {
-      id: 'catalog_studio',
-      serialBn: '০১',
-      label: 'এআই প্রোডাক্ট ও স্টোর ইমপোর্টার',
-      subtitleBn: 'লিংক ও CSV থেকে প্রোডাক্ট আপলোড',
-      icon: Palette,
-      badgeBg: 'bg-rose-600 text-white',
-      categoryGroup: 'catalog',
-    },
-    {
-      id: 'products',
-      serialBn: '০২',
-      label: 'সকল প্রোডাক্ট ও লাইভ এডিট',
-      subtitleBn: 'দাম, ছবি ও স্টক ম্যানেজমেন্ট',
-      count: products.length,
-      icon: Tag,
-      badgeBg: 'bg-pink-600 text-white',
-      categoryGroup: 'catalog',
-    },
-    {
-      id: 'categories',
-      serialBn: '০৩',
-      label: '১১টি ক্যাটাগরি সাজানো',
-      subtitleBn: 'ড্র্যাগ অ্যান্ড ড্রপ সিরিয়াল',
-      count: OFFICIAL_CATEGORIES.length,
-      icon: FolderTree,
-      badgeBg: 'bg-purple-600 text-white',
-      categoryGroup: 'catalog',
-    },
-    {
-      id: 'orders',
-      serialBn: '০৪',
-      label: 'অর্ডার ও কুরিয়ার বুকিং',
-      subtitleBn: 'Steadfast ও Pathao বুকিং',
-      count: orders.length,
-      icon: Package,
-      badgeBg: 'bg-emerald-600 text-white',
-      categoryGroup: 'orders',
-    },
-    {
-      id: 'courier_returns',
-      serialBn: '০৫',
-      label: 'কুরিয়ার রিটার্ন ম্যানেজমেন্ট',
-      subtitleBn: 'অটো স্টক অ্যাডজাস্টমেন্ট ও ড্যামেজ ট্র্যাকিং',
-      count: courierReturns.filter((r) => r.status !== 'completed').length,
-      icon: RotateCcw,
-      badgeBg: 'bg-rose-700 text-white',
-      categoryGroup: 'orders',
-    },
-    {
-      id: 'abandoned_leads',
-      serialBn: '০৬',
-      label: 'অসম্পূর্ণ অর্ডার ও লিড রিকভারি',
-      subtitleBn: 'কাস্টমারের নম্বর ও কার্ট ট্র্যাকিং',
-      count: abandonedLeads.filter((l) => l.status === 'pending').length,
-      icon: PhoneCall,
-      badgeBg: 'bg-amber-500 text-white',
-      categoryGroup: 'orders',
-    },
-    {
-      id: 'customers',
-      serialBn: '০৭',
-      label: 'কাস্টমার ডাটাবেস ও তালিকা',
-      subtitleBn: 'গ্রাহকের ঠিকানা ও অর্ডার হিস্ট্রি',
-      count: aggregatedCustomers.length,
-      icon: Users,
-      badgeBg: 'bg-teal-600 text-white',
-      categoryGroup: 'orders',
-    },
-    {
-      id: 'pixels',
-      serialBn: '০৮',
-      label: 'পিক্সেল, GTM, GA4 ও SEO সেটআপ',
-      subtitleBn: 'মেটা, টিকটক, হোয়াটসঅ্যাপ ও গুগল ট্যাগ',
-      icon: Activity,
-      badgeBg: 'bg-blue-600 text-white',
-      categoryGroup: 'marketing',
-    },
-    {
-      id: 'campaigns',
-      serialBn: '০৯',
-      label: 'এআই বিজ্ঞাপন ও ক্যাম্পেইন কপি',
-      subtitleBn: 'ফেসবুক ও টিকটক অ্যাড স্ক্রিপ্ট',
-      count: savedCampaigns.length,
-      icon: Megaphone,
-      badgeBg: 'bg-indigo-600 text-white',
-      categoryGroup: 'marketing',
-    },
-    {
-      id: 'banners',
-      serialBn: '১০',
-      label: 'হিরো ব্যানার ও স্লাইডার ডিজাইন',
-      subtitleBn: 'হোমপেজ ব্যানার ও স্লাইড স্পিড',
-      count: siteContent.heroSlides.length,
-      icon: ImageIcon,
-      badgeBg: 'bg-fuchsia-600 text-white',
-      categoryGroup: 'marketing',
-    },
-    {
-      id: 'settings',
-      serialBn: '১১',
-      label: 'ওয়েবসাইট ও ডেলিভারি চার্জ সেটিংস',
-      subtitleBn: 'ঢাকা ৳৭০ / ঢাকার বাইরে ৳১২০ ও নম্বর',
-      icon: Settings,
-      badgeBg: 'bg-cyan-600 text-white',
-      categoryGroup: 'settings',
-    },
-    {
-      id: 'api_integrations',
-      serialBn: '১২',
-      label: 'কুরিয়ার ও পেমেন্ট এপিআই কি',
-      subtitleBn: 'Steadfast, Pathao, bKash ও Nagad',
-      icon: Key,
-      badgeBg: 'bg-orange-600 text-white',
-      categoryGroup: 'settings',
-    },
-    {
-      id: 'analytics',
-      serialBn: '১৩',
-      label: 'সেলস রিপোর্ট ও অ্যানালাইটিক্স',
-      subtitleBn: 'মোট বিক্রি, P&L ও রিটার্ন ক্ষতি',
-      icon: Activity,
-      badgeBg: 'bg-emerald-700 text-white',
-      categoryGroup: 'settings',
-    },
-    {
-      id: 'security',
-      serialBn: '১৪',
-      label: 'অ্যাডমিন পাসওয়ার্ড ও সিকিউরিটি',
-      subtitleBn: 'অ্যাডমিন ইমেইল ও পাসওয়ার্ড পরিবর্তন',
-      count: authorizedEmails.length,
-      icon: Shield,
-      badgeBg: 'bg-red-600 text-white',
-      categoryGroup: 'settings',
-    },
-    {
-      id: 'cache',
-      serialBn: '১৫',
-      label: 'ক্যাশে ও ফায়ারবেস লাইভ সিঙ্ক',
-      subtitleBn: 'ডাটাবেজ স্পিড ও সিঙ্ক চেক',
-      icon: Database,
-      badgeBg: 'bg-violet-600 text-white',
-      categoryGroup: 'settings',
-    },
-    {
-      id: 'omni_flow_studio',
-      serialBn: '১৬',
-      label: 'গুগল ফ্লো এআই স্টুডিও',
-      subtitleBn: 'Veo 3 ভিডিও, ওমিনি, Imagen 3 ও ফর্ম জেনারেটর',
-      icon: Video,
-      badgeBg: 'bg-gradient-to-r from-[#E11D48] to-pink-600 text-white',
-      categoryGroup: 'marketing',
-    },
-    {
-      id: 'purchase_management',
-      serialBn: '১৭',
-      label: 'পণ্য ক্রয় ও স্টক (Purchase Management)',
-      subtitleBn: 'চায়না/বাংলাদেশ সোর্সিং, ক্রয়মূল্য, বাকি ও স্টক হিসাব',
-      count: purchases.length,
-      icon: ShoppingBag,
-      badgeBg: 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white',
-      categoryGroup: 'orders',
-    },
-  ];
+  // All Official Admin Dashboard Tools — Derived from SHARED_ADMIN_MENU_ITEMS so Desktop & Mobile share the exact same 18 features
+  const adminNavList = useMemo(() => {
+    const countsById: Partial<Record<AdminTool, number>> = {
+      products: products.length,
+      categories: OFFICIAL_CATEGORIES.length,
+      orders: orders.length,
+      courier_returns: courierReturns.filter((r) => r.status !== 'completed').length,
+      abandoned_leads: abandonedLeads.filter((l) => l.status === 'pending').length,
+      customers: aggregatedCustomers.length,
+      campaigns: savedCampaigns.length,
+      banners: siteContent.heroSlides.length,
+      security: authorizedEmails.length,
+      purchase_management: purchases.length,
+      business_command_center: orders.length,
+    };
+    return SHARED_ADMIN_MENU_ITEMS.map((item) => ({
+      ...item,
+      count: countsById[item.id],
+    }));
+  }, [
+    products.length,
+    orders.length,
+    courierReturns,
+    abandonedLeads,
+    aggregatedCustomers.length,
+    savedCampaigns.length,
+    siteContent.heroSlides.length,
+    authorizedEmails.length,
+    purchases.length,
+  ]);
 
   const filteredAdminNavList = useMemo(() => {
     if (navCategoryFilter === 'all') return adminNavList;
-    return adminNavList.filter((item) => item.categoryGroup === navCategoryFilter);
+    return adminNavList.filter(
+      (item) =>
+        item.categoryGroup === navCategoryFilter || item.id === 'business_command_center'
+    );
   }, [adminNavList, navCategoryFilter]);
 
   return (
@@ -3794,7 +3911,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
             {/* Module #17 Quick Button: পণ্য ক্রয় করুন (Purchase Management) */}
             <button
-              onClick={() => setActiveTool('purchase_management')}
+              onClick={() => handleSelectAdminTool('purchase_management')}
               className={`px-4 py-2.5 text-xs sm:text-sm font-extrabold rounded-2xl border-2 flex items-center gap-2 shadow-xs transition-all cursor-pointer ${
                 activeTool === 'purchase_management'
                   ? 'bg-emerald-700 text-white border-emerald-800'
@@ -3804,6 +3921,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             >
               <ShoppingBag className="w-4 h-4 text-emerald-700" />
               <span>🛒 #১৭ পণ্য ক্রয় করুন</span>
+            </button>
+
+            {/* Module #18 Quick Button: বিজনেস কমান্ড সেন্টার (Business Command Center) */}
+            <button
+              onClick={() => handleSelectAdminTool('business_command_center')}
+              className={`px-4 py-2.5 text-xs sm:text-sm font-extrabold rounded-2xl border-2 flex items-center gap-2 shadow-xs transition-all cursor-pointer ${
+                activeTool === 'business_command_center'
+                  ? 'bg-gradient-to-r from-amber-600 to-indigo-700 text-white border-indigo-800'
+                  : 'bg-amber-50 hover:bg-amber-100 text-amber-950 border-amber-300'
+              }`}
+              title="#১৮ বিজনেস কমান্ড সেন্টার — অটোমেশন ও ফাইনান্সিয়াল ম্যানেজমেন্ট ড্যাশবোর্ড"
+            >
+              <TrendingUp className="w-4 h-4 text-amber-700 shrink-0" />
+              <span>📊 #১৮ বিজনেস কমান্ড সেন্টার</span>
             </button>
           </div>
         </div>
@@ -3852,32 +3983,99 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
           </div>
 
-          {/* Grid Layout: Spacious, Colorful, Legible Bengali Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+          {/* Prominent Mobile Feature #18 Card at Top of Admin Menu + Quick Selector */}
+          <div className="md:hidden space-y-2.5">
+            <button
+              type="button"
+              onClick={() => handleSelectAdminTool('business_command_center')}
+              className={`w-full p-3.5 rounded-2xl border-2 text-left transition-all cursor-pointer flex items-center justify-between gap-3 shadow-sm ${
+                activeTool === 'business_command_center'
+                  ? 'bg-gradient-to-r from-[#E11D48] to-[#BE123C] text-white border-[#9F1239] ring-2 ring-rose-300'
+                  : 'bg-gradient-to-r from-amber-50 via-rose-50 to-indigo-50 text-stone-900 border-amber-400 hover:border-rose-500'
+              }`}
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div
+                  className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 font-extrabold text-xs shadow-2xs ${
+                    activeTool === 'business_command_center'
+                      ? 'bg-white/20 text-white'
+                      : 'bg-gradient-to-r from-amber-600 to-indigo-700 text-white'
+                  }`}
+                >
+                  ১৮
+                </div>
+                <div className="min-w-0">
+                  <div className="text-xs font-extrabold leading-snug break-words">
+                    ১৮ • বিজনেস কমান্ড সেন্টার — অটোমেশন ও ফাইনান্সিয়াল ম্যানেজমেন্ট ড্যাশবোর্ড
+                  </div>
+                  <div
+                    className={`text-[10.5px] font-medium leading-snug break-words mt-0.5 ${
+                      activeTool === 'business_command_center' ? 'text-rose-100' : 'text-stone-600'
+                    }`}
+                  >
+                    এক ক্লিকে সম্পূর্ণ বিজনেস কমান্ড সেন্টার ও ফাইনান্সিয়াল ড্যাশবোর্ড খুলুন
+                  </div>
+                </div>
+              </div>
+              <span
+                className={`text-[11px] font-mono px-2.5 py-0.5 rounded-full font-extrabold shrink-0 ${
+                  activeTool === 'business_command_center'
+                    ? 'bg-white text-[#E11D48]'
+                    : 'bg-white text-[#E11D48] border border-rose-200'
+                }`}
+              >
+                {orders.length}
+              </span>
+            </button>
+
+            <div>
+              <label htmlFor="mobile-admin-module-select" className="block text-[11px] font-extrabold text-stone-700 mb-1.5">
+                📱 মোবাইল কুইক মেনু সিলেক্টর (১৮টি মডিউল):
+              </label>
+              <select
+                id="mobile-admin-module-select"
+                value={activeTool}
+                onChange={(e) => handleSelectAdminTool(e.target.value as AdminTool)}
+                className="w-full px-3.5 py-2.5 rounded-2xl bg-[#FFF0F3] border-2 border-rose-300 text-stone-900 text-xs font-extrabold focus:outline-none focus:border-[#E11D48]"
+              >
+                {adminNavList.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.serialBn} • {item.label} — {item.subtitleBn}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Grid Layout: Responsive 2-column on mobile (9 exact pairs: 01-18) & 5-column on desktop */}
+          <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2.5 sm:gap-3">
             {filteredAdminNavList.map((item) => {
               const Icon = item.icon;
               const isActive = activeTool === item.id;
               return (
                 <button
                   key={item.id}
-                  onClick={() => setActiveTool(item.id)}
-                  className={`p-3.5 sm:p-4 rounded-2xl flex flex-col items-start justify-between min-h-[104px] transition-all cursor-pointer text-left border-2 ${
+                  type="button"
+                  data-admin-feature-id={item.id}
+                  data-admin-serial={item.serialBn}
+                  onClick={() => handleSelectAdminTool(item.id)}
+                  className={`p-3 sm:p-4 rounded-2xl flex flex-col items-start justify-between min-h-[100px] sm:min-h-[104px] w-full min-w-0 transition-all cursor-pointer text-left border-2 ${
                     isActive
                       ? 'bg-gradient-to-br from-[#E11D48] to-[#BE123C] text-white border-[#9F1239] shadow-md ring-2 ring-rose-300'
                       : 'bg-[#FFF7F9] hover:bg-[#FFE4E9]/80 text-stone-900 border-rose-200 hover:border-rose-400 shadow-2xs'
                   }`}
                 >
-                  <div className="flex items-center justify-between w-full mb-2">
-                    <div className="flex items-center gap-2">
+                  <div className="flex items-center justify-between w-full mb-2 gap-1">
+                    <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
                       <div
-                        className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 shadow-2xs ${
+                        className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center shrink-0 shadow-2xs ${
                           isActive ? 'bg-white/20 text-white' : item.badgeBg
                         }`}
                       >
-                        <Icon className="w-4 h-4" />
+                        <Icon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                       </div>
                       <span
-                        className={`text-[11px] font-extrabold px-2 py-0.5 rounded-lg ${
+                        className={`text-[10.5px] sm:text-[11px] font-extrabold px-1.5 sm:px-2 py-0.5 rounded-lg shrink-0 ${
                           isActive
                             ? 'bg-white/20 text-white'
                             : 'bg-white text-rose-800 border border-rose-200'
@@ -3888,7 +4086,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     </div>
                     {item.count !== undefined && (
                       <span
-                        className={`text-xs font-mono px-2.5 py-0.5 rounded-full font-extrabold ${
+                        className={`text-[11px] sm:text-xs font-mono px-2 sm:px-2.5 py-0.5 rounded-full font-extrabold shrink-0 ${
                           isActive
                             ? 'bg-white text-[#E11D48]'
                             : 'bg-white text-[#E11D48] border border-rose-200'
@@ -3898,16 +4096,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       </span>
                     )}
                   </div>
-                  <div className="space-y-0.5 w-full">
+                  <div className="space-y-0.5 w-full min-w-0">
                     <div
-                      className={`text-xs sm:text-sm font-extrabold leading-snug ${
+                      className={`text-xs sm:text-sm font-extrabold leading-snug break-words ${
                         isActive ? 'text-white' : 'text-stone-900'
                       }`}
                     >
                       {item.label}
                     </div>
                     <div
-                      className={`text-[11px] font-medium truncate ${
+                      className={`text-[10.5px] sm:text-[11px] font-medium leading-snug break-words ${
                         isActive ? 'text-rose-100' : 'text-stone-600'
                       }`}
                     >
@@ -3919,6 +4117,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             })}
           </div>
         </div>
+
+        <div id="admin-active-tool-viewport" className="scroll-mt-4" />
 
         {/* =====================================================================
             EXTRA ADMIN MENU (TOOL 15): GOOGLE OMNI AI STUDIO (Only renders when explicitly clicked!)
@@ -10838,6 +11038,45 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             onFeedback={(msg) => {
               setFeedback(msg);
               setTimeout(() => setFeedback(''), 5000);
+            }}
+          />
+        )}
+
+        {/* =====================================================================
+            TOOL 18: BUSINESS COMMAND CENTER (#১৮ বিজনেস কমান্ড সেন্টার — অটোমেশন ও ফাইনান্সিয়াল ম্যানেজমেন্ট ড্যাশবোর্ড)
+           ===================================================================== */}
+        {activeTool === 'business_command_center' && (
+          <EnterpriseDashboardHub
+            products={products}
+            orders={orders}
+            courierReturns={courierReturns}
+            purchases={purchases}
+            onUpdateOrder={async (updatedOrder) => {
+              setOrders((prev) => {
+                const next = prev.map((o) => (o.id === updatedOrder.id ? updatedOrder : o));
+                syncOrdersToLocalCache(next);
+                return next;
+              });
+            }}
+            onUpdateProductsList={(updatedProds) => {
+              updatedProds.forEach((p) => {
+                const old = products.find((x) => x.id === p.id);
+                if (old && (old.stock !== p.stock || old.costPrice !== p.costPrice)) {
+                  onAddProduct(p);
+                }
+              });
+            }}
+            onPrintOrder={(ord) => {
+              setSelectedOrderForInvoice(ord);
+              setActiveTool('orders');
+            }}
+            onEditProduct={(prod) => {
+              if (onEditProduct) onEditProduct(prod);
+            }}
+            onNavigateTool={(toolId) => setActiveTool(toolId as AdminTool)}
+            showToast={(msg) => {
+              setFeedback(msg);
+              setTimeout(() => setFeedback(''), 5500);
             }}
           />
         )}
