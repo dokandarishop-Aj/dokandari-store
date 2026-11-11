@@ -2110,10 +2110,9 @@ async function startServer() {
   app.disable('x-powered-by');
   app.use(express.json({ limit: '50mb' }));
 
-  // Standard Security Headers Middleware (Prevents MIME sniffing, clickjacking, and referrer leakage)
+  // Standard Security Headers Middleware (Prevents MIME sniffing and referrer leakage)
   app.use((_req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     next();
   });

@@ -2158,7 +2158,7 @@ function StoreMain() {
       {!isAdminOpen && !editingProduct && (
         <nav
           aria-label="Mobile Web App Navigation"
-          className="fixed bottom-0 inset-x-0 z-40 sm:hidden bg-white/95 backdrop-blur-md border-t border-rose-100 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] px-2 py-1.5 flex items-center justify-around"
+          className="fixed bottom-0 inset-x-0 z-40 sm:hidden bg-white/95 backdrop-blur-md border-t border-rose-100 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] px-1.5 py-1.5 grid grid-cols-6 gap-1 items-center"
         >
           <button
             onClick={() => {
@@ -2171,14 +2171,14 @@ function StoreMain() {
               setIsTrackingOpen(false);
               navigateToStoreRoute('/');
             }}
-            className={`flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-xl text-[10px] font-bold transition-colors cursor-pointer ${
+            className={`flex flex-col items-center justify-center gap-0.5 px-1 py-1 rounded-xl text-[9.5px] font-bold transition-colors cursor-pointer ${
               !detailedProduct && !activeCategoryPage && !isAboutOpen && !isTrackingOpen && !isVideoGalleryOpen
                 ? 'text-[#E11D48] bg-rose-50'
-                : 'text-stone-600'
+                : 'text-stone-600 hover:text-[#E11D48]'
             }`}
           >
             <span className="text-sm leading-none">🏠</span>
-            <span>হোম</span>
+            <span className="truncate">হোম</span>
           </button>
 
           <button
@@ -2196,10 +2196,10 @@ function StoreMain() {
                 if (elem) elem.scrollIntoView({ behavior: 'smooth' });
               }, 80);
             }}
-            className="flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-xl text-[10px] font-bold text-stone-600 hover:text-[#E11D48] transition-colors cursor-pointer"
+            className="flex flex-col items-center justify-center gap-0.5 px-1 py-1 rounded-xl text-[9.5px] font-bold text-stone-600 hover:text-[#E11D48] transition-colors cursor-pointer"
           >
             <span className="text-sm leading-none">🛍️</span>
-            <span>সব পণ্য</span>
+            <span className="truncate">সব পণ্য</span>
           </button>
 
           <button
@@ -2212,12 +2212,12 @@ function StoreMain() {
               setIsTrackingOpen(false);
               navigateToStoreRoute('/about');
             }}
-            className={`flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-xl text-[10px] font-bold transition-colors cursor-pointer ${
-              isAboutOpen ? 'text-[#E11D48] bg-rose-50' : 'text-stone-600'
+            className={`flex flex-col items-center justify-center gap-0.5 px-1 py-1 rounded-xl text-[9.5px] font-bold transition-colors cursor-pointer ${
+              isAboutOpen ? 'text-[#E11D48] bg-rose-50' : 'text-stone-600 hover:text-[#E11D48]'
             }`}
           >
             <span className="text-sm leading-none">🏢</span>
-            <span>ব্র্যান্ড</span>
+            <span className="truncate">ব্র্যান্ড</span>
           </button>
 
           <button
@@ -2230,20 +2230,41 @@ function StoreMain() {
               setIsPolicyOpen(false);
               navigateToStoreRoute('/track');
             }}
-            className={`flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-xl text-[10px] font-bold transition-colors cursor-pointer ${
-              isTrackingOpen ? 'text-[#E11D48] bg-rose-50' : 'text-stone-600'
+            className={`flex flex-col items-center justify-center gap-0.5 px-1 py-1 rounded-xl text-[9.5px] font-bold transition-colors cursor-pointer ${
+              isTrackingOpen ? 'text-[#E11D48] bg-rose-50' : 'text-stone-600 hover:text-[#E11D48]'
             }`}
           >
             <span className="text-sm leading-none">🚚</span>
-            <span>ট্র্যাকিং</span>
+            <span className="truncate">ট্র্যাকিং</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setSelectedAdminTool('business_command_center');
+              setIsMenuOpen(false);
+              setIsAdminAuthenticated(isAdminSessionValid() || authIsAdmin);
+              setIsAdminOpen(true);
+              setActiveCategoryPage(null);
+              setIsAboutOpen(false);
+              setIsVideoGalleryOpen(false);
+              setIsPolicyOpen(false);
+              setDetailedProduct(null);
+              setIsTrackingOpen(false);
+              navigateToStoreRoute('/admin?tool=business_command_center');
+            }}
+            className="flex flex-col items-center justify-center gap-0.5 px-1 py-1 rounded-xl text-[9.5px] font-extrabold text-amber-700 bg-amber-50/80 hover:bg-amber-100 hover:text-amber-800 transition-colors cursor-pointer border border-amber-200"
+            title="১৮ • বিজনেস কমান্ড সেন্টার — অটোমেশন ও ফাইনান্সিয়াল ম্যানেজমেন্ট ড্যাশবোর্ড"
+          >
+            <span className="text-sm leading-none">📊</span>
+            <span className="truncate">কমান্ড সেন্টার</span>
           </button>
 
           <button
             onClick={() => setIsMenuOpen(true)}
-            className="flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-xl text-[10px] font-bold text-stone-600 hover:text-[#E11D48] transition-colors cursor-pointer"
+            className="flex flex-col items-center justify-center gap-0.5 px-1 py-1 rounded-xl text-[9.5px] font-bold text-stone-600 hover:text-[#E11D48] transition-colors cursor-pointer"
           >
             <span className="text-sm leading-none">☰</span>
-            <span>মেনু</span>
+            <span className="truncate">মেনু</span>
           </button>
         </nav>
       )}
