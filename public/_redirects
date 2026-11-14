@@ -1,3 +1,6 @@
+/google7c6132a379300a48.html  /google7c6132a379300a48.html  200
+/robots.txt  /robots.txt  200
+/sitemap.xml  /sitemap.xml  200
 /api/*  /api/:splat  200
 /uploads/*  /uploads/:splat  200
 /*  /index.html  200

@@ -2117,6 +2117,41 @@ async function startServer() {
     next();
   });
 
+  // Google Search Console HTML File Ownership Verification & SEO Sitemap / Robots Routes
+  app.get('/google7c6132a379300a48.html', (_req, res) => {
+    res
+      .status(200)
+      .set('Content-Type', 'text/html; charset=utf-8')
+      .send('google-site-verification: google7c6132a379300a48.html');
+  });
+
+  app.get('/robots.txt', (_req, res) => {
+    res
+      .status(200)
+      .set('Content-Type', 'text/plain; charset=utf-8')
+      .send('User-agent: *\nAllow: /\n\nSitemap: https://www.dokandari.com/sitemap.xml\n');
+  });
+
+  app.get('/sitemap.xml', (_req, res) => {
+    const base = 'https://www.dokandari.com';
+    const today = new Date().toISOString().split('T')[0];
+    const urls: string[] = [
+      `  <url><loc>${base}/</loc><lastmod>${today}</lastmod><changefreq>daily</changefreq><priority>1.0</priority></url>`,
+      `  <url><loc>${base}/about</loc><lastmod>${today}</lastmod><changefreq>weekly</changefreq><priority>0.8</priority></url>`,
+      `  <url><loc>${base}/videos</loc><lastmod>${today}</lastmod><changefreq>daily</changefreq><priority>0.8</priority></url>`,
+      `  <url><loc>${base}/track</loc><lastmod>${today}</lastmod><changefreq>weekly</changefreq><priority>0.7</priority></url>`,
+    ];
+    for (const prod of INITIAL_PRODUCTS) {
+      if (prod?.id) {
+        urls.push(
+          `  <url><loc>${base}/?product=${encodeURIComponent(prod.id)}</loc><lastmod>${today}</lastmod><changefreq>daily</changefreq><priority>0.9</priority></url>`
+        );
+      }
+    }
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join('\n')}\n</urlset>\n`;
+    res.status(200).set('Content-Type', 'application/xml; charset=utf-8').send(xml);
+  });
+
   // Legacy upload filename map so any cached or legacy /uploads/product/:filename resolves to a verified 200 OK image
   const SERVER_LEGACY_UPLOAD_MAP: Record<string, string> = {
     '1792219337-ha7e0aa8d05a44d73b82d68816420d174s.jpg': '1792322764-whatsapp-image-2026-10-14-at-12.59.53.jpeg',

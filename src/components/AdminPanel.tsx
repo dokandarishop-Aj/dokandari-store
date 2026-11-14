@@ -614,7 +614,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     youtubeTagId: '',
     gtmContainerId: '',
     ga4MeasurementId: '',
-    googleSearchConsoleCode: '',
+    googleSearchConsoleCode: 'DkliykIxK8hKjdnVUbLH_DTw0OlxMPJpD7ccYz3CQ4E',
   });
   const [apiSaved, setApiSaved] = useState(false);
   const [showSteadfastSecret, setShowSteadfastSecret] = useState(false);

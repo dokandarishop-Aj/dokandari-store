@@ -1964,6 +1964,8 @@ export function trackPixelWhatsAppConversion(
   }
 }
 
+export const DEFAULT_DOKANDARI_GSC_VERIFICATION = 'DkliykIxK8hKjdnVUbLH_DTw0OlxMPJpD7ccYz3CQ4E';
+
 /**
  * Automatically connects Google Tag Manager (GTM-XXXX), Google Analytics 4 (G-XXXX),
  * and Google Search Console verification tag (`google-site-verification`) into the live DOM.
@@ -1976,11 +1978,14 @@ export function initializeGoogleSeoAndTags(config?: {
   youtubeTagId?: string;
 }): void {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
-  if (!config) return;
 
   try {
     // 1. Google Search Console Verification Meta Tag
-    const rawVerify = (config.googleSiteVerification || config.googleSearchConsoleCode || '').trim();
+    const rawVerify = (
+      config?.googleSiteVerification ||
+      config?.googleSearchConsoleCode ||
+      DEFAULT_DOKANDARI_GSC_VERIFICATION
+    ).trim();
     if (rawVerify) {
       const cleanToken = rawVerify
         .replace(/<meta[^>]*content=["']([^"']+)["'][^>]*>/i, '$1')
@@ -1998,6 +2003,7 @@ export function initializeGoogleSeoAndTags(config?: {
         metaEl.content = cleanToken;
       }
     }
+    if (!config) return;
 
     // 2. Google Tag Manager (GTM-XXXX)
     const rawGtm = (config.gtmContainerId || '').trim();

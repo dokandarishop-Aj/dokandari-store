@@ -1,7 +1,7 @@
 {
   "headers": [
     {
-      "source": "/(tiktok-catalog|facebook-catalog|google-merchant-center|catalog\\.xml|tiktok-catalog\\.xml|facebook-catalog\\.xml|google-merchant-center\\.xml)",
+      "source": "/(tiktok-catalog|facebook-catalog|google-merchant-center|catalog\\.xml|tiktok-catalog\\.xml|facebook-catalog\\.xml|google-merchant-center\\.xml|sitemap\\.xml)",
       "headers": [
         {
           "key": "Content-Type",
@@ -28,6 +28,18 @@
     }
   ],
   "rewrites": [
+    {
+      "source": "/google7c6132a379300a48.html",
+      "destination": "/google7c6132a379300a48.html"
+    },
+    {
+      "source": "/robots.txt",
+      "destination": "/robots.txt"
+    },
+    {
+      "source": "/sitemap.xml",
+      "destination": "/sitemap.xml"
+    },
     {
       "source": "/tiktok-catalog",
       "destination": "/tiktok-catalog.xml"
