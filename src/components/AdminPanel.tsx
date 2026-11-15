@@ -87,7 +87,13 @@ import {
   InventoryMovement,
   PurchaseRecord,
 } from '../types';
-import { updateLeadStatus, deleteAbandonedLead } from '../lib/leadRecovery';
+import {
+  updateLeadStatus,
+  deleteAbandonedLead,
+  normalizePhone,
+  markLeadConverted,
+  cleanupDuplicateAndPartialLeads,
+} from '../lib/leadRecovery';
 import {
   DEFAULT_DOKANDARI_META_PIXEL_ID,
   PixelEventTelemetryLog,
@@ -160,6 +166,7 @@ import {
   downloadCustomerScreenshot,
   isProductScreenshotEnabled,
   executeOrderStatusAutomation,
+  calculateOrderFinancialBreakdown,
 } from '../lib/storeSync';
 import {
   OfficialWhatsAppIcon,
@@ -171,6 +178,7 @@ import {
 import { OmniFlowStudio } from './OmniFlowStudio';
 import { PurchaseManagementPanel } from './PurchaseManagementPanel';
 import { EnterpriseDashboardHub } from './EnterpriseDashboardHub';
+import { DualHorizontalScrollWrapper } from './DualHorizontalScrollWrapper';
 
 type HeroSlide = StoreContent['heroSlides'][number];
 
@@ -737,6 +745,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [editOrderItems, setEditOrderItems] = useState<Order['items']>([]);
   const [editOrderShipping, setEditOrderShipping] = useState<number>(70);
   const [editOrderDiscount, setEditOrderDiscount] = useState<number>(0);
+  const [editOrderCogs, setEditOrderCogs] = useState<number>(0);
+  const [editOrderCourierExpense, setEditOrderCourierExpense] = useState<number>(70);
+  const [editOrderPackagingCost, setEditOrderPackagingCost] = useState<number>(15);
+  const [editOrderOtherExpense, setEditOrderOtherExpense] = useState<number>(0);
+  const [editOrderManualCostOverride, setEditOrderManualCostOverride] = useState<boolean>(false);
   const [editOrderStatus, setEditOrderStatus] = useState<OrderStatus>('confirmed');
   const [editOrderNotes, setEditOrderNotes] = useState('');
   const [editOrderSaving, setEditOrderSaving] = useState(false);
@@ -1712,19 +1725,157 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       }
     );
 
-    // Realtime live listener for dropped / abandoned leads
+    // Realtime live listener for dropped / abandoned leads with automatic partial-phone deduplication & full-order auto-recovery
+    const autoRecoveredPhones = new Set<string>();
     const unsubLeads = onSnapshot(
       collection(db, 'abandoned_leads'),
       (snap) => {
-        const list: AbandonedLead[] = [];
-        snap.forEach((d) => list.push(d.data() as AbandonedLead));
-        list.sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
-        setAbandonedLeads(list);
+        const rawList: AbandonedLead[] = [];
+        snap.forEach((d) => rawList.push({ ...(d.data() as AbandonedLead), id: d.id }));
+        const currentOrders = mergeAndPersistAllOrders({
+          localOrders: getPersistedOrders(),
+          serverMirrorOrders: serverOrdersRef.current,
+        });
+        const cleanedList = cleanupDuplicateAndPartialLeads(rawList, currentOrders);
+
+        // Automatically recover any complete direct-form order (11-digit phone + real name + real address)
+        // that got stuck in abandoned_leads so it immediately appears in #04 Orders & #18 Command Center!
+        const existingPhoneSet = new Set(
+          currentOrders
+            .filter((o) => o.status !== 'cancelled')
+            .map((o) => normalizePhone(o.customer?.phone || ''))
+            .filter((p) => p.length === 11)
+        );
+
+        for (const lead of cleanedList) {
+          const cleanPhone = normalizePhone(lead.customerPhone || '');
+          const hasRealName =
+            Boolean(lead.customerName) &&
+            lead.customerName.trim().length >= 2 &&
+            lead.customerName.trim() !== 'সম্মানিত ক্রেতা' &&
+            lead.customerName.trim() !== 'নাম উল্লেখ নেই';
+            const addrText = (lead.customerAddress || '').trim();
+            const hasRealAddress = addrText.length >= 4;
+
+          if (
+            cleanPhone.length === 11 &&
+            /^01\d{9}$/.test(cleanPhone) &&
+            hasRealName &&
+            hasRealAddress &&
+            !existingPhoneSet.has(cleanPhone) &&
+            !autoRecoveredPhones.has(cleanPhone)
+          ) {
+            autoRecoveredPhones.add(cleanPhone);
+            existingPhoneSet.add(cleanPhone);
+            const fallbackProd =
+              products.find((p) => p.id === lead.productId) ||
+              products.find((p) => lead.productName && p.name === lead.productName) ||
+              products[0];
+            const isOutside =
+              lead.deliveryArea === 'outside_dhaka' ||
+              (addrText &&
+                !/ঢাকা|dhaka|mirpur|uttara|dhanmondi|mohammadpur|banani|gulshan|badda|rampura|jatrabari/i.test(
+                  addrText
+                ));
+            const shipFee = isOutside ? 120 : 70;
+            const itemQty = Math.max(1, Number(lead.quantity) || 1);
+            const unitPrice = Number(
+              lead.productPrice || lead.items?.[0]?.price || fallbackProd?.price || 1250
+            );
+            const subtotal = unitPrice * itemQty;
+            const total = Number(lead.totalAmount || lead.estimatedTotal || subtotal + shipFee);
+            const recoveredOrderId = `DKD-${Math.floor(100000 + Math.random() * 900000)}`;
+            const recoveredOrder: Order = {
+              id: recoveredOrderId,
+              customer: {
+                name: (lead.customerName || 'সম্মানিত ক্রেতা').trim(),
+                phone: cleanPhone,
+                address: addrText,
+                city: isOutside ? 'Outside Dhaka' : 'Dhaka',
+                district: isOutside ? 'ঢাকার বাইরে (Outside Dhaka)' : 'ঢাকা (Inside Dhaka)',
+              },
+              items:
+                Array.isArray(lead.items) && lead.items.length > 0
+                  ? lead.items.map((it, idx) => ({
+                      id: it.productId || fallbackProd?.id || `item-${idx}`,
+                      productId: it.productId || fallbackProd?.id || `item-${idx}`,
+                      name: it.productName || fallbackProd?.name || 'অরিজিনাল কালেকশন',
+                      price: Number(it.price || unitPrice),
+                      quantity: Math.max(1, Number(it.quantity || itemQty)),
+                      image:
+                        it.productImage ||
+                        fallbackProd?.images?.[0] ||
+                        '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg',
+                      selectedColor: it.selectedColor || 'Standard',
+                      selectedSize: it.selectedSize || 'Standard',
+                      category: fallbackProd?.category || 'home_decor',
+                    }))
+                  : [
+                      {
+                        id: lead.productId || fallbackProd?.id || 'dkd-recovered',
+                        productId: lead.productId || fallbackProd?.id || 'dkd-recovered',
+                        name: lead.productName || fallbackProd?.name || 'অরিজিনাল কালেকশন',
+                        price: unitPrice,
+                        quantity: itemQty,
+                        image:
+                          lead.productImage ||
+                          fallbackProd?.images?.[0] ||
+                          '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg',
+                        selectedColor: 'Standard',
+                        selectedSize: 'Standard',
+                        category: fallbackProd?.category || 'home_decor',
+                      },
+                    ],
+              subtotal,
+              shippingCost: shipFee,
+              discount: Math.max(0, subtotal + shipFee - total),
+              total,
+              paymentMethod: 'cod',
+              status: 'pending',
+              userId: null,
+              createdAt: Number(lead.createdAt || Date.now()),
+              updatedAt: Date.now(),
+            };
+            lead.status = 'converted';
+            lead.convertedOrderId = recoveredOrderId;
+            saveOrderPersisted(recoveredOrder).catch(() => null);
+            markLeadConverted(cleanPhone, recoveredOrderId).catch(() => null);
+          }
+        }
+
+        cleanedList.sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
+        setAbandonedLeads(cleanedList);
       },
       (err) => {
         console.warn('Realtime abandoned leads listener note', err);
       }
     );
+
+    // Instant same-window listener when an order is created or edited from PDP, CheckoutModal, Manual Form, or Order Edit
+    const handleInstantOrderSync = (evt?: Event) => {
+      const customEvt = evt as CustomEvent<{ order?: Order }> | undefined;
+      const incomingOrd = customEvt?.detail?.order;
+      if (incomingOrd && incomingOrd.id) {
+        serverOrdersRef.current = [
+          incomingOrd,
+          ...serverOrdersRef.current.filter((o) => o && o.id !== incomingOrd.id),
+        ];
+      }
+      const merged = mergeAndPersistAllOrders({
+        localOrders: getPersistedOrders(),
+        serverMirrorOrders: serverOrdersRef.current,
+      });
+      setOrders(merged);
+      if (incomingOrd && incomingOrd.id) {
+        setSelectedOrderForView((prev) =>
+          prev && prev.id === incomingOrd.id ? incomingOrd : prev
+        );
+        setSelectedOrderForInvoice((prev) =>
+          prev && prev.id === incomingOrd.id ? incomingOrd : prev
+        );
+      }
+    };
+    window.addEventListener('dokandari:orders-updated', handleInstantOrderSync);
 
     // Realtime live listener for store settings & hero banners
     const unsubStoreContent = onSnapshot(
@@ -1766,6 +1917,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     );
 
     return () => {
+      window.removeEventListener('dokandari:orders-updated', handleInstantOrderSync);
       unsubDeletedOrders();
       unsubOrders();
       unsubPurchases();
@@ -1885,6 +2037,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setTimeout(() => setFeedback(''), 3500);
   };
 
+  const computeItemsCogs = (itemsList: Order['items']) => {
+    return (itemsList || []).reduce((sum, item) => {
+      const matched = products.find(
+        (p) => p.id === item.productId || p.id === item.id || p.name === item.name
+      );
+      const unitCost =
+        matched && typeof matched.costPrice === 'number' && matched.costPrice > 0
+          ? matched.costPrice
+          : Math.round((Number(item.price) || 0) * 0.52);
+      return sum + unitCost * Math.max(1, Number(item.quantity) || 1);
+    }, 0);
+  };
+
   // Open Order Edit Modal with populated data
   const handleOpenEditOrder = (order: Order) => {
     setEditingOrder(order);
@@ -1896,35 +2061,105 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       (order.customer.district && order.customer.district.includes('ঢাকার বাইরে')) ||
       (order.customer.city && order.customer.city.includes('Outside'));
     setEditOrderArea(isOut ? 'outside_dhaka' : 'inside_dhaka');
-    setEditOrderItems(order.items ? JSON.parse(JSON.stringify(order.items)) : []);
-    setEditOrderShipping(typeof order.shippingCost === 'number' ? order.shippingCost : 70);
+    const clonedItems: Order['items'] = order.items
+      ? JSON.parse(JSON.stringify(order.items))
+      : [];
+    setEditOrderItems(clonedItems);
+    const shippingVal = typeof order.shippingCost === 'number' ? order.shippingCost : 70;
+    setEditOrderShipping(shippingVal);
     setEditOrderDiscount(typeof order.discount === 'number' ? order.discount : 0);
+    const fin = calculateOrderFinancialBreakdown(order, products);
+    setEditOrderCogs(fin.cogsTotal);
+    setEditOrderCourierExpense(fin.courierExpense);
+    setEditOrderPackagingCost(fin.packagingCost);
+    setEditOrderOtherExpense(fin.otherOrderExpense);
+    setEditOrderManualCostOverride(Boolean(order.manualFinancialOverride));
     setEditOrderStatus(order.status || 'confirmed');
-    setEditOrderNotes('');
+    setEditOrderNotes(order.adminNotes || '');
     setEditOrderAddProdId('');
     setIsEditOrderModalOpen(true);
   };
 
+  const handleEditOrderItemName = (index: number, newName: string) => {
+    setEditOrderItems((prev) =>
+      prev.map((item, idx) => (idx === index ? { ...item, name: newName } : item))
+    );
+  };
+
   const handleEditOrderItemQuantity = (index: number, newQty: number) => {
     if (newQty < 1) return;
-    setEditOrderItems((prev) =>
-      prev.map((item, idx) => (idx === index ? { ...item, quantity: newQty } : item))
-    );
+    setEditOrderItems((prev) => {
+      const next = prev.map((item, idx) =>
+        idx === index ? { ...item, quantity: newQty } : item
+      );
+      if (!editOrderManualCostOverride) {
+        setEditOrderCogs(computeItemsCogs(next));
+      }
+      return next;
+    });
   };
 
   const handleEditOrderItemPrice = (index: number, newPrice: number) => {
     if (newPrice < 0) return;
-    setEditOrderItems((prev) =>
-      prev.map((item, idx) => (idx === index ? { ...item, price: newPrice } : item))
+    // IMPORTANT: Updates ONLY this order's item price, NEVER mutates the main Product catalog price
+    setEditOrderItems((prev) => {
+      const next = prev.map((item, idx) =>
+        idx === index ? { ...item, price: newPrice } : item
+      );
+      if (!editOrderManualCostOverride) {
+        setEditOrderCogs(computeItemsCogs(next));
+      }
+      return next;
+    });
+  };
+
+  // Direct COD Amount / Total Payable override: keeps Subtotal - Discount + Shipping = COD Total 100% consistent
+  const handleEditOrderCodTotalDirect = (targetCodTotal: number) => {
+    const safeCod = Math.max(0, Number(targetCodTotal) || 0);
+    const currentSubtotal = editOrderItems.reduce(
+      (sum, it) => sum + (Number(it.price) || 0) * (Number(it.quantity) || 1),
+      0
     );
+    const fee = Math.max(0, Number(editOrderShipping) || 0);
+    if (safeCod <= currentSubtotal + fee) {
+      setEditOrderDiscount(currentSubtotal + fee - safeCod);
+    } else if (editOrderItems.length > 0) {
+      // If admin increases total COD above current subtotal + shipping, set discount to 0 and adjust first item price
+      setEditOrderDiscount(0);
+      const neededSubtotal = Math.max(0, safeCod - fee);
+      const otherItemsSubtotal = editOrderItems
+        .slice(1)
+        .reduce((sum, it) => sum + (Number(it.price) || 0) * (Number(it.quantity) || 1), 0);
+      const firstQty = Math.max(1, Number(editOrderItems[0].quantity) || 1);
+      const newFirstUnitPrice = Math.max(
+        0,
+        Math.round((neededSubtotal - otherItemsSubtotal) / firstQty)
+      );
+      setEditOrderItems((prev) => {
+        const next = prev.map((it, idx) =>
+          idx === 0 ? { ...it, price: newFirstUnitPrice } : it
+        );
+        if (!editOrderManualCostOverride) {
+          setEditOrderCogs(computeItemsCogs(next));
+        }
+        return next;
+      });
+    }
   };
 
   const handleRemoveOrderItem = (index: number) => {
     if (editOrderItems.length <= 1) {
-      alert('অর্ডারে কমপক্ষে একটি পণ্য থাকা আবশ্যক।');
+      setFeedback('⚠️ অর্ডারে কমপক্ষে একটি পণ্য থাকা আবশ্যক।');
+      setTimeout(() => setFeedback(''), 3500);
       return;
     }
-    setEditOrderItems((prev) => prev.filter((_, idx) => idx !== index));
+    setEditOrderItems((prev) => {
+      const next = prev.filter((_, idx) => idx !== index);
+      if (!editOrderManualCostOverride) {
+        setEditOrderCogs(computeItemsCogs(next));
+      }
+      return next;
+    });
   };
 
   const handleAddProductToEditOrder = (prodId: string) => {
@@ -1942,15 +2177,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       selectedSize: target.variants?.sizes?.[0] || 'Standard',
       image: target.images?.[0] || '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg',
     };
-    setEditOrderItems((prev) => [...prev, newItem]);
+    setEditOrderItems((prev) => {
+      const next = [...prev, newItem];
+      if (!editOrderManualCostOverride) {
+        setEditOrderCogs(computeItemsCogs(next));
+      }
+      return next;
+    });
     setEditOrderAddProdId('');
   };
 
   const handleSaveEditedOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingOrder) return;
-    const cleanPhone = editOrderPhone.replace(/[^\d]/g, '').replace(/^88/, '');
-    if (!editOrderName.trim() || cleanPhone.length !== 11 || !editOrderAddress.trim()) {
+    const cleanPhone = normalizePhone(editOrderPhone);
+    if (!editOrderName.trim() || cleanPhone.length < 10 || !editOrderAddress.trim()) {
       setFeedback('⚠️ কাস্টমারের নাম, ১১ ডিজিটের মোবাইল নম্বর এবং সম্পূর্ণ ঠিকানা সঠিকভাবে দিন।');
       setTimeout(() => setFeedback(''), 4000);
       return;
@@ -1963,17 +2204,30 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
     setEditOrderSaving(true);
     try {
-      const calcSubtotal = editOrderItems.reduce((acc, it) => acc + (it.price * it.quantity), 0);
-      const fee = Number(editOrderShipping) || 0;
-      const disc = Number(editOrderDiscount) || 0;
-      const calcTotal = Math.max(0, calcSubtotal + fee - disc);
+      const sanitizedItems = editOrderItems.map((it) => ({
+        ...it,
+        price: Math.max(0, Number(it.price) || 0),
+        quantity: Math.max(1, Number(it.quantity) || 1),
+      }));
+      const calcSubtotal = sanitizedItems.reduce(
+        (acc, it) => acc + it.price * it.quantity,
+        0
+      );
+      const fee = Math.max(0, Number(editOrderShipping) || 0);
+      const disc = Math.max(0, Number(editOrderDiscount) || 0);
+      const calcTotal = Math.max(0, calcSubtotal - disc + fee);
 
       const finalDistrict =
         editOrderArea === 'inside_dhaka'
-          ? (editOrderDistrict.includes('ঢাকার বাইরে') ? 'ঢাকা (Inside Dhaka)' : editOrderDistrict || 'ঢাকা (Inside Dhaka)')
-          : (editOrderDistrict.includes('ঢাকা (Inside') ? 'ঢাকার বাইরে (Outside Dhaka)' : editOrderDistrict || 'ঢাকার বাইরে (Outside Dhaka)');
+          ? editOrderDistrict.includes('ঢাকার বাইরে')
+            ? 'ঢাকা (Inside Dhaka)'
+            : editOrderDistrict || 'ঢাকা (Inside Dhaka)'
+          : editOrderDistrict.includes('ঢাকা (Inside')
+          ? 'ঢাকার বাইরে (Outside Dhaka)'
+          : editOrderDistrict || 'ঢাকার বাইরে (Outside Dhaka)';
 
-      const updatedOrder: Order = {
+      const now = Date.now();
+      const baseUpdatedOrder: Order = {
         ...editingOrder,
         customer: {
           ...editingOrder.customer,
@@ -1983,42 +2237,78 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           district: finalDistrict,
           city: editOrderArea === 'inside_dhaka' ? 'Dhaka' : 'Outside Dhaka',
         },
-        items: editOrderItems,
+        items: sanitizedItems,
         subtotal: calcSubtotal,
         shippingCost: fee,
         discount: disc,
         total: calcTotal,
         status: editOrderStatus,
-        updatedAt: Date.now(),
+        adminNotes: editOrderNotes.trim() || editingOrder.adminNotes,
+        manualFinancialOverride: editOrderManualCostOverride,
+        updatedAt: now,
       };
 
-      await saveOrderPersisted(updatedOrder);
+      // Execute full financial & status automation (recalculates COGS, Courier, Packaging, Net Profit, and persists to Firestore + Backend Mirror)
+      const autoRes = await executeOrderStatusAutomation({
+        order: baseUpdatedOrder,
+        newStatus: editOrderStatus,
+        manualFinancials: {
+          cogsTotal: editOrderManualCostOverride
+            ? Math.max(0, Number(editOrderCogs) || 0)
+            : computeItemsCogs(sanitizedItems),
+          courierExpense: Math.max(0, Number(editOrderCourierExpense) || 0),
+          packagingCost: Math.max(0, Number(editOrderPackagingCost) || 0),
+          otherOrderExpense: Math.max(0, Number(editOrderOtherExpense) || 0),
+          manualFinancialOverride: editOrderManualCostOverride,
+          adminNotes: editOrderNotes.trim() || editingOrder.adminNotes,
+        },
+        products,
+      });
+
+      let verifiedOrder: Order = autoRes.updatedOrder;
+
+      // Verify and fetch latest saved document from Firestore Database by Unique Order ID
       try {
-        await setDoc(
-          doc(db, 'orders', updatedOrder.id),
-          JSON.parse(JSON.stringify(updatedOrder)),
-          { merge: true }
-        );
-      } catch (err) {
-        console.warn('Firestore order edit sync note:', err);
+        const snap = await getDoc(doc(db, 'orders', verifiedOrder.id));
+        if (snap.exists()) {
+          const dbData = snap.data() as Order;
+          if (dbData && Number(dbData.updatedAt || 0) >= Number(verifiedOrder.updatedAt || 0)) {
+            verifiedOrder = { ...verifiedOrder, ...dbData, id: verifiedOrder.id };
+          }
+        }
+      } catch {
+        // Fallback to savedOrder if offline
       }
 
-      setOrders((prev) => prev.map((o) => (o.id === updatedOrder.id ? updatedOrder : o)));
-      if (selectedOrderForView?.id === updatedOrder.id) {
-        setSelectedOrderForView(updatedOrder);
+      // Update serverOrdersRef and local state immediately so all 10 dashboard areas update in 0ms
+      serverOrdersRef.current = [
+        verifiedOrder,
+        ...serverOrdersRef.current.filter((o) => o && o.id !== verifiedOrder.id),
+      ];
+      setOrders((prev) => {
+        const next = prev.map((o) => (o.id === verifiedOrder.id ? verifiedOrder : o));
+        syncOrdersToLocalCache(next);
+        return next;
+      });
+      if (selectedOrderForView?.id === verifiedOrder.id) {
+        setSelectedOrderForView(verifiedOrder);
       }
-      if (selectedOrderForInvoice?.id === updatedOrder.id) {
-        setSelectedOrderForInvoice(updatedOrder);
+      if (selectedOrderForInvoice?.id === verifiedOrder.id) {
+        setSelectedOrderForInvoice(verifiedOrder);
       }
 
       setIsEditOrderModalOpen(false);
       setEditingOrder(null);
-      setFeedback(`✅ অর্ডার #${updatedOrder.id} সফলভাবে এডিট ও সেভ করা হয়েছে!`);
-      setTimeout(() => setFeedback(''), 4500);
+      setFeedback(
+        `✅ অর্ডার #${verifiedOrder.id} সফলভাবে ডাটাবেজে আপডেট হয়েছে! নতুন প্রদেয় বিল (COD): ৳${verifiedOrder.total.toLocaleString()} — ইনভয়েস, সেলস রিপোর্ট ও লাভ-ক্ষতি হিসাব স্বয়ংক্রিয়ভাবে সিঙ্ক হয়েছে।`
+      );
+      setTimeout(() => setFeedback(''), 5000);
     } catch (err: any) {
       console.warn('Order edit error:', err);
-      setFeedback(`❌ অর্ডার এডিট ত্রুটি: ${err?.message || 'অনুগ্রহ করে পুনরায় চেষ্টা করুন'}`);
-      setTimeout(() => setFeedback(''), 4000);
+      setFeedback(
+        `❌ অর্ডার ডাটাবেজে আপডেট ত্রুটি: ${err?.message || 'অনুগ্রহ করে পুনরায় চেষ্টা করুন'} (পূর্বের ডেটা সুরক্ষিত রয়েছে)`
+      );
+      setTimeout(() => setFeedback(''), 5000);
     } finally {
       setEditOrderSaving(false);
     }
@@ -2086,95 +2376,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         }
       }
 
-      // If valid phone is extracted, automatically save the order + screenshot directly to Firestore orders!
-      const cleanExtractedPhone = (extracted.customerPhone || '').replace(/[^\d]/g, '').replace(/^88/, '');
-      if (cleanExtractedPhone.length === 11) {
-        const autoQty = Math.max(1, Number(extracted.quantity) || 1);
-        const autoUnitPrice = matchedProd ? matchedProd.price : 1450;
-        const autoSubtotal = autoUnitPrice * autoQty;
-        const autoArea = extracted.deliveryArea === 'outside_dhaka' ? 'outside_dhaka' : 'inside_dhaka';
-        const autoFee =
-          autoArea === 'inside_dhaka'
-            ? Number(deliverySettings.dhakaFee) || 70
-            : Number(deliverySettings.outsideDhakaFee) || 130;
-        const autoOrderId = `DKD-${Math.floor(100000 + Math.random() * 900000)}`;
-        const autoItemId = matchedProd?.id || `wa-${Date.now()}`;
-        const autoOrder: Order = {
-          id: autoOrderId,
-          items: [
-            {
-              id: autoItemId,
-              productId: autoItemId,
-              name: matchedProd?.name || extracted.productNameHint || 'হোয়াটসঅ্যাপ স্ক্রিনশট অর্ডার পণ্য',
-              category: matchedProd?.category || 'home_decor',
-              price: autoUnitPrice,
-              quantity: autoQty,
-              selectedColor: matchedProd?.variants?.colors?.[0] || 'Standard',
-              selectedSize: matchedProd?.variants?.sizes?.[0] || 'Standard',
-              image:
-                matchedProd?.images?.[0] ||
-                '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg',
-            },
-          ],
-          customer: {
-            name: (extracted.customerName || 'কাস্টমার').trim(),
-            phone: cleanExtractedPhone,
-            address: (extracted.customerAddress || 'হোয়াটসঅ্যাপ স্ক্রিনশট অনুযায়ী ঠিকানা').trim(),
-            city: autoArea === 'inside_dhaka' ? 'Dhaka' : 'Outside Dhaka',
-            district:
-              autoArea === 'inside_dhaka'
-                ? 'ঢাকা (Inside Dhaka)'
-                : 'ঢাকার বাইরে (Outside Dhaka)',
-          },
-          subtotal: autoSubtotal,
-          shippingCost: autoFee,
-          discount: 0,
-          total: autoSubtotal + autoFee,
-          paymentMethod: 'cod',
-          customerScreenshot: waScreenshotPreview || undefined,
-          status: 'confirmed',
-          userId: null,
-          pixelTracking: {
-            eventId: `dkd_purchase_${autoOrderId}`,
-            browserFired: true,
-            capiDispatched: false,
-            capiStatus: 'Dispatching CAPI...',
-            updatedAt: Date.now(),
-          },
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        };
-        await saveOrderPersisted(autoOrder);
-        trackPixelPurchase(autoOrder).then((capiRes) => {
-          if (capiRes) {
-            const withTracking: Order = {
-              ...autoOrder,
-              pixelTracking: {
-                eventId: capiRes.eventId || `dkd_purchase_${autoOrderId}`,
-                browserFired: true,
-                capiDispatched: Boolean(capiRes.capiResults && capiRes.capiResults.length > 0),
-                capiStatus:
-                  Array.isArray(capiRes.capiResults) && capiRes.capiResults.length > 0
-                    ? capiRes.capiResults.map((r) => `${r.platform}: ${r.status}`).join(' | ')
-                    : 'Browser Pixel Synced',
-                metaPixels: capiRes.metaPixels,
-                tiktokPixels: capiRes.tiktokPixels,
-                contentIds: capiRes.contentIds,
-                capiResults: capiRes.capiResults,
-                updatedAt: Date.now(),
-              },
-            };
-            saveOrderPersisted(withTracking).catch(() => null);
-            setOrders((prev) => prev.map((o) => (o.id === autoOrderId ? withTracking : o)));
-          }
-        });
-        setOrders((prev) => [autoOrder, ...prev]);
-        setFeedback(
-          `🎉 স্ক্রিনশট থেকে স্বয়ংক্রিয়ভাবে অর্ডার #${autoOrderId} (${autoOrder.customer.name} - ${autoOrder.customer.phone}) তৈরি এবং Meta/TikTok পিক্সেলে সিঙ্ক হয়েছে!`
-        );
-      } else {
-        setFeedback('✅ স্ক্রিনশট/মেসেজ থেকে অর্ডারের সকল তথ্য স্বয়ংক্রিয়ভাবে পূরণ হয়েছে! যাচাই করে "অর্ডার সেভ করুন" চাপুন।');
+      // Only auto-fill the form fields so clicking "✅ অর্ডার সেভ করুন" saves the order cleanly ONCE (prevents double orders!)
+      if (extracted.customerPhone) {
+        setManualOrderPhone(normalizePhone(extracted.customerPhone));
       }
+      setFeedback(
+        '✅ স্ক্রিনশট/মেসেজ থেকে অর্ডারের সকল তথ্য স্বয়ংক্রিয়ভাবে পূরণ হয়েছে! এখন ডানপাশের "✅ অর্ডার সেভ করুন" বাটনে ক্লিক করুন।'
+      );
       setTimeout(() => setFeedback(''), 5500);
     } catch (err: any) {
       setFeedback(`⚠️ স্ক্রিনশট বিশ্লেষণে সমস্যা হয়েছে: ${err?.message || 'ম্যানুয়ালি তথ্য পূরণ করুন'}`);
@@ -2187,8 +2395,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   // Save Manual / WhatsApp Order to Firestore & live Admin orders state
   const handleCreateManualOrder = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanPhone = manualOrderPhone.replace(/[^\d]/g, '').replace(/^88/, '');
-    if (!manualOrderName.trim() || cleanPhone.length !== 11 || !manualOrderAddress.trim()) {
+    if (manualOrderSubmitting) return;
+    const cleanPhone = normalizePhone(manualOrderPhone);
+    if (!manualOrderName.trim() || cleanPhone.length < 10 || !manualOrderAddress.trim()) {
       setFeedback('⚠️ কাস্টমারের নাম, ১১ ডিজিটের মোবাইল নম্বর এবং সম্পূর্ণ ঠিকানা সঠিকভাবে দিন।');
       setTimeout(() => setFeedback(''), 4000);
       return;
@@ -2263,6 +2472,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setManualOrderSubmitting(true);
     try {
       await saveOrderPersisted(newOrder);
+      markLeadConverted(cleanPhone, orderId).catch(() => null);
       trackPixelPurchase(newOrder).then((capiRes) => {
         if (capiRes) {
           const withTracking: Order = {
@@ -2286,7 +2496,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           setOrders((prev) => prev.map((o) => (o.id === orderId ? withTracking : o)));
         }
       });
-      setOrders((prev) => [newOrder, ...prev]);
+      setOrders((prev) => {
+        const filtered = prev.filter((o) => o.id !== newOrder.id);
+        return [newOrder, ...filtered];
+      });
       setManualOrderName('');
       setManualOrderPhone('');
       setManualOrderAddress('');
@@ -2296,6 +2509,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       setWaScreenshotPreview('');
       setWaScreenshotText('');
       setIsManualOrderOpen(false);
+      setSearchTerm('');
       setFeedback(`🎉 অর্ডার #${orderId} সফলভাবে তৈরি ও ফায়ারবেস + মেটা/টিকটক CAPI-তে সিঙ্ক হয়েছে!`);
       setTimeout(() => setFeedback(''), 5500);
     } catch (err: any) {
@@ -3492,8 +3706,134 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setTimeout(() => setFeedback(''), 4000);
   };
 
-  // Update abandoned lead status live
+  // Convert an abandoned lead into a real Order in #04 Orders & #18 Business Command Center
+  const handleConvertLeadToOrder = async (lead: AbandonedLead) => {
+    const cleanPhone = normalizePhone(lead.customerPhone || '');
+    if (cleanPhone.length < 10) {
+      setFeedback('⚠️ এই লিডে পূর্ণাঙ্গ ১১ ডিজিটের মোবাইল নম্বর নেই।');
+      setTimeout(() => setFeedback(''), 3500);
+      return;
+    }
+    setLeadActionLoading(lead.id);
+    try {
+      const existingOrder = orders.find(
+        (o) => o.status !== 'cancelled' && normalizePhone(o.customer?.phone || '') === cleanPhone
+      );
+      if (existingOrder) {
+        await markLeadConverted(cleanPhone, existingOrder.id);
+        await updateLeadStatus(lead.id, 'converted');
+        setAbandonedLeads((prev) =>
+          cleanupDuplicateAndPartialLeads(
+            prev.map((l) =>
+              l.id === lead.id ? { ...l, status: 'converted', convertedOrderId: existingOrder.id } : l
+            ),
+            orders
+          )
+        );
+        setFeedback(`✅ এই কাস্টমারের অর্ডার (#${existingOrder.id}) ইতোমধ্যে অর্ডার তালিকায় রয়েছে!`);
+        setTimeout(() => setFeedback(''), 4000);
+        return;
+      }
+
+      const fallbackProd =
+        products.find((p) => p.id === lead.productId) ||
+        products.find((p) => lead.productName && p.name === lead.productName) ||
+        products[0];
+      const isOutside = lead.deliveryArea === 'outside_dhaka';
+      const shipFee = isOutside ? 120 : 70;
+      const itemQty = Math.max(1, Number(lead.quantity) || 1);
+      const unitPrice = Number(
+        lead.productPrice || lead.items?.[0]?.price || fallbackProd?.price || 1250
+      );
+      const subtotal = unitPrice * itemQty;
+      const total = Number(lead.totalAmount || lead.estimatedTotal || subtotal + shipFee);
+      const orderId = `DKD-${Math.floor(100000 + Math.random() * 900000)}`;
+
+      const newOrder: Order = {
+        id: orderId,
+        customer: {
+          name: (lead.customerName || 'সম্মানিত ক্রেতা').trim(),
+          phone: cleanPhone,
+          address: (lead.customerAddress || 'ফোনে ঠিকানা কনফার্ম করা হয়েছে').trim(),
+          city: isOutside ? 'Outside Dhaka' : 'Dhaka',
+          district: isOutside ? 'ঢাকার বাইরে (Outside Dhaka)' : 'ঢাকা (Inside Dhaka)',
+        },
+        items:
+          Array.isArray(lead.items) && lead.items.length > 0
+            ? lead.items.map((it, idx) => ({
+                id: it.productId || fallbackProd?.id || `item-${idx}`,
+                productId: it.productId || fallbackProd?.id || `item-${idx}`,
+                name: it.productName || fallbackProd?.name || 'অরিজিনাল কালেকশন',
+                price: Number(it.price || unitPrice),
+                quantity: Math.max(1, Number(it.quantity || itemQty)),
+                image:
+                  it.productImage ||
+                  fallbackProd?.images?.[0] ||
+                  '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg',
+                selectedColor: it.selectedColor || 'Standard',
+                selectedSize: it.selectedSize || 'Standard',
+                category: fallbackProd?.category || 'home_decor',
+              }))
+            : [
+                {
+                  id: lead.productId || fallbackProd?.id || 'dkd-lead',
+                  productId: lead.productId || fallbackProd?.id || 'dkd-lead',
+                  name: lead.productName || fallbackProd?.name || 'অরিজিনাল কালেকশন',
+                  price: unitPrice,
+                  quantity: itemQty,
+                  image:
+                    lead.productImage ||
+                    fallbackProd?.images?.[0] ||
+                    '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg',
+                  selectedColor: 'Standard',
+                  selectedSize: 'Standard',
+                  category: fallbackProd?.category || 'home_decor',
+                },
+              ],
+        subtotal,
+        shippingCost: shipFee,
+        discount: Math.max(0, subtotal + shipFee - total),
+        total,
+        paymentMethod: 'cod',
+        status: 'confirmed',
+        userId: null,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+
+      await saveOrderPersisted(newOrder);
+      await markLeadConverted(cleanPhone, orderId);
+      await updateLeadStatus(lead.id, 'converted');
+
+      setOrders((prev) => [newOrder, ...prev.filter((o) => o.id !== orderId)]);
+      setAbandonedLeads((prev) =>
+        cleanupDuplicateAndPartialLeads(
+          prev.map((l) =>
+            l.id === lead.id ? { ...l, status: 'converted', convertedOrderId: orderId } : l
+          ),
+          [newOrder, ...orders]
+        )
+      );
+      setFeedback(
+        `🎉 লিডটি সফলভাবে মূল অর্ডারে (#${orderId} — ${newOrder.customer.name}) রূপান্তরিত হয়েছে এবং #০৪ অর্ডার ও #১৮ কমান্ড সেন্টারে যুক্ত হয়েছে!`
+      );
+      setTimeout(() => setFeedback(''), 5000);
+    } catch (err) {
+      console.warn('Convert lead to order error:', err);
+    } finally {
+      setLeadActionLoading(null);
+    }
+  };
+
+  // Update abandoned lead status live (and create real Order if marked 'converted')
   const handleUpdateLeadStatus = async (leadId: string, nextStatus: AbandonedLeadStatus) => {
+    if (nextStatus === 'converted') {
+      const targetLead = abandonedLeads.find((l) => l.id === leadId);
+      if (targetLead) {
+        await handleConvertLeadToOrder(targetLead);
+        return;
+      }
+    }
     setLeadActionLoading(leadId);
     try {
       await updateLeadStatus(leadId, nextStatus);
@@ -5436,7 +5776,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             TOOL 3: ORDERS, MANUAL ORDER ENTRY, WHATSAPP SCREENSHOT AI & COURIER BOOKING
            ===================================================================== */}
         {activeTool === 'orders' && (
-          <div className="bg-white rounded-3xl border border-rose-200 shadow-xs overflow-hidden animate-in fade-in">
+          <div className="bg-white rounded-3xl border border-rose-200 shadow-xs animate-in fade-in">
             <div className="p-5 border-b border-rose-100 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
               <div>
                 <h3 className="text-base font-bold text-stone-900">
@@ -5790,7 +6130,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </div>
             )}
 
-            <div className="overflow-x-auto">
+            <DualHorizontalScrollWrapper dependencyKey={`${orders.length}-${searchTerm}`}>
               <table className="w-full text-left text-xs text-stone-700">
                 <thead className="bg-rose-50/50 text-[11px] uppercase tracking-wider text-stone-600 border-b border-rose-100 font-bold">
                   <tr>
@@ -6006,7 +6346,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   )}
                 </tbody>
               </table>
-            </div>
+            </DualHorizontalScrollWrapper>
 
             {/* MODAL 1: ORDER FULL DETAILS MODAL */}
             {selectedOrderForView && (
@@ -7784,9 +8124,22 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               </select>
                             </td>
 
-                            {/* 1-Click Recovery Actions */}
+                              {/* 1-Click Recovery Actions */}
                             <td className="px-4 py-3.5 whitespace-nowrap text-right">
                               <div className="flex items-center justify-end gap-1.5">
+                                {lead.status !== 'converted' && (
+                                  <button
+                                    type="button"
+                                    disabled={leadActionLoading === lead.id}
+                                    onClick={() => handleConvertLeadToOrder(lead)}
+                                    className="px-2.5 py-1.5 rounded-lg bg-[#E11D48] hover:bg-[#BE123C] text-white font-bold text-[11px] flex items-center gap-1 shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+                                    title="১-ক্লিকে এই লিডটি মূল অর্ডারে (#04 ও #18) যুক্ত করুন"
+                                  >
+                                    <Check className="w-3.5 h-3.5" />
+                                    <span>অর্ডার কনফার্ম</span>
+                                  </button>
+                                )}
+
                                 {/* WhatsApp 1-Click */}
                                 <a
                                   href={`https://wa.me/88${cleanPhone}?text=${waText}`}
@@ -9041,8 +9394,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             0
           );
 
-          // Calculate Sold Product COGS from actual items sold in active orders
+          // Calculate Sold Product COGS from actual items sold in active orders (respecting manual Order COGS override when set)
           const soldProductCogs = filteredOrders.reduce((orderSum, ord) => {
+            if (ord.manualFinancialOverride && typeof ord.cogsTotal === 'number') {
+              return orderSum + ord.cogsTotal;
+            }
             const itemsCogs = ord.items.reduce((itSum, it) => {
               const catProd = products.find(
                 (p) => p.id === it.productId || p.id === it.id || p.name === it.name
@@ -9056,7 +9412,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   ? Math.round(
                       matchedPurchase.grandTotalPurchaseCost / matchedPurchase.purchaseQuantity
                     )
-                  : 0);
+                  : Math.round((Number(it.price) || 0) * 0.52));
               return itSum + unitCost * (Number(it.quantity) || 1);
             }, 0);
             return orderSum + itemsCogs;
@@ -11052,12 +11408,23 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             courierReturns={courierReturns}
             purchases={purchases}
             onUpdateOrder={async (updatedOrder) => {
+              serverOrdersRef.current = [
+                updatedOrder,
+                ...serverOrdersRef.current.filter((o) => o && o.id !== updatedOrder.id),
+              ];
               setOrders((prev) => {
                 const next = prev.map((o) => (o.id === updatedOrder.id ? updatedOrder : o));
                 syncOrdersToLocalCache(next);
                 return next;
               });
+              if (selectedOrderForView?.id === updatedOrder.id) {
+                setSelectedOrderForView(updatedOrder);
+              }
+              if (selectedOrderForInvoice?.id === updatedOrder.id) {
+                setSelectedOrderForInvoice(updatedOrder);
+              }
             }}
+            onEditOrder={(ord) => handleOpenEditOrder(ord)}
             onUpdateProductsList={(updatedProds) => {
               updatedProds.forEach((p) => {
                 const old = products.find((x) => x.id === p.id);
@@ -11329,316 +11696,451 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </div>
       )}
 
-      {/* Edit Order Modal (Real-time live persistence to Firestore + state) */}
-      {isEditOrderModalOpen && editingOrder && (
-        <div className="fixed inset-0 z-50 bg-stone-950/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-3xl max-w-2xl w-full p-6 space-y-5 shadow-2xl border border-stone-200 text-xs my-auto max-h-[92vh] overflow-y-auto">
-            <div className="flex items-center justify-between pb-3 border-b border-rose-100 sticky top-0 bg-white z-10">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
-                  <Edit3 className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-extrabold text-stone-900">
-                    অর্ডার তথ্য এডিট করুন (অর্ডার #{editingOrder.id})
-                  </h3>
-                  <p className="text-[11px] text-stone-500">
-                    কাস্টমারের নাম, ফোন, ডেলিভারি ঠিকানা, প্রোডাক্ট ও মূল্য এডিট করুন। সাথে সাথে ডাটাবেজে আপডেট হবে।
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsEditOrderModalOpen(false);
-                  setEditingOrder(null);
-                }}
-                className="text-stone-400 hover:text-stone-700 cursor-pointer text-base font-bold p-1"
-              >
-                ✕
-              </button>
-            </div>
+      {/* Edit Order Modal (Real-time live persistence to Firestore + Backend + All 10 Reports) */}
+      {isEditOrderModalOpen && editingOrder && (() => {
+        const liveSubtotal = editOrderItems.reduce(
+          (sum, it) => sum + (Number(it.price) || 0) * (Number(it.quantity) || 1),
+          0
+        );
+        const liveShipping = Math.max(0, Number(editOrderShipping) || 0);
+        const liveDiscount = Math.max(0, Number(editOrderDiscount) || 0);
+        const liveCodTotal = Math.max(0, liveSubtotal - liveDiscount + liveShipping);
+        const liveCogs = editOrderManualCostOverride
+          ? Math.max(0, Number(editOrderCogs) || 0)
+          : computeItemsCogs(editOrderItems);
+        const liveCourierExp = Math.max(0, Number(editOrderCourierExpense) || 0);
+        const livePackExp = Math.max(0, Number(editOrderPackagingCost) || 0);
+        const liveOtherExp = Math.max(0, Number(editOrderOtherExpense) || 0);
+        const liveProfit = liveCodTotal - liveCogs - liveCourierExp - livePackExp - liveOtherExp;
 
-            <form onSubmit={handleSaveEditedOrder} className="space-y-4">
-              {/* Customer Information Section */}
-              <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 space-y-3">
-                <span className="font-extrabold text-stone-800 text-xs block">
-                  👤 কাস্টমার ও ডেলিভারি তথ্য:
-                </span>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        return (
+          <div className="fixed inset-0 z-50 bg-stone-950/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+            <div className="bg-white rounded-3xl max-w-2xl w-full p-6 space-y-5 shadow-2xl border border-stone-200 text-xs my-auto max-h-[92vh] overflow-y-auto">
+              <div className="flex items-center justify-between pb-3 border-b border-rose-100 sticky top-0 bg-white z-10">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+                    <Edit3 className="w-4 h-4" />
+                  </div>
                   <div>
-                    <label className="block font-bold text-stone-700 mb-1">কাস্টমারের নাম *</label>
-                    <input
-                      type="text"
-                      required
-                      value={editOrderName}
-                      onChange={(e) => setEditOrderName(e.target.value)}
-                      className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl font-bold"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-bold text-stone-700 mb-1">মোবাইল নম্বর (১১ ডিজিট) *</label>
-                    <input
-                      type="tel"
-                      required
-                      value={editOrderPhone}
-                      onChange={(e) => setEditOrderPhone(e.target.value)}
-                      placeholder="01XXXXXXXXX"
-                      className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl font-mono font-bold text-[#E11D48]"
-                    />
-                  </div>
-
-                  <div className="sm:col-span-2">
-                    <label className="block font-bold text-stone-700 mb-1">সম্পূর্ণ ঠিকানা (বাসা/রোড/এলাকা) *</label>
-                    <input
-                      type="text"
-                      required
-                      value={editOrderAddress}
-                      onChange={(e) => setEditOrderAddress(e.target.value)}
-                      className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl font-bold"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-bold text-stone-700 mb-1">ডেলিভারি এরিয়া *</label>
-                    <select
-                      value={editOrderArea}
-                      onChange={(e) => {
-                        const area = e.target.value as 'inside_dhaka' | 'outside_dhaka';
-                        setEditOrderArea(area);
-                        const fee =
-                          area === 'inside_dhaka'
-                            ? Number(deliverySettings.dhakaFee) || 70
-                            : Number(deliverySettings.outsideDhakaFee) || 130;
-                        setEditOrderShipping(fee);
-                      }}
-                      className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl font-bold"
-                    >
-                      <option value="inside_dhaka">ঢাকার ভেতরে (Inside Dhaka)</option>
-                      <option value="outside_dhaka">ঢাকার বাইরে (Outside Dhaka)</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block font-bold text-stone-700 mb-1">জেলা (District)</label>
-                    <input
-                      type="text"
-                      value={editOrderDistrict}
-                      onChange={(e) => setEditOrderDistrict(e.target.value)}
-                      placeholder="যেমন: ঢাকা / চট্টগ্রাম / সিলেট"
-                      className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl font-bold"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-bold text-stone-700 mb-1">অর্ডার স্ট্যাটাস *</label>
-                    <select
-                      value={editOrderStatus}
-                      onChange={(e) => setEditOrderStatus(e.target.value as OrderStatus)}
-                      className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl font-bold"
-                    >
-                      <option value="pending">পেন্ডিং (Pending)</option>
-                      <option value="confirmed">কনফার্মড (Confirmed)</option>
-                      <option value="packed">প্যাকড (Packed)</option>
-                      <option value="in_transit">কুরিয়ারে (In Transit)</option>
-                      <option value="delivered">ডেলিভারড (Delivered)</option>
-                      <option value="cancelled">বাতিল (Cancelled)</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block font-bold text-stone-700 mb-1">স্পেশাল নোট / নির্দেশনা</label>
-                    <input
-                      type="text"
-                      value={editOrderNotes}
-                      onChange={(e) => setEditOrderNotes(e.target.value)}
-                      placeholder="যেমন: দ্রুত ডেলিভারি বা গিফট বক্স"
-                      className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl"
-                    />
+                    <h3 className="text-sm font-extrabold text-stone-900">
+                      অর্ডার তথ্য ও আর্থিক হিসাব এডিট করুন (অর্ডার #{editingOrder.id})
+                    </h3>
+                    <p className="text-[11px] text-stone-500">
+                      পণ্যের দাম, পরিমাণ, ডিসকাউন্ট, ডেলিভারি চার্জ ও COD পরিবর্তন করলে সাথে সাথে মূল ডাটাবেজ ও সকল রিপোর্টে আপডেট হবে।
+                    </p>
                   </div>
                 </div>
-              </div>
-
-              {/* Ordered Items List & Quantity/Price Edits */}
-              <div className="p-4 rounded-2xl bg-[#FFF8F9] border border-rose-200 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-extrabold text-stone-900 text-xs">
-                    🛍️ অর্ডারকৃত পণ্যের তালিকা ({editOrderItems.length}টি আইটেম):
-                  </span>
-                  <span className="text-[11px] font-bold text-[#E11D48]">
-                    সাবটোটাল: ৳
-                    {editOrderItems
-                      .reduce((sum, it) => sum + it.price * it.quantity, 0)
-                      .toLocaleString()}
-                  </span>
-                </div>
-
-                <div className="border border-stone-200 rounded-xl divide-y divide-stone-100 bg-white overflow-hidden">
-                  {editOrderItems.map((item, idx) => (
-                    <div key={idx} className="p-3 flex items-center justify-between gap-3 text-xs">
-                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                        {item.image && (
-                          <img
-                            src={item.image}
-                            alt={item.name}
-                            className="w-10 h-10 rounded-lg object-cover border border-stone-200 shrink-0"
-                          />
-                        )}
-                        <div className="min-w-0 flex-1">
-                          <p className="font-bold text-stone-900 truncate">{item.name}</p>
-                          <div className="flex items-center gap-3 mt-1">
-                            <div className="flex items-center gap-1">
-                              <span className="text-stone-500 text-[10px]">মূল্য: ৳</span>
-                              <input
-                                type="number"
-                                min={1}
-                                value={item.price}
-                                onChange={(e) =>
-                                  handleEditOrderItemPrice(idx, Math.max(1, Number(e.target.value)))
-                                }
-                                className="w-16 px-1.5 py-0.5 border border-stone-300 rounded text-center font-mono font-bold text-[#E11D48] text-xs"
-                              />
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <span className="text-stone-500 text-[10px]">পরিমাণ:</span>
-                              <input
-                                type="number"
-                                min={1}
-                                value={item.quantity}
-                                onChange={(e) =>
-                                  handleEditOrderItemQuantity(idx, Math.max(1, Number(e.target.value)))
-                                }
-                                className="w-12 px-1.5 py-0.5 border border-stone-300 rounded text-center font-mono font-bold text-stone-900 text-xs"
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-3 shrink-0">
-                        <span className="font-mono font-extrabold text-stone-900">
-                          ৳{(item.price * item.quantity).toLocaleString()}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveOrderItem(idx)}
-                          className="p-1 text-stone-400 hover:text-rose-600 cursor-pointer"
-                          title="এই আইটেমটি অর্ডার থেকে সরান"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Add More Product to this Order */}
-                <div className="pt-2 flex flex-col sm:flex-row items-center gap-2">
-                  <select
-                    value={editOrderAddProdId}
-                    onChange={(e) => setEditOrderAddProdId(e.target.value)}
-                    className="w-full sm:flex-1 px-3 py-2 bg-white border border-stone-300 rounded-xl font-bold text-stone-800 text-xs"
-                  >
-                    <option value="">+ ক্যাটালগ থেকে আরও একটি পণ্য নির্বাচন করুন...</option>
-                    {products.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} — ৳{p.price}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={() => handleAddProductToEditOrder(editOrderAddProdId)}
-                    disabled={!editOrderAddProdId}
-                    className="w-full sm:w-auto px-4 py-2 bg-[#E11D48] hover:bg-[#BE123C] text-white rounded-xl font-bold text-xs flex items-center justify-center gap-1 cursor-pointer disabled:opacity-40 shrink-0"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>অর্ডারে যোগ করুন</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Order Financial Calculation Breakdown */}
-              <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 space-y-2 text-xs">
-                <div className="flex justify-between items-center text-stone-600">
-                  <span>পণ্যের মোট মূল্য (Subtotal):</span>
-                  <span className="font-mono font-bold text-stone-900 text-sm">
-                    ৳
-                    {editOrderItems
-                      .reduce((sum, it) => sum + it.price * it.quantity, 0)
-                      .toLocaleString()}
-                  </span>
-                </div>
-
-                <div className="flex justify-between items-center text-stone-600">
-                  <span>ডেলিভারি চার্জ (Shipping Fee):</span>
-                  <div className="flex items-center gap-1">
-                    <span className="font-mono">৳</span>
-                    <input
-                      type="number"
-                      min={0}
-                      value={editOrderShipping}
-                      onChange={(e) => setEditOrderShipping(Math.max(0, Number(e.target.value)))}
-                      className="w-20 px-2 py-1 bg-white border border-stone-300 rounded-lg text-right font-mono font-bold text-stone-900"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex justify-between items-center text-emerald-700">
-                  <span>ডিসকাউন্ট (Discount):</span>
-                  <div className="flex items-center gap-1">
-                    <span className="font-mono">-৳</span>
-                    <input
-                      type="number"
-                      min={0}
-                      value={editOrderDiscount}
-                      onChange={(e) => setEditOrderDiscount(Math.max(0, Number(e.target.value)))}
-                      className="w-20 px-2 py-1 bg-white border border-stone-300 rounded-lg text-right font-mono font-bold text-emerald-700"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex justify-between items-center pt-2 border-t border-stone-200 text-sm font-extrabold text-[#E11D48]">
-                  <span>সর্বমোট প্রদেয় বিল (Total Payable):</span>
-                  <span className="font-mono text-base font-black">
-                    ৳
-                    {Math.max(
-                      0,
-                      editOrderItems.reduce((sum, it) => sum + it.price * it.quantity, 0) +
-                        editOrderShipping -
-                        editOrderDiscount
-                    ).toLocaleString()}{' '}
-                    BDT
-                  </span>
-                </div>
-              </div>
-
-              {/* Modal Action Buttons */}
-              <div className="flex items-center justify-end gap-2.5 pt-2">
                 <button
                   type="button"
                   onClick={() => {
                     setIsEditOrderModalOpen(false);
                     setEditingOrder(null);
                   }}
-                  className="px-4 py-2 border border-stone-300 rounded-xl text-stone-700 font-bold hover:bg-stone-50 cursor-pointer"
+                  className="text-stone-400 hover:text-stone-700 cursor-pointer text-base font-bold p-1"
                 >
-                  বাতিল
-                </button>
-                <button
-                  type="submit"
-                  disabled={editOrderSaving}
-                  className="px-6 py-2.5 bg-[#E11D48] hover:bg-[#BE123C] text-white rounded-xl font-bold flex items-center gap-2 cursor-pointer shadow-xs disabled:opacity-50"
-                >
-                  <Save className="w-4 h-4" />
-                  <span>{editOrderSaving ? 'সংরক্ষণ হচ্ছে...' : '✅ অর্ডার এডিট সম্পন্ন ও সেভ করুন'}</span>
+                  ✕
                 </button>
               </div>
-            </form>
+
+              <form onSubmit={handleSaveEditedOrder} className="space-y-4">
+                {/* Customer Information Section */}
+                <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 space-y-3">
+                  <span className="font-extrabold text-stone-800 text-xs block">
+                    👤 কাস্টমার ও ডেলিভারি তথ্য:
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-bold text-stone-700 mb-1">কাস্টমারের নাম *</label>
+                      <input
+                        type="text"
+                        required
+                        value={editOrderName}
+                        onChange={(e) => setEditOrderName(e.target.value)}
+                        className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl font-bold"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-stone-700 mb-1">মোবাইল নম্বর (১১ ডিজিট) *</label>
+                      <input
+                        type="tel"
+                        required
+                        value={editOrderPhone}
+                        onChange={(e) => setEditOrderPhone(e.target.value)}
+                        placeholder="01XXXXXXXXX"
+                        className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl font-mono font-bold text-[#E11D48]"
+                      />
+                    </div>
+
+                    <div className="sm:col-span-2">
+                      <label className="block font-bold text-stone-700 mb-1">সম্পূর্ণ ঠিকানা (বাসা/রোড/এলাকা) *</label>
+                      <input
+                        type="text"
+                        required
+                        value={editOrderAddress}
+                        onChange={(e) => setEditOrderAddress(e.target.value)}
+                        className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl font-bold"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-stone-700 mb-1">ডেলিভারি এরিয়া *</label>
+                      <select
+                        value={editOrderArea}
+                        onChange={(e) => {
+                          const area = e.target.value as 'inside_dhaka' | 'outside_dhaka';
+                          setEditOrderArea(area);
+                          const fee =
+                            area === 'inside_dhaka'
+                              ? Number(deliverySettings.dhakaFee) || 70
+                              : Number(deliverySettings.outsideDhakaFee) || 130;
+                          setEditOrderShipping(fee);
+                          setEditOrderCourierExpense(fee);
+                        }}
+                        className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl font-bold"
+                      >
+                        <option value="inside_dhaka">ঢাকার ভেতরে (Inside Dhaka)</option>
+                        <option value="outside_dhaka">ঢাকার বাইরে (Outside Dhaka)</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-stone-700 mb-1">জেলা (District)</label>
+                      <input
+                        type="text"
+                        value={editOrderDistrict}
+                        onChange={(e) => setEditOrderDistrict(e.target.value)}
+                        placeholder="যেমন: ঢাকা / চট্টগ্রাম / সিলেট"
+                        className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl font-bold"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-stone-700 mb-1">অর্ডার স্ট্যাটাস *</label>
+                      <select
+                        value={editOrderStatus}
+                        onChange={(e) => setEditOrderStatus(e.target.value as OrderStatus)}
+                        className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl font-bold"
+                      >
+                        <option value="pending">পেন্ডিং (Pending)</option>
+                        <option value="processing">প্রসেসিং (Processing)</option>
+                        <option value="confirmed">কনফার্মড (Confirmed)</option>
+                        <option value="packed">প্যাকড (Packed)</option>
+                        <option value="in_transit">কুরিয়ারে (In Transit)</option>
+                        <option value="delivered">ডেলিভারড (Delivered)</option>
+                        <option value="returned">রিটার্নড (Returned)</option>
+                        <option value="cancelled">বাতিল (Cancelled)</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-stone-700 mb-1">স্পেশাল নোট / নির্দেশনা</label>
+                      <input
+                        type="text"
+                        value={editOrderNotes}
+                        onChange={(e) => setEditOrderNotes(e.target.value)}
+                        placeholder="যেমন: দ্রুত ডেলিভারি বা গিফট বক্স"
+                        className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Ordered Items List & Quantity/Price Edits */}
+                <div className="p-4 rounded-2xl bg-[#FFF8F9] border border-rose-200 space-y-3">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <span className="font-extrabold text-stone-900 text-xs">
+                      🛍️ অর্ডারকৃত পণ্যের তালিকা ({editOrderItems.length}টি আইটেম):
+                    </span>
+                    <span className="text-[11px] font-bold text-[#E11D48]">
+                      সাবটোটাল (Price × Qty): ৳{liveSubtotal.toLocaleString()}
+                    </span>
+                  </div>
+
+                  <div className="border border-stone-200 rounded-xl divide-y divide-stone-100 bg-white overflow-hidden">
+                    {editOrderItems.map((item, idx) => (
+                      <div key={idx} className="p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                          {item.image && (
+                            <img
+                              src={item.image}
+                              alt={item.name}
+                              className="w-10 h-10 rounded-lg object-cover border border-stone-200 shrink-0"
+                            />
+                          )}
+                          <div className="min-w-0 flex-1 space-y-1.5">
+                            <input
+                              type="text"
+                              value={item.name}
+                              onChange={(e) => handleEditOrderItemName(idx, e.target.value)}
+                              className="w-full px-2 py-1 border border-stone-200 rounded-lg font-bold text-stone-900 text-xs bg-stone-50/60 focus:bg-white"
+                              title="পণ্যের নাম পরিবর্তন করুন"
+                            />
+                            <div className="flex flex-wrap items-center gap-3">
+                              <div className="flex items-center gap-1">
+                                <span className="text-stone-600 font-semibold text-[11px]">একক মূল্য: ৳</span>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  value={item.price}
+                                  onChange={(e) =>
+                                    handleEditOrderItemPrice(idx, Math.max(0, Number(e.target.value)))
+                                  }
+                                  className="w-24 px-2 py-1 border border-rose-300 rounded-lg text-center font-mono font-bold text-[#E11D48] text-xs bg-white"
+                                />
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <span className="text-stone-600 font-semibold text-[11px]">পরিমাণ (Qty):</span>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  value={item.quantity}
+                                  onChange={(e) =>
+                                    handleEditOrderItemQuantity(idx, Math.max(1, Number(e.target.value)))
+                                  }
+                                  className="w-16 px-2 py-1 border border-stone-300 rounded-lg text-center font-mono font-bold text-stone-900 text-xs bg-white"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-stone-100">
+                          <div className="text-right">
+                            <span className="text-[10px] text-stone-400 block">মোট (Price × Qty)</span>
+                            <span className="font-mono font-extrabold text-stone-900 text-sm">
+                              ৳{(item.price * item.quantity).toLocaleString()}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveOrderItem(idx)}
+                            className="p-1.5 text-stone-400 hover:text-rose-600 cursor-pointer rounded-lg hover:bg-rose-50"
+                            title="এই আইটেমটি অর্ডার থেকে সরান"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Add More Product to this Order */}
+                  <div className="pt-2 flex flex-col sm:flex-row items-center gap-2">
+                    <select
+                      value={editOrderAddProdId}
+                      onChange={(e) => setEditOrderAddProdId(e.target.value)}
+                      className="w-full sm:flex-1 px-3 py-2 bg-white border border-stone-300 rounded-xl font-bold text-stone-800 text-xs"
+                    >
+                      <option value="">+ ক্যাটালগ থেকে আরও একটি পণ্য নির্বাচন করুন...</option>
+                      {products.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} — ৳{p.price}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => handleAddProductToEditOrder(editOrderAddProdId)}
+                      disabled={!editOrderAddProdId}
+                      className="w-full sm:w-auto px-4 py-2 bg-[#E11D48] hover:bg-[#BE123C] text-white rounded-xl font-bold text-xs flex items-center justify-center gap-1 cursor-pointer disabled:opacity-40 shrink-0"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>অর্ডারে যোগ করুন</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Order Financial Calculation Breakdown (Subtotal, Discount, Delivery, COD Amount & Profit) */}
+                <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 space-y-2.5 text-xs">
+                  <div className="font-extrabold text-stone-800 pb-1 border-b border-stone-200 flex items-center justify-between">
+                    <span>💰 অর্ডার বিলিং ও স্বয়ংক্রিয় ক্যালকুলেশন (Subtotal − Discount + Delivery = COD):</span>
+                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                      অটো-ক্যালকুলেশন সক্রিয়
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between items-center text-stone-700">
+                    <span className="font-semibold">পণ্যের মোট মূল্য (Subtotal = Price × Quantity):</span>
+                    <span className="font-mono font-extrabold text-stone-900 text-sm">
+                      ৳{liveSubtotal.toLocaleString()}
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between items-center text-emerald-700">
+                    <span className="font-semibold">ডিসকাউন্ট / ছাড় (Discount):</span>
+                    <div className="flex items-center gap-1">
+                      <span className="font-mono font-bold">-৳</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={editOrderDiscount}
+                        onChange={(e) => setEditOrderDiscount(Math.max(0, Number(e.target.value)))}
+                        className="w-24 px-2.5 py-1 bg-white border border-emerald-300 rounded-lg text-right font-mono font-bold text-emerald-700"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between items-center text-stone-700">
+                    <span className="font-semibold">ডেলিভারি চার্জ (Delivery Charge):</span>
+                    <div className="flex items-center gap-1">
+                      <span className="font-mono font-bold">+৳</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={editOrderShipping}
+                        onChange={(e) => {
+                          const nextFee = Math.max(0, Number(e.target.value));
+                          setEditOrderShipping(nextFee);
+                          if (!editOrderManualCostOverride) {
+                            setEditOrderCourierExpense(nextFee);
+                          }
+                        }}
+                        className="w-24 px-2.5 py-1 bg-white border border-stone-300 rounded-lg text-right font-mono font-bold text-stone-900"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2.5 border-t-2 border-rose-200 text-sm font-extrabold text-[#E11D48] bg-rose-50/60 p-3 rounded-xl">
+                    <div>
+                      <span>সর্বমোট প্রদেয় বিল / COD Amount (Customer Payable):</span>
+                      <span className="block text-[10px] font-medium text-stone-500">
+                        সরাসরি COD Amount পরিবর্তন করলে ডিসকাউন্ট/মূল্য অটোমেটিক সমন্বয় হবে
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono text-base font-black">৳</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={liveCodTotal}
+                        onChange={(e) => handleEditOrderCodTotalDirect(Number(e.target.value))}
+                        className="w-28 px-2.5 py-1.5 bg-white border-2 border-[#E11D48] rounded-xl text-right font-mono text-base font-black text-[#E11D48]"
+                      />
+                      <span className="font-mono text-xs font-bold">BDT</span>
+                    </div>
+                  </div>
+
+                  {/* Cost & Profit Calculation Section */}
+                  <div className="pt-3 mt-2 border-t border-stone-200 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-extrabold text-stone-700 text-[11px]">
+                        📊 ক্রয়মূল্য ও নিট লাভ-ক্ষতি হিসাব (Profit = Sales Revenue − Purchase Cost − Expenses):
+                      </span>
+                      <label className="inline-flex items-center gap-1.5 text-[11px] font-bold text-indigo-700 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={editOrderManualCostOverride}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            setEditOrderManualCostOverride(checked);
+                            if (!checked) {
+                              setEditOrderCogs(computeItemsCogs(editOrderItems));
+                            }
+                          }}
+                          className="rounded border-stone-300"
+                        />
+                        <span>ক্রয়মূল্য (COGS) ম্যানুয়াল এডিট</span>
+                      </label>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      <div className="p-2 rounded-xl bg-white border border-stone-200">
+                        <label className="block text-[10px] text-stone-500 font-bold mb-0.5">
+                          ক্রয়মূল্য / COGS (৳)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          value={liveCogs}
+                          onChange={(e) => {
+                            setEditOrderManualCostOverride(true);
+                            setEditOrderCogs(Math.max(0, Number(e.target.value)));
+                          }}
+                          className="w-full px-2 py-1 border border-stone-200 rounded font-mono font-bold text-indigo-700 text-xs"
+                        />
+                      </div>
+
+                      <div className="p-2 rounded-xl bg-white border border-stone-200">
+                        <label className="block text-[10px] text-stone-500 font-bold mb-0.5">
+                          কুরিয়ার খরচ (৳)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          value={editOrderCourierExpense}
+                          onChange={(e) =>
+                            setEditOrderCourierExpense(Math.max(0, Number(e.target.value)))
+                          }
+                          className="w-full px-2 py-1 border border-stone-200 rounded font-mono font-bold text-stone-800 text-xs"
+                        />
+                      </div>
+
+                      <div className="p-2 rounded-xl bg-white border border-stone-200">
+                        <label className="block text-[10px] text-stone-500 font-bold mb-0.5">
+                          প্যাকেজিং খরচ (৳)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          value={editOrderPackagingCost}
+                          onChange={(e) =>
+                            setEditOrderPackagingCost(Math.max(0, Number(e.target.value)))
+                          }
+                          className="w-full px-2 py-1 border border-stone-200 rounded font-mono font-bold text-stone-800 text-xs"
+                        />
+                      </div>
+
+                      <div
+                        className={`p-2 rounded-xl border ${
+                          liveProfit >= 0
+                            ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                            : 'bg-rose-50 border-rose-200 text-rose-800'
+                        }`}
+                      >
+                        <span className="block text-[10px] font-bold mb-0.5">
+                          নিট লাভ / প্রফিট (Profit)
+                        </span>
+                        <span className="font-mono font-black text-sm">
+                          {liveProfit >= 0
+                            ? `+৳${liveProfit.toLocaleString()}`
+                            : `-৳${Math.abs(liveProfit).toLocaleString()}`}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Modal Action Buttons */}
+                <div className="flex items-center justify-end gap-2.5 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsEditOrderModalOpen(false);
+                      setEditingOrder(null);
+                    }}
+                    className="px-4 py-2 border border-stone-300 rounded-xl text-stone-700 font-bold hover:bg-stone-50 cursor-pointer"
+                  >
+                    বাতিল
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={editOrderSaving}
+                    className="px-6 py-2.5 bg-[#E11D48] hover:bg-[#BE123C] text-white rounded-xl font-bold flex items-center gap-2 cursor-pointer shadow-xs disabled:opacity-50"
+                  >
+                    <Save className="w-4 h-4" />
+                    <span>
+                      {editOrderSaving
+                        ? 'ডাটাবেজে সংরক্ষণ হচ্ছে...'
+                        : '✅ অর্ডার এডিট সম্পন্ন ও ডাটাবেজে সেভ করুন'}
+                    </span>
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Edit Expense Modal (Instant Live Persistence) */}
       {isEditExpenseModalOpen && editingExpense && (

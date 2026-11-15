@@ -71,6 +71,7 @@ import {
   DEFAULT_DOKANDARI_META_PIXEL_ID,
   DEFAULT_DOKANDARI_TIKTOK_PIXEL_ID,
 } from '../lib/pixelManager';
+import { DualHorizontalScrollWrapper } from './DualHorizontalScrollWrapper';
 
 export type DateFilterPreset =
   | 'today'
@@ -89,6 +90,7 @@ interface EnterpriseDashboardHubProps {
   courierReturns: CourierReturn[];
   purchases: PurchaseRecord[];
   onUpdateOrder: (order: Order) => Promise<void> | void;
+  onEditOrder?: (order: Order) => void;
   onUpdateProductsList?: (products: Product[]) => void;
   onPrintOrder?: (order: Order) => void;
   onEditProduct?: (product: Product) => void;
@@ -114,6 +116,7 @@ export const EnterpriseDashboardHub: React.FC<EnterpriseDashboardHubProps> = ({
   courierReturns,
   purchases,
   onUpdateOrder,
+  onEditOrder,
   onUpdateProductsList,
   onPrintOrder,
   onEditProduct,
@@ -795,7 +798,7 @@ export const EnterpriseDashboardHub: React.FC<EnterpriseDashboardHubProps> = ({
 
   return (
     <div
-      className={`rounded-3xl border transition-colors duration-200 p-3.5 sm:p-6 mb-8 w-full max-w-full overflow-x-hidden ${
+      className={`rounded-3xl border transition-colors duration-200 p-3.5 sm:p-6 mb-8 w-full max-w-full ${
         darkMode
           ? 'bg-slate-950 border-slate-800 text-slate-100 shadow-2xl'
           : 'bg-gradient-to-br from-white via-stone-50/50 to-amber-50/20 border-stone-200/90 text-stone-900 shadow-sm'
@@ -1461,8 +1464,11 @@ export const EnterpriseDashboardHub: React.FC<EnterpriseDashboardHubProps> = ({
             </div>
           </div>
 
-          <div className={`rounded-2xl border overflow-hidden ${cardBg}`}>
-            <div className="overflow-x-auto">
+          <div className={`rounded-2xl border ${cardBg}`}>
+            <DualHorizontalScrollWrapper
+              dependencyKey={`${filteredOrders.length}-${orderStatusFilter}-${globalSearch}`}
+              darkMode={darkMode}
+            >
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
                   <tr
@@ -1615,6 +1621,17 @@ export const EnterpriseDashboardHub: React.FC<EnterpriseDashboardHubProps> = ({
 
                         <td className="py-3 px-3 align-top text-right">
                           <div className="inline-flex items-center gap-1.5">
+                            {onEditOrder && (
+                              <button
+                                type="button"
+                                onClick={() => onEditOrder(ord)}
+                                className="px-2.5 py-1.5 rounded-lg border border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-950/50 hover:bg-blue-100 text-blue-700 dark:text-blue-300 font-extrabold text-[11px] inline-flex items-center gap-1 cursor-pointer"
+                                title="অর্ডারের সব তথ্য, পণ্যের দাম, পরিমাণ, ডিসকাউন্ট, ডেলিভারি চার্জ ও COD এডিট করুন"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                                <span>এডিট</span>
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => {
@@ -1648,7 +1665,7 @@ export const EnterpriseDashboardHub: React.FC<EnterpriseDashboardHubProps> = ({
                   })}
                 </tbody>
               </table>
-            </div>
+            </DualHorizontalScrollWrapper>
           </div>
 
           {/* Manual Financial Override Modal */}

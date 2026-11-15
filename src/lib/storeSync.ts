@@ -3428,11 +3428,12 @@ export function mergeAndPersistAllOrders(sources: {
     putOrder(fsOrd);
   }
 
-  const merged = Array.from(orderMap.values()).sort(
+  const sortedByNewest = Array.from(orderMap.values()).sort(
     (a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)
   );
-  syncOrdersToLocalCache(merged);
-  return merged;
+
+  syncOrdersToLocalCache(sortedByNewest);
+  return sortedByNewest;
 }
 
 export async function saveOrderPersisted(order: Order): Promise<Order> {
@@ -3480,15 +3481,44 @@ export async function saveOrderPersisted(order: Order): Promise<Order> {
     console.warn('localStorage order backup note:', e);
   }
 
+  // Broadcast instant update event so AdminPanel & Business Command Center update in 0ms
+  if (typeof window !== 'undefined') {
+    try {
+      window.dispatchEvent(
+        new CustomEvent('dokandari:orders-updated', { detail: { order: cleanOrder } })
+      );
+    } catch {
+      // ignore
+    }
+  }
+
   // 2. Save to Server Order Mirror + Server Firestore (`/api/orders`) and Client Firestore `orders` collection in parallel
-  await Promise.allSettled([
-    setDoc(doc(db, 'orders', cleanOrder.id), cleanOrder, { merge: true }),
+  const [fsRes, apiRes] = await Promise.allSettled([
+    setDoc(doc(db, 'orders', cleanOrder.id), cleanOrder),
     fetch('/api/orders', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ order: cleanOrder }),
     }),
   ]);
+
+  if (
+    fsRes.status === 'rejected' &&
+    (apiRes.status === 'rejected' || (apiRes.status === 'fulfilled' && !apiRes.value.ok))
+  ) {
+    throw new Error('ডাটাবেজে অর্ডার আপডেট করতে ব্যর্থ হয়েছে। অনুগ্রহ করে ইন্টারনেট সংযোগ চেক করুন।');
+  }
+
+  // Broadcast post-persistence confirmation event so all views & reports stay 100% in sync with DB
+  if (typeof window !== 'undefined') {
+    try {
+      window.dispatchEvent(
+        new CustomEvent('dokandari:orders-updated', { detail: { order: cleanOrder, persisted: true } })
+      );
+    } catch {
+      // ignore
+    }
+  }
 
   return cleanOrder;
 }
@@ -4343,13 +4373,15 @@ export function calculateOrderFinancialBreakdown(
   const cogsTotal =
     order.manualFinancialOverride && typeof order.cogsTotal === 'number'
       ? order.cogsTotal
-      : typeof order.cogsTotal === 'number' && order.cogsTotal > 0
-      ? order.cogsTotal
       : computedCogs;
 
   const defaultShipping = Number(order.shippingCost) || 80;
   const courierExpense =
-    typeof order.courierExpense === 'number' ? order.courierExpense : defaultShipping;
+    order.manualFinancialOverride && typeof order.courierExpense === 'number'
+      ? order.courierExpense
+      : typeof order.courierExpense === 'number' && order.courierExpense > 0
+      ? order.courierExpense
+      : defaultShipping;
   const packagingCost =
     typeof order.packagingCost === 'number' ? order.packagingCost : 15;
   const otherOrderExpense =
@@ -4359,10 +4391,7 @@ export function calculateOrderFinancialBreakdown(
     (Number(order.total) || 0) - cogsTotal - courierExpense - packagingCost - otherOrderExpense;
 
   if (order.status === 'delivered') {
-    const netOrderProfit =
-      order.manualFinancialOverride && typeof order.netOrderProfit === 'number'
-        ? order.netOrderProfit
-        : expectedProfit;
+    const netOrderProfit = expectedProfit;
     return {
       cogsTotal,
       courierExpense,

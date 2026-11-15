@@ -529,8 +529,9 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
 
   // Real-time Lead Recovery mechanism: automatically captures customer phone & details on Product & Checkout page
   useEffect(() => {
+    if (isOrdering || completedOrder || viewStep === 'thank_you') return;
     const cleanPhone = normalizePhone(customerPhone);
-    if (cleanPhone && cleanPhone.length >= 6) {
+    if (cleanPhone && cleanPhone.length === 11 && /^01\d{9}$/.test(cleanPhone)) {
       captureAbandonedLeadDebounced({
         customerPhone: cleanPhone,
         customerName,
@@ -556,6 +557,9 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     selectedColor,
     selectedSize,
     product,
+    isOrdering,
+    completedOrder,
+    viewStep,
   ]);
 
   const displayTitle = cleanProductTitle(product.name);
@@ -611,12 +615,6 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
 
   // Navigate directly to the separate Order Form / Instant Checkout Page
   const handleGoToInstantCheckout = () => {
-    if (isScreenshotEnabled && !customerScreenshot) {
-      setScreenshotError(
-        '⚠️ অর্ডার করার জন্য অনুগ্রহ করে আপনার পেজ/প্রোফাইল স্ক্রিনশট বা কাস্টম ডিজাইনের ছবি আপলোড করুন (আবশ্যক)।'
-      );
-      return;
-    }
     setScreenshotError('');
     try {
       window.history.pushState(
@@ -634,6 +632,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   // Submit Instant Checkout Order -> Opens Dedicated Thank You Page!
   const handleDirectOrder = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isOrdering) return;
     setOrderError('');
     setScreenshotError('');
 
@@ -648,13 +647,6 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     }
     if (!customerAddress.trim()) {
       setOrderError('সম্পূর্ণ ডেলিভারি ঠিকানা লিখুন (বাসা/রোড/থানা/জেলা)।');
-      return;
-    }
-    if (isScreenshotEnabled && !customerScreenshot) {
-      const msg =
-        'অনুগ্রহ করে আপনার পেজ/প্রোফাইল স্ক্রিনশট বা কাস্টম ডিজাইনের ছবি আপলোড করুন (আবশ্যক)।';
-      setOrderError(msg);
-      setScreenshotError(`⚠️ ${msg}`);
       return;
     }
 

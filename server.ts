@@ -6855,14 +6855,19 @@ Return strict JSON with 100% complete, rich Bengali product details:
         return res.status(400).json({ success: false, error: 'Missing order id' });
       }
       const orderId = String(incoming.id).trim();
+      const updatedOrder = {
+        ...incoming,
+        id: orderId,
+        updatedAt: Number(incoming.updatedAt) || Date.now(),
+      };
       const mirror = readLocalOrdersMirror();
-      mirror.orders[orderId] = incoming;
+      mirror.orders[orderId] = updatedOrder;
       mirror.deletedIds = mirror.deletedIds.filter((id) => id !== orderId);
       writeLocalOrdersMirror(mirror);
 
       try {
         await withTimeout(
-          setDoc(doc(serverDb, 'orders', orderId), incoming, { merge: true }),
+          setDoc(doc(serverDb, 'orders', orderId), updatedOrder),
           4500,
           'Firestore order write'
         );
@@ -6870,7 +6875,7 @@ Return strict JSON with 100% complete, rich Bengali product details:
         console.warn('Server Firestore order write note:', e);
       }
 
-      return res.json({ success: true, order: incoming });
+      return res.json({ success: true, order: updatedOrder });
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err?.message || 'Order save error' });
     }

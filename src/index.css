@@ -38,3 +38,32 @@
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* Visible, user-friendly horizontal scrollbar for Admin Order Management tables */
+.dokandari-sync-scrollbar {
+  scrollbar-width: auto;
+  scrollbar-color: #E11D48 #FFE4E9;
+  -webkit-overflow-scrolling: touch;
+}
+.dokandari-sync-scrollbar::-webkit-scrollbar {
+  height: 12px;
+  width: 10px;
+}
+.dokandari-sync-scrollbar::-webkit-scrollbar-track {
+  background: #FFF0F3;
+  border-radius: 9999px;
+  border: 1px solid #FECDD3;
+}
+.dokandari-sync-scrollbar::-webkit-scrollbar-thumb {
+  background: linear-gradient(90deg, #E11D48, #BE123C);
+  border-radius: 9999px;
+  border: 2px solid #FFF0F3;
+  cursor: grab;
+}
+.dokandari-sync-scrollbar::-webkit-scrollbar-thumb:active {
+  cursor: grabbing;
+}
+.dokandari-sync-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #9F1239;
+}
+

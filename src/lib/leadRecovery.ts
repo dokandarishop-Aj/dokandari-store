@@ -6,9 +6,10 @@
 import { doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import { sanitizeForFirestore } from './storeSync';
-import { AbandonedLead, AbandonedLeadStatus } from '../types';
+import { AbandonedLead, AbandonedLeadStatus, Order } from '../types';
 
 let leadDebounceTimer: any = null;
+const recentlyConvertedPhones = new Map<string, number>();
 
 /**
  * Normalizes phone numbers to standard 11-digit Bangladesh format (e.g. 01XXXXXXXXX)
@@ -17,16 +18,22 @@ export function normalizePhone(raw: string): string {
   const ascii = String(raw || '').replace(/[০-৯]/g, (d) =>
     String('০১২৩৪৫৬৭৮৯'.indexOf(d))
   );
-  const digits = ascii.replace(/\D/g, '');
+  let digits = ascii.replace(/\D/g, '');
   if (digits.startsWith('880') && digits.length >= 13) {
-    return digits.slice(2);
+    digits = digits.slice(2);
+  } else if (digits.length === 10 && digits.startsWith('1')) {
+    digits = `0${digits}`;
+  }
+  if (digits.length > 11 && digits.startsWith('01')) {
+    digits = digits.slice(0, 11);
   }
   return digits;
 }
 
 /**
- * Captures or updates an abandoned checkout lead in real-time
- * Debounces calls to prevent rapid Firestore writes while customer is typing
+ * Captures or updates an abandoned checkout lead in real-time.
+ * ONLY persists when the phone number is a complete 11-digit BD number (01XXXXXXXXX)
+ * so partial typing (6, 7, 8, 9, 10 digits) NEVER creates duplicate rows in Firestore!
  */
 export function captureAbandonedLeadDebounced(
   leadData: {
@@ -44,10 +51,15 @@ export function captureAbandonedLeadDebounced(
     quantity?: number;
     estimatedTotal: number;
   },
-  delayMs = 600
+  delayMs = 800
 ): void {
   const cleanPhone = normalizePhone(leadData.customerPhone || '');
-  if (cleanPhone.length < 6) return; // Do not record until phone has meaningful digits
+  // CRITICAL FIX: Never create Firestore documents for partial (< 11 digit) phone numbers!
+  if (cleanPhone.length !== 11 || !/^01\d{9}$/.test(cleanPhone)) return;
+
+  // Do not overwrite a recently converted order back to 'pending'
+  const lastConv = recentlyConvertedPhones.get(cleanPhone);
+  if (lastConv && Date.now() - lastConv < 120000) return;
 
   if (leadDebounceTimer) {
     clearTimeout(leadDebounceTimer);
@@ -55,6 +67,9 @@ export function captureAbandonedLeadDebounced(
 
   leadDebounceTimer = setTimeout(async () => {
     try {
+      const recheckConv = recentlyConvertedPhones.get(cleanPhone);
+      if (recheckConv && Date.now() - recheckConv < 120000) return;
+
       const itemsList =
         leadData.cartItems && leadData.cartItems.length > 0
           ? leadData.cartItems.map((ci: any) => ({
@@ -110,11 +125,18 @@ export function captureAbandonedLeadDebounced(
 }
 
 /**
- * Marks an abandoned lead as converted when the customer actually confirms the order
+ * Marks an abandoned lead as converted when the customer actually confirms the order,
+ * cancels any pending debounce timer, and removes any legacy partial-phone prefix documents.
  */
 export async function markLeadConverted(phone: string, orderId: string): Promise<void> {
+  if (leadDebounceTimer) {
+    clearTimeout(leadDebounceTimer);
+    leadDebounceTimer = null;
+  }
   const cleanPhone = normalizePhone(phone);
   if (!cleanPhone) return;
+
+  recentlyConvertedPhones.set(cleanPhone, Date.now());
 
   try {
     const docId = `lead_${cleanPhone}`;
@@ -126,6 +148,98 @@ export async function markLeadConverted(phone: string, orderId: string): Promise
   } catch {
     // Lead might not exist or already cleaned
   }
+
+  // Also delete any legacy partial prefix documents (6..10 digits) for this phone number
+  if (cleanPhone.length === 11) {
+    for (let len = 6; len <= 10; len++) {
+      const partialId = `lead_${cleanPhone.slice(0, len)}`;
+      deleteDoc(doc(db, 'abandoned_leads', partialId)).catch(() => null);
+    }
+  }
+}
+
+/**
+ * Automatically cleans up partial-phone duplicate leads (< 11 digits or prefixes of another lead)
+ * and deduplicates leads by 11-digit phone number. Also deletes the partial records from Firestore.
+ */
+export function cleanupDuplicateAndPartialLeads(
+  rawLeads: AbandonedLead[],
+  existingOrders: Order[] = []
+): AbandonedLead[] {
+  const orderByPhone = new Map<string, Order>();
+  for (const ord of existingOrders) {
+    const p = normalizePhone(ord.customer?.phone || '');
+    if (p.length === 11 && ord.status !== 'cancelled') {
+      if (!orderByPhone.has(p)) {
+        orderByPhone.set(p, ord);
+      }
+    }
+  }
+
+  const partialLeadIdsToDelete: string[] = [];
+  const byFullPhone = new Map<string, AbandonedLead>();
+
+  // Sort newest first so we keep the richest/latest record for each 11-digit phone
+  const sorted = [...rawLeads].sort(
+    (a, b) => Number(b.updatedAt || b.createdAt || 0) - Number(a.updatedAt || a.createdAt || 0)
+  );
+
+  for (const lead of sorted) {
+    const cleanPhone = normalizePhone(lead.customerPhone || '');
+    // Any partial phone number (< 11 digits, e.g. 0171708, 017170844, 017118, 01711830, 0171183087)
+    // is a typing artifact and should be removed from UI and deleted from Firestore
+    if (cleanPhone.length < 11 || !/^01\d{9}$/.test(cleanPhone)) {
+      if (lead.id) partialLeadIdsToDelete.push(lead.id);
+      continue;
+    }
+
+    const matchingOrder = orderByPhone.get(cleanPhone);
+    const updatedLead: AbandonedLead = matchingOrder && lead.status === 'pending'
+      ? { ...lead, customerPhone: cleanPhone, status: 'converted', convertedOrderId: matchingOrder.id }
+      : { ...lead, customerPhone: cleanPhone };
+
+    if (matchingOrder && lead.status === 'pending' && lead.id) {
+      updateDoc(doc(db, 'abandoned_leads', lead.id), {
+        status: 'converted',
+        convertedOrderId: matchingOrder.id,
+        updatedAt: Date.now(),
+      }).catch(() => null);
+    }
+
+    const existing = byFullPhone.get(cleanPhone);
+    if (!existing) {
+      byFullPhone.set(cleanPhone, updatedLead);
+    } else {
+      // Merge richer customerName / customerAddress if the newer one was empty
+      const merged: AbandonedLead = {
+        ...existing,
+        customerName:
+          existing.customerName && existing.customerName !== 'সম্মানিত ক্রেতা'
+            ? existing.customerName
+            : updatedLead.customerName,
+        customerAddress: existing.customerAddress || updatedLead.customerAddress,
+        status:
+          existing.status === 'converted' || updatedLead.status === 'converted'
+            ? 'converted'
+            : existing.status,
+      };
+      byFullPhone.set(cleanPhone, merged);
+      if (lead.id && lead.id !== existing.id) {
+        partialLeadIdsToDelete.push(lead.id);
+      }
+    }
+  }
+
+  // Delete partial/duplicate documents from Firestore in the background
+  if (partialLeadIdsToDelete.length > 0) {
+    for (const delId of partialLeadIdsToDelete) {
+      deleteDoc(doc(db, 'abandoned_leads', delId)).catch(() => null);
+    }
+  }
+
+  return Array.from(byFullPhone.values()).sort(
+    (a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)
+  );
 }
 
 /**

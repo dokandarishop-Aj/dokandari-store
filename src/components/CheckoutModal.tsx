@@ -99,9 +99,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
   // Real-time Lead Recovery mechanism: automatically captures phone & basic info
   useEffect(() => {
-    if (isOpen && customerPhone && normalizePhone(customerPhone).length >= 6) {
+    if (!isOpen || isSubmitting || completedOrder) return;
+    const cleanPhone = normalizePhone(customerPhone);
+    if (cleanPhone && cleanPhone.length === 11 && /^01\d{9}$/.test(cleanPhone)) {
       captureAbandonedLeadDebounced({
-        customerPhone: normalizePhone(customerPhone),
+        customerPhone: cleanPhone,
         customerName,
         customerAddress,
         deliveryArea: deliveryZone,
@@ -110,12 +112,13 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         estimatedTotal: currentTotal,
       });
     }
-  }, [isOpen, customerPhone, customerName, customerAddress, deliveryZone, items, currentTotal]);
+  }, [isOpen, isSubmitting, completedOrder, customerPhone, customerName, customerAddress, deliveryZone, items, currentTotal]);
 
   if (!isOpen) return null;
 
   const handlePlaceOrder = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     setErrorMsg('');
 
     if (items.length === 0) {
