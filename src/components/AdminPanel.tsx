@@ -177,6 +177,7 @@ import {
   getPersistedCourierAuditLogs,
   saveCourierAuditLogPersisted,
   processCourierReturnAutomationIdempotent,
+  buildCustomerTrackingUrl,
 } from '../lib/storeSync';
 import {
   OfficialWhatsAppIcon,
@@ -2284,14 +2285,25 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           `${idx + 1}. ${it.name} (${it.quantity}টি) - ৳${(it.price * it.quantity).toLocaleString()}`
       )
       .join('\n');
+    const customerTrackingLink = buildCustomerTrackingUrl(order);
+    const hasCourierInfo =
+      Boolean(order.consignmentId || order.trackingNumber) &&
+      !String(order.trackingNumber || '').startsWith('DKD-EXP-');
+    const courierSection = hasCourierInfo
+      ? `\n🚚 *কুরিয়ার:* ${order.courierName || 'Steadfast Courier'}\n` +
+        `📦 *Consignment ID:* ${order.consignmentId || order.trackingNumber}\n` +
+        `🔢 *Tracking ID:* ${order.trackingId || order.trackingNumber || order.consignmentId}\n` +
+        `🔗 *লাইভ কুরিয়ার ট্র্যাকিং লিংক:* ${customerTrackingLink}\n`
+      : `\n🔗 *অর্ডার ট্র্যাকিং লিংক:* ${customerTrackingLink}\n`;
     const text =
       `*Dokandari.com — প্রফেশনাল ক্যাশ অন ডেলিভারি ইনভয়েস*\n\n` +
       `সম্মানিত গ্রাহক *${order.customer.name}*,\n` +
       `দোকানদারিতে আপনার অর্ডারটি সফলভাবে কনফার্ম করা হয়েছে।\n\n` +
       `📋 *ইনভয়েস নং:* INV-${order.id}\n` +
       `📅 *তারিখ:* ${new Date(order.createdAt).toLocaleDateString('bn-BD')}\n` +
-      `📍 *ডেলিভারি ঠিকানা:* ${order.customer.address}, ${order.customer.district}\n\n` +
-      `🛍️ *পণ্যের তালিকা:*\n${itemsList}\n\n` +
+      `📍 *ডেলিভারি ঠিকানা:* ${order.customer.address}, ${order.customer.district}\n` +
+      courierSection +
+      `\n🛍️ *পণ্যের তালিকা:*\n${itemsList}\n\n` +
       `💵 পণ্যের মূল্য: ৳${order.subtotal?.toLocaleString() || order.total.toLocaleString()}\n` +
       (order.discount ? `🎁 ডিসকাউন্ট: -৳${order.discount.toLocaleString()}\n` : '') +
       `🚚 ডেলিভারি চার্জ: ৳${order.shippingCost || 0}\n` +
@@ -2301,6 +2313,86 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       `🌐 ওয়েবসাইট: https://dokandari.com\n\n` +
       `ধন্যবাদ Dokandari-র সাথে কেনাকাটা করার জন্য!`;
     window.open(`https://wa.me/${waNum}?text=${encodeURIComponent(text)}`, '_blank');
+  };
+
+  const handleCopyCustomerTrackingLink = (order: Order) => {
+    const link = buildCustomerTrackingUrl(order);
+    navigator.clipboard.writeText(link);
+    setFeedback(`🔗 কাস্টমার ট্র্যাকিং লিংক কপি হয়েছে: ${link}`);
+    setTimeout(() => setFeedback(''), 4500);
+  };
+
+  const sendTrackingLinkViaWhatsApp = (order: Order) => {
+    const cleanPhone = order.customer.phone.replace(/\D/g, '');
+    const waNum = cleanPhone.startsWith('88')
+      ? cleanPhone
+      : cleanPhone.startsWith('0')
+      ? `88${cleanPhone}`
+      : `880${cleanPhone}`;
+    const trackingLink = buildCustomerTrackingUrl(order);
+    const courierName = order.courierName || 'Steadfast / Pathao Courier';
+    const cid = order.consignmentId || order.trackingNumber || `CID-${order.id}`;
+    const tid = order.trackingId || order.trackingNumber || cid;
+    const msg =
+      `*Dokandari.com — লাইভ কুরিয়ার ট্র্যাকিং আপডেট*\n\n` +
+      `সম্মানিত *${order.customer.name}*,\n` +
+      `আপনার অর্ডারটি কুরিয়ারে পাঠানো হয়েছে।\n\n` +
+      `📦 *Order ID:* ${order.id}\n` +
+      `🚚 *Courier:* ${courierName}\n` +
+      `🔖 *Consignment ID:* ${cid}\n` +
+      `🔢 *Tracking ID:* ${tid}\n` +
+      `📌 *বর্তমান স্ট্যাটাস:* ${order.courierLastStatusText || order.courierStatus || 'Order Booked'}\n` +
+      `💰 *ডেলিভারির সময় প্রদেয় (COD):* ৳${order.total.toLocaleString()}\n\n` +
+      `👇 *নিচের লিংকে ক্লিক করে লগইন ছাড়াই আপনার অর্ডারের লাইভ কুরিয়ার ট্র্যাকিং ও হিস্ট্রি দেখুন:*\n` +
+      `${trackingLink}\n\n` +
+      `📞 সহায়তায় WhatsApp: 01885533437`;
+    window.open(`https://wa.me/${waNum}?text=${encodeURIComponent(msg)}`, '_blank');
+  };
+
+  const handleSyncSingleOrderTracking = async (order: Order) => {
+    setCourierBookingId(`${order.id}-sync`);
+    try {
+      const res = await fetch('/api/courier/track/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId: order.id,
+          consignmentId: order.consignmentId || order.trackingNumber || '',
+          phone: order.customer.phone,
+          orderSnapshot: order,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.ok && data?.order) {
+        const updatedOrder: Order = {
+          ...order,
+          ...data.order,
+          id: order.id,
+          customer: order.customer,
+          items: order.items,
+          updatedAt: Date.now(),
+        };
+        await saveOrderPersisted(updatedOrder);
+        setOrders((prev) => prev.map((o) => (o.id === order.id ? updatedOrder : o)));
+        if (selectedOrderForView?.id === order.id) {
+          setSelectedOrderForView(updatedOrder);
+        }
+        setFeedback(
+          `✅ অর্ডার #${order.id} এর লাইভ ট্র্যাকিং সিঙ্ক সম্পন্ন: ${
+            updatedOrder.courierLastStatusText || updatedOrder.courierStatus || 'Updated'
+          }`
+        );
+        setTimeout(() => setFeedback(''), 4500);
+      } else {
+        setFeedback(`⚠️ ${data?.error || 'ট্র্যাকিং স্ট্যাটাস সিঙ্ক করা যায়নি।'}`);
+        setTimeout(() => setFeedback(''), 4500);
+      }
+    } catch (err: any) {
+      setFeedback(`❌ ট্র্যাকিং সিঙ্ক ত্রুটি: ${err?.message || 'আবার চেষ্টা করুন'}`);
+      setTimeout(() => setFeedback(''), 4500);
+    } finally {
+      setCourierBookingId(null);
+    }
   };
 
   // Load orders, settings, campaigns & Gemini status
@@ -3477,22 +3569,49 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         localStorage.setItem('dokandari_api_credentials', JSON.stringify(nextWithStore));
       }
 
-      const trackingNumber = String(data.trackingCode || data.consignmentId || '');
+      const trackingNumber = String(data.trackingCode || data.trackingId || data.consignmentId || '');
       const consignmentId = String(data.consignmentId || trackingNumber);
+      const trackingId = String(data.trackingId || data.trackingCode || trackingNumber);
+      const courierName = provider === 'steadfast' ? 'Steadfast Courier' : 'Pathao Courier';
+      const nowTs = Date.now();
       const updatedOrder: Order = {
         ...order,
         status: 'in_transit',
-        courierName: provider === 'steadfast' ? 'Steadfast Courier' : 'Pathao Courier',
+        merchantOrderId: data.merchantOrderId || order.id,
+        courierName,
         trackingNumber,
+        trackingId,
         consignmentId,
-        courierStatus: data.status || 'in_review',
-        updatedAt: Date.now(),
+        courierStatus: data.status || 'order_booked',
+        courierTrackingStage: data.courierTrackingStage || 'order_booked',
+        courierLastStatusText: `অর্ডার বুকিং সম্পন্ন (${courierName})`,
+        courierLastSyncedAt: nowTs,
+        customerTrackingUrl:
+          data.customerTrackingPath ||
+          `/track?orderId=${encodeURIComponent(order.id)}&cid=${encodeURIComponent(consignmentId)}`,
+        externalCourierTrackingUrl: data.externalCourierTrackingUrl || undefined,
+        trackingHistory: Array.isArray(data.trackingHistory)
+          ? data.trackingHistory
+          : [
+              {
+                id: `trk_${nowTs}_booked`,
+                stage: 'order_booked',
+                statusLabel: `Order Booking Status: Booked with ${courierName}`,
+                statusLabelBn: `অর্ডার বুকিং সম্পন্ন (${courierName})`,
+                rawCourierStatus: data.status || 'order_booked',
+                description: `${courierName}-এ পার্সেল বুকিং সম্পন্ন হয়েছে। Consignment ID: ${consignmentId}, Tracking ID: ${trackingId}`,
+                location: 'Dokandari Dispatch Center',
+                timestamp: nowTs,
+                source: provider === 'pathao' ? 'pathao_api' : 'steadfast_api',
+              },
+            ],
+        updatedAt: nowTs,
       };
 
       await saveOrderPersisted(updatedOrder);
       setOrders((prev) => prev.map((o) => (o.id === order.id ? updatedOrder : o)));
       setFeedback(
-        `🚚 ${data.message || `${provider.toUpperCase()} কুরিয়ারে অর্ডার বুকিং সফল! Tracking: ${trackingNumber}`}`
+        `🚚 ${data.message || `${provider.toUpperCase()} কুরিয়ারে অর্ডার বুকিং সফল! Consignment ID: ${consignmentId}`}`
       );
       setTimeout(() => setFeedback(''), 5000);
     } catch (err: any) {
@@ -7213,42 +7332,85 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                             <td className="px-5 py-4 whitespace-nowrap">
                               {hasRealCourierBooking ? (
-                                <div className="space-y-1">
+                                <div className="space-y-1.5">
                                   <div className="flex items-center gap-1.5">
                                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-bold">
                                       ✓ {o.courierName || 'Courier Booked'}
                                     </span>
                                     <button
                                       type="button"
+                                      onClick={() => handleSyncSingleOrderTracking(o)}
+                                      disabled={courierBookingId === `${o.id}-sync`}
+                                      className="text-[10px] text-emerald-700 hover:underline font-extrabold cursor-pointer"
+                                      title="কুরিয়ার API থেকে লাইভ ট্র্যাকিং স্ট্যাটাস সিঙ্ক করুন"
+                                    >
+                                      {courierBookingId === `${o.id}-sync` ? 'সিঙ্ক হচ্ছে...' : '🔄 লাইভ সিঙ্ক'}
+                                    </button>
+                                    <button
+                                      type="button"
                                       onClick={() => handleResetCourierBooking(o)}
                                       className="text-[10px] text-rose-600 hover:underline font-bold cursor-pointer"
                                       title="পুনরায় কুরিয়ার বুকিং দিতে রিসেট করুন"
                                     >
-                                      🔄 রিসেট
+                                      রিসেট
                                     </button>
                                   </div>
                                   <div className="text-[10px] font-mono text-stone-600">
-                                    Code: <strong className="text-stone-900">{o.trackingNumber}</strong>
+                                    CID: <strong className="text-stone-900">{o.consignmentId || o.trackingNumber}</strong>
+                                    {o.courierLastStatusText ? (
+                                      <span className="ml-1.5 px-1.5 py-0.5 rounded bg-stone-100 text-stone-700 font-sans font-bold">
+                                        {o.courierLastStatusText}
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                  <div className="flex items-center gap-1 pt-0.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCopyCustomerTrackingLink(o)}
+                                      className="px-2 py-1 rounded bg-stone-100 hover:bg-stone-200 text-stone-800 border border-stone-300 text-[10px] font-bold cursor-pointer transition-colors"
+                                      title="কাস্টমার ট্র্যাকিং লিংক কপি করুন (লগইন ছাড়া দেখা যাবে)"
+                                    >
+                                      🔗 ট্র্যাকিং লিংক
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => sendTrackingLinkViaWhatsApp(o)}
+                                      className="px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold cursor-pointer transition-colors"
+                                      title="কাস্টমারকে WhatsApp-এ লাইভ ট্র্যাকিং লিংক পাঠান"
+                                    >
+                                      💬 WA ট্র্যাকিং
+                                    </button>
                                   </div>
                                 </div>
                               ) : (
-                                <div className="flex items-center gap-1.5">
-                                  <button
-                                    type="button"
-                                    disabled={courierBookingId === `${o.id}-steadfast`}
-                                    onClick={() => handleBookCourier(o, 'steadfast')}
-                                    className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold cursor-pointer transition-colors disabled:opacity-50"
-                                  >
-                                    {courierBookingId === `${o.id}-steadfast` ? 'বুকিং হচ্ছে...' : '🚚 Steadfast বুকিং'}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={courierBookingId === `${o.id}-pathao`}
-                                    onClick={() => handleBookCourier(o, 'pathao')}
-                                    className="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold cursor-pointer transition-colors disabled:opacity-50"
-                                  >
-                                    {courierBookingId === `${o.id}-pathao` ? 'বুকিং হচ্ছে...' : '🛵 Pathao বুকিং'}
-                                  </button>
+                                <div className="space-y-1.5">
+                                  <div className="flex items-center gap-1.5">
+                                    <button
+                                      type="button"
+                                      disabled={courierBookingId === `${o.id}-steadfast`}
+                                      onClick={() => handleBookCourier(o, 'steadfast')}
+                                      className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold cursor-pointer transition-colors disabled:opacity-50"
+                                    >
+                                      {courierBookingId === `${o.id}-steadfast` ? 'বুকিং হচ্ছে...' : '🚚 Steadfast বুকিং'}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={courierBookingId === `${o.id}-pathao`}
+                                      onClick={() => handleBookCourier(o, 'pathao')}
+                                      className="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold cursor-pointer transition-colors disabled:opacity-50"
+                                    >
+                                      {courierBookingId === `${o.id}-pathao` ? 'বুকিং হচ্ছে...' : '🛵 Pathao বুকিং'}
+                                    </button>
+                                  </div>
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCopyCustomerTrackingLink(o)}
+                                      className="px-2 py-0.5 rounded bg-stone-100 hover:bg-stone-200 text-stone-700 text-[10px] font-bold cursor-pointer"
+                                    >
+                                      🔗 কাস্টমার ট্র্যাকিং লিংক কপি
+                                    </button>
+                                  </div>
                                 </div>
                               )}
                             </td>
@@ -7399,10 +7561,43 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         </span>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="text-stone-600">কুরিয়ার ট্র্যাকিং:</span>
+                        <span className="text-stone-600">কুরিয়ার ও কনসাইনমেন্ট:</span>
                         <span className="font-mono font-bold text-stone-900">
-                          {selectedOrderForView.trackingNumber || 'এখনো বুকিং হয়নি'}
+                          {selectedOrderForView.courierName
+                            ? `${selectedOrderForView.courierName} (${selectedOrderForView.consignmentId || selectedOrderForView.trackingNumber || 'Booked'})`
+                            : selectedOrderForView.trackingNumber || 'এখনো বুকিং হয়নি'}
                         </span>
+                      </div>
+                      <div className="pt-1.5 border-t border-stone-200 space-y-1.5">
+                        <span className="text-[10px] font-bold text-stone-500 block">
+                          কাস্টমার ট্র্যাকিং লিংক (লগইন ছাড়া লাইভ ট্র্যাকিং):
+                        </span>
+                        <div className="p-2 rounded-lg bg-white border border-stone-200 font-mono text-[10px] text-stone-700 break-all">
+                          {buildCustomerTrackingUrl(selectedOrderForView)}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleCopyCustomerTrackingLink(selectedOrderForView)}
+                            className="px-2.5 py-1 rounded-lg bg-stone-900 hover:bg-stone-800 text-white text-[10px] font-bold cursor-pointer"
+                          >
+                            🔗 ট্র্যাকিং লিংক কপি
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => sendTrackingLinkViaWhatsApp(selectedOrderForView)}
+                            className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold cursor-pointer"
+                          >
+                            💬 WhatsApp-এ ট্র্যাকিং পাঠান
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSyncSingleOrderTracking(selectedOrderForView)}
+                            className="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-[#E11D48] border border-rose-200 text-[10px] font-bold cursor-pointer"
+                          >
+                            🔄 লাইভ স্ট্যাটাস সিঙ্ক
+                          </button>
+                        </div>
                       </div>
                       {selectedOrderForView.customerScreenshot && (
                         <div className="pt-2 border-t border-stone-200 space-y-2">

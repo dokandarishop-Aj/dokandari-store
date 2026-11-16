@@ -693,7 +693,38 @@ function StoreMain() {
         setIsTrackingOpen(false);
         setIsAdminOpen(false);
         return;
-      } else if (normalizedPath === '/track' || normalizedPath === '/tracking' || hash === '#/track') {
+      } else if (
+        normalizedPath === '/track' ||
+        normalizedPath === '/tracking' ||
+        normalizedPath.startsWith('/track/') ||
+        normalizedPath.startsWith('/tracking/') ||
+        hash === '#/track' ||
+        hash.startsWith('#/track') ||
+        Boolean(sp.get('track'))
+      ) {
+        const hashQueryIdx = hash.indexOf('?');
+        const hashParams =
+          hashQueryIdx >= 0 ? new URLSearchParams(hash.slice(hashQueryIdx + 1)) : null;
+        const pathTrackId = normalizedPath.startsWith('/track/')
+          ? decodeURIComponent(normalizedPath.replace('/track/', '').split('/')[0])
+          : normalizedPath.startsWith('/tracking/')
+          ? decodeURIComponent(normalizedPath.replace('/tracking/', '').split('/')[0])
+          : '';
+        const targetTrackParam = (
+          sp.get('orderId') ||
+          sp.get('cid') ||
+          sp.get('consignmentId') ||
+          sp.get('trackingId') ||
+          sp.get('track') ||
+          hashParams?.get('orderId') ||
+          hashParams?.get('cid') ||
+          hashParams?.get('track') ||
+          pathTrackId ||
+          ''
+        ).trim();
+        if (targetTrackParam) {
+          setTrackingOrderId(targetTrackParam);
+        }
         setIsTrackingOpen(true);
         setDetailedProduct(null);
         setActiveCategoryPage(null);

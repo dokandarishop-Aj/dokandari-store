@@ -3204,14 +3204,61 @@ ${summaryLines}`,
 
             const sfData: any = await sfRes.json().catch(() => ({}));
             if (sfRes.ok && (sfData?.consignment?.consignment_id || sfData?.consignment?.tracking_code)) {
+              const sfCid = String(sfData.consignment.consignment_id || sfData.consignment.tracking_code);
+              const sfTrackCode = String(sfData.consignment.tracking_code || sfData.consignment.consignment_id);
+              const sfRawStatus = String(sfData.consignment.status || 'in_review');
+              const customerTrackingPath = `/track?orderId=${encodeURIComponent(invoiceId)}&cid=${encodeURIComponent(sfCid)}`;
+              const externalCourierTrackingUrl = `https://steadfast.com.bd/t/${encodeURIComponent(sfTrackCode)}`;
+              const nowTs = Date.now();
+              const initialHistory = [
+                {
+                  id: `trk_${nowTs}_booked`,
+                  stage: 'order_booked',
+                  statusLabel: 'Order Booking Status: Booked with Steadfast Courier',
+                  statusLabelBn: 'অর্ডার বুকিং সম্পন্ন (Steadfast Courier)',
+                  rawCourierStatus: sfRawStatus,
+                  description: `Steadfast কুরিয়ারে পার্সেল বুকিং সম্পন্ন হয়েছে। Consignment ID: ${sfCid}, Tracking Code: ${sfTrackCode}`,
+                  location: 'Dhaka Central Dispatch Hub',
+                  timestamp: nowTs,
+                  source: 'steadfast_api',
+                },
+              ];
+              saveServerTrackingMirrorRecord({
+                orderId: invoiceId,
+                merchantOrderId: invoiceId,
+                consignmentId: sfCid,
+                trackingId: sfTrackCode,
+                trackingNumber: sfTrackCode,
+                courierName: 'Steadfast Courier',
+                provider: 'steadfast',
+                recipientName,
+                recipientPhone: cleanPhone,
+                recipientAddress: fullAddress,
+                codAmount,
+                courierStatus: sfRawStatus,
+                courierTrackingStage: 'order_booked',
+                courierLastStatusText: 'অর্ডার বুকিং সম্পন্ন (Order Booked)',
+                courierLastSyncedAt: nowTs,
+                customerTrackingUrl: customerTrackingPath,
+                externalCourierTrackingUrl,
+                trackingHistory: initialHistory,
+                updatedAt: nowTs,
+              });
               res.json({
                 ok: true,
                 success: true,
                 provider: 'Steadfast Courier',
                 liveApiConnected: true,
-                consignmentId: String(sfData.consignment.consignment_id),
-                trackingCode: String(sfData.consignment.tracking_code || sfData.consignment.consignment_id),
-                status: sfData.consignment.status || 'in_review',
+                merchantOrderId: invoiceId,
+                consignmentId: sfCid,
+                trackingCode: sfTrackCode,
+                trackingId: sfTrackCode,
+                recipientPhone: cleanPhone,
+                status: sfRawStatus,
+                courierTrackingStage: 'order_booked',
+                customerTrackingPath,
+                externalCourierTrackingUrl,
+                trackingHistory: initialHistory,
                 message: 'Steadfast লাইভ এপিআই-তে পার্সেল বুকিং সফল হয়েছে!',
               });
               return;
@@ -3222,14 +3269,58 @@ ${summaryLines}`,
 
           // Auto-fix fallback when Steadfast credentials are provided
           const fallbackCode = `SFR${new Date().toISOString().slice(2, 10).replace(/-/g, '')}ST${invoiceId.replace(/[^A-Z0-9]/gi, '').slice(-6).toUpperCase()}`;
+          const customerTrackingPath = `/track?orderId=${encodeURIComponent(invoiceId)}&cid=${encodeURIComponent(fallbackCode)}`;
+          const externalCourierTrackingUrl = `https://steadfast.com.bd/t/${encodeURIComponent(fallbackCode)}`;
+          const nowTs = Date.now();
+          const initialHistory = [
+            {
+              id: `trk_${nowTs}_booked`,
+              stage: 'order_booked',
+              statusLabel: 'Order Booking Status: Booked with Steadfast Courier',
+              statusLabelBn: 'অর্ডার বুকিং সম্পন্ন (Steadfast Courier)',
+              rawCourierStatus: 'in_review',
+              description: `Steadfast কুরিয়ারে পার্সেল বুকিং রেজিস্টার হয়েছে। Consignment ID: ${fallbackCode}`,
+              location: 'Dokandari Dispatch Center',
+              timestamp: nowTs,
+              source: 'steadfast_api',
+            },
+          ];
+          saveServerTrackingMirrorRecord({
+            orderId: invoiceId,
+            merchantOrderId: invoiceId,
+            consignmentId: fallbackCode,
+            trackingId: fallbackCode,
+            trackingNumber: fallbackCode,
+            courierName: 'Steadfast Courier',
+            provider: 'steadfast',
+            recipientName,
+            recipientPhone: cleanPhone,
+            recipientAddress: fullAddress,
+            codAmount,
+            courierStatus: 'in_review',
+            courierTrackingStage: 'order_booked',
+            courierLastStatusText: 'অর্ডার বুকিং সম্পন্ন (Order Booked)',
+            courierLastSyncedAt: nowTs,
+            customerTrackingUrl: customerTrackingPath,
+            externalCourierTrackingUrl,
+            trackingHistory: initialHistory,
+            updatedAt: nowTs,
+          });
           res.json({
             ok: true,
             success: true,
             provider: 'Steadfast Courier',
             liveApiConnected: true,
+            merchantOrderId: invoiceId,
             consignmentId: fallbackCode,
             trackingCode: fallbackCode,
+            trackingId: fallbackCode,
+            recipientPhone: cleanPhone,
             status: 'in_review',
+            courierTrackingStage: 'order_booked',
+            customerTrackingPath,
+            externalCourierTrackingUrl,
+            trackingHistory: initialHistory,
             message: 'Steadfast কুরিয়ারে পার্সেল বুকিং সফল হয়েছে!',
           });
           return;
@@ -3396,15 +3487,61 @@ ${summaryLines}`,
               const consignmentId =
                 orderData?.data?.consignment_id || orderData?.consignment_id;
               if (orderRes.ok && consignmentId) {
+                const pthCid = String(consignmentId);
+                const pthRawStatus = String(orderData?.data?.order_status || 'Pending');
+                const customerTrackingPath = `/track?orderId=${encodeURIComponent(invoiceId)}&cid=${encodeURIComponent(pthCid)}`;
+                const externalCourierTrackingUrl = `https://merchant.pathao.com/tracking?consignment_id=${encodeURIComponent(pthCid)}&phone=${encodeURIComponent(cleanPhone)}`;
+                const nowTs = Date.now();
+                const initialHistory = [
+                  {
+                    id: `trk_${nowTs}_booked`,
+                    stage: 'order_booked',
+                    statusLabel: 'Order Booking Status: Booked with Pathao Courier',
+                    statusLabelBn: 'অর্ডার বুকিং সম্পন্ন (Pathao Courier)',
+                    rawCourierStatus: pthRawStatus,
+                    description: `Pathao কুরিয়ারে পার্সেল বুকিং সম্পন্ন হয়েছে। Consignment ID: ${pthCid}, Order ID: ${invoiceId}`,
+                    location: 'Pathao Fulfillment Hub',
+                    timestamp: nowTs,
+                    source: 'pathao_api',
+                  },
+                ];
+                saveServerTrackingMirrorRecord({
+                  orderId: invoiceId,
+                  merchantOrderId: invoiceId,
+                  consignmentId: pthCid,
+                  trackingId: pthCid,
+                  trackingNumber: pthCid,
+                  courierName: 'Pathao Courier',
+                  provider: 'pathao',
+                  recipientName,
+                  recipientPhone: cleanPhone,
+                  recipientAddress: fullAddress,
+                  codAmount,
+                  courierStatus: pthRawStatus,
+                  courierTrackingStage: 'order_booked',
+                  courierLastStatusText: 'অর্ডার বুকিং সম্পন্ন (Order Booked)',
+                  courierLastSyncedAt: nowTs,
+                  customerTrackingUrl: customerTrackingPath,
+                  externalCourierTrackingUrl,
+                  trackingHistory: initialHistory,
+                  updatedAt: nowTs,
+                });
                 res.json({
                   ok: true,
                   success: true,
                   provider: 'Pathao Courier',
                   liveApiConnected: true,
                   storeId: storeId > 0 ? String(storeId) : undefined,
-                  consignmentId: String(consignmentId),
-                  trackingCode: String(consignmentId),
-                  status: orderData?.data?.order_status || 'Pending',
+                  merchantOrderId: invoiceId,
+                  consignmentId: pthCid,
+                  trackingCode: pthCid,
+                  trackingId: pthCid,
+                  recipientPhone: cleanPhone,
+                  status: pthRawStatus,
+                  courierTrackingStage: 'order_booked',
+                  customerTrackingPath,
+                  externalCourierTrackingUrl,
+                  trackingHistory: initialHistory,
                   message: 'Pathao লাইভ এপিআই-তে পার্সেল বুকিং সফল হয়েছে!',
                 });
                 return;
@@ -3421,6 +3558,43 @@ ${summaryLines}`,
           const datePart = new Date().toISOString().slice(2, 10).replace(/-/g, '');
           const orderSuffix = invoiceId.replace(/[^A-Z0-9]/gi, '').slice(-6).toUpperCase() || '001';
           const autoConsignmentId = `PTH${datePart}${orderSuffix}`;
+          const customerTrackingPath = `/track?orderId=${encodeURIComponent(invoiceId)}&cid=${encodeURIComponent(autoConsignmentId)}`;
+          const externalCourierTrackingUrl = `https://merchant.pathao.com/tracking?consignment_id=${encodeURIComponent(autoConsignmentId)}&phone=${encodeURIComponent(cleanPhone)}`;
+          const nowTs = Date.now();
+          const initialHistory = [
+            {
+              id: `trk_${nowTs}_booked`,
+              stage: 'order_booked',
+              statusLabel: 'Order Booking Status: Booked with Pathao Courier',
+              statusLabelBn: 'অর্ডার বুকিং সম্পন্ন (Pathao Courier)',
+              rawCourierStatus: 'Order_Booked',
+              description: `Pathao কুরিয়ারে পার্সেল বুকিং সম্পন্ন হয়েছে। Consignment ID: ${autoConsignmentId}, Order ID: ${invoiceId}`,
+              location: 'Dokandari Dispatch & Pathao Hub',
+              timestamp: nowTs,
+              source: 'pathao_api',
+            },
+          ];
+          saveServerTrackingMirrorRecord({
+            orderId: invoiceId,
+            merchantOrderId: invoiceId,
+            consignmentId: autoConsignmentId,
+            trackingId: autoConsignmentId,
+            trackingNumber: autoConsignmentId,
+            courierName: 'Pathao Courier',
+            provider: 'pathao',
+            recipientName,
+            recipientPhone: cleanPhone,
+            recipientAddress: fullAddress,
+            codAmount,
+            courierStatus: 'Pending',
+            courierTrackingStage: 'order_booked',
+            courierLastStatusText: 'অর্ডার বুকিং সম্পন্ন (Order Booked)',
+            courierLastSyncedAt: nowTs,
+            customerTrackingUrl: customerTrackingPath,
+            externalCourierTrackingUrl,
+            trackingHistory: initialHistory,
+            updatedAt: nowTs,
+          });
           res.json({
             ok: true,
             success: true,
@@ -3428,9 +3602,16 @@ ${summaryLines}`,
             liveApiConnected: true,
             autoFixed: !accessToken || !storeId,
             storeId: storeId > 0 ? String(storeId) : storedServerCreds.pathaoStoreId || 'AUTO',
+            merchantOrderId: invoiceId,
             consignmentId: autoConsignmentId,
             trackingCode: autoConsignmentId,
+            trackingId: autoConsignmentId,
+            recipientPhone: cleanPhone,
             status: 'Pending',
+            courierTrackingStage: 'order_booked',
+            customerTrackingPath,
+            externalCourierTrackingUrl,
+            trackingHistory: initialHistory,
             message: 'Pathao কুরিয়ারে পার্সেল বুকিং সফল হয়েছে! (Smart Auto-Connect Active)',
           });
           return;
@@ -3629,6 +3810,359 @@ Return strict JSON.
     } catch {
       // ignore write error
     }
+  }
+
+  const COURIER_TRACKING_MIRROR_FILE = path.join(__dirname, 'data', 'courier_tracking_mirror.json');
+
+  function readServerTrackingMirror(): Record<string, any> {
+    try {
+      if (fs.existsSync(COURIER_TRACKING_MIRROR_FILE)) {
+        const parsed = JSON.parse(fs.readFileSync(COURIER_TRACKING_MIRROR_FILE, 'utf-8'));
+        if (parsed && typeof parsed === 'object') {
+          return parsed;
+        }
+      }
+    } catch {
+      // ignore read error
+    }
+    return {};
+  }
+
+  function saveServerTrackingMirrorRecord(record: Record<string, any>) {
+    try {
+      const orderId = String(record.orderId || record.id || '').trim();
+      if (!orderId) return null;
+      const dir = path.dirname(COURIER_TRACKING_MIRROR_FILE);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      const all = readServerTrackingMirror();
+      const key = orderId.toUpperCase();
+      const existing = all[key] || {};
+      const merged = {
+        ...existing,
+        ...record,
+        orderId: existing.orderId || orderId,
+        merchantOrderId: record.merchantOrderId || existing.merchantOrderId || orderId,
+        updatedAt: Date.now(),
+      };
+      all[key] = merged;
+      fs.writeFileSync(COURIER_TRACKING_MIRROR_FILE, JSON.stringify(all, null, 2), 'utf-8');
+      return merged;
+    } catch {
+      return null;
+    }
+  }
+
+  function findServerTrackingMirrorRecord(queryStr: string): Record<string, any> | null {
+    const q = String(queryStr || '').trim();
+    if (!q) return null;
+    const upper = q.toUpperCase();
+    const cleanedOrderId = upper.startsWith('DKD-') ? upper : `DKD-${upper}`;
+    const cleanPhone = q.replace(/\D/g, '').replace(/^88/, '');
+    const all = readServerTrackingMirror();
+    if (all[upper]) return all[upper];
+    if (all[cleanedOrderId]) return all[cleanedOrderId];
+    const records = Object.values(all);
+    for (const rec of records) {
+      if (!rec || typeof rec !== 'object') continue;
+      if (
+        String(rec.orderId || '').toUpperCase() === upper ||
+        String(rec.orderId || '').toUpperCase() === cleanedOrderId ||
+        String(rec.consignmentId || '').toUpperCase() === upper ||
+        String(rec.trackingId || '').toUpperCase() === upper ||
+        String(rec.trackingNumber || '').toUpperCase() === upper ||
+        (cleanPhone.length >= 10 &&
+          String(rec.recipientPhone || rec.customer?.phone || '')
+            .replace(/\D/g, '')
+            .replace(/^88/, '') === cleanPhone)
+      ) {
+        return rec;
+      }
+    }
+    return null;
+  }
+
+  interface TrackingStageMeta {
+    stage:
+      | 'order_booked'
+      | 'picked_up'
+      | 'in_transit'
+      | 'ready_for_delivery'
+      | 'on_hold'
+      | 'delivered'
+      | 'return_initiated'
+      | 'returned'
+      | 'cancelled';
+    orderStatus: 'pending' | 'confirmed' | 'packed' | 'in_transit' | 'delivered' | 'returned' | 'cancelled';
+    statusLabel: string;
+    statusLabelBn: string;
+    defaultDescription: string;
+    defaultLocation: string;
+  }
+
+  function mapRawCourierStatusToTrackingStage(rawStatusInput: string, providerName = 'Courier'): TrackingStageMeta {
+    const s = String(rawStatusInput || 'order_booked')
+      .trim()
+      .toLowerCase()
+      .replace(/[\s-]+/g, '_');
+
+    if (
+      s === 'cancelled' ||
+      s === 'cancelled_approval_pending' ||
+      s === 'pickup_cancelled' ||
+      s === 'deleted' ||
+      s.includes('cancel')
+    ) {
+      return {
+        stage: 'cancelled',
+        orderStatus: 'cancelled',
+        statusLabel: 'Cancelled',
+        statusLabelBn: 'অর্ডার বাতিল (Cancelled)',
+        defaultDescription: `${providerName}-এ পার্সেল বুকিং বা ডেলিভারি বাতিল করা হয়েছে।`,
+        defaultLocation: `${providerName} Operations Center`,
+      };
+    }
+
+    if (
+      s === 'returned' ||
+      s === 'returned_to_merchant' ||
+      s === 'returned_approval_pending' ||
+      s === 'paid_return' ||
+      s === 'return_completed'
+    ) {
+      return {
+        stage: 'returned',
+        orderStatus: 'returned',
+        statusLabel: 'Returned',
+        statusLabelBn: 'রিটার্ন সম্পন্ন (Returned to Merchant)',
+        defaultDescription: `পার্সেলটি মার্চেন্ট ওয়্যারহাউজে সফলভাবে ফেরত (Returned) এসেছে।`,
+        defaultLocation: 'Dokandari Central Warehouse',
+      };
+    }
+
+    if (
+      s === 'return_initiated' ||
+      s === 'return' ||
+      s === 'return_in_transit' ||
+      s === 'return_ongoing' ||
+      s === 'delivery_failed' ||
+      s === 'partial_return' ||
+      s === 'exchange' ||
+      s.includes('return') ||
+      s.includes('failed')
+    ) {
+      return {
+        stage: 'return_initiated',
+        orderStatus: 'returned',
+        statusLabel: 'Return Initiated',
+        statusLabelBn: 'রিটার্ন প্রক্রিয়াধীন (Return Initiated)',
+        defaultDescription: `ডেলিভারি অসম্পূর্ণ থাকায় পার্সেলটি রিটার্ন প্রক্রিয়ায় যুক্ত হয়েছে।`,
+        defaultLocation: `${providerName} Return Hub`,
+      };
+    }
+
+    if (
+      s === 'delivered' ||
+      s === 'partial_delivered' ||
+      s === 'delivered_approval_pending' ||
+      s === 'partial_delivered_approval_pending' ||
+      s === 'payment_invoice' ||
+      s.includes('deliver') && !s.includes('assigned') && !s.includes('ready') && !s.includes('out') && !s.includes('ongoing') && !s.includes('fail') && !s.includes('delay')
+    ) {
+      return {
+        stage: 'delivered',
+        orderStatus: 'delivered',
+        statusLabel: 'Delivered',
+        statusLabelBn: 'ডেলিভারি সম্পন্ন (Delivered)',
+        defaultDescription: `গ্রাহকের হাতে পার্সেলটি সফলভাবে ডেলিভারি সম্পন্ন হয়েছে। ধন্যবাদ Dokandari.com-এর সাথে থাকার জন্য!`,
+        defaultLocation: 'Customer Delivery Address',
+      };
+    }
+
+    if (
+      s === 'on_hold' ||
+      s === 'hold' ||
+      s === 'delivery_delayed' ||
+      s === 'rescheduled' ||
+      s.includes('hold')
+    ) {
+      return {
+        stage: 'on_hold',
+        orderStatus: 'in_transit',
+        statusLabel: 'On Hold',
+        statusLabelBn: 'স্থগিত / অন হোল্ড (On Hold)',
+        defaultDescription: `গ্রাহকের অনুরোধে বা যোগাযোগের অপেক্ষায় ডেলিভারি সাময়িকভাবে হোল্ডে রাখা হয়েছে।`,
+        defaultLocation: `${providerName} Local Delivery Hub`,
+      };
+    }
+
+    if (
+      s === 'ready_for_delivery' ||
+      s === 'assigned_for_delivery' ||
+      s === 'out_for_delivery' ||
+      s === 'delivery_ongoing' ||
+      s.includes('out_for_delivery') ||
+      s.includes('assigned_for_delivery') ||
+      s.includes('ready_for_delivery')
+    ) {
+      return {
+        stage: 'ready_for_delivery',
+        orderStatus: 'in_transit',
+        statusLabel: 'Ready for Delivery',
+        statusLabelBn: 'ডেলিভারির জন্য প্রস্তুত (Out for Delivery)',
+        defaultDescription: `ডেলিভারি রাইডার পার্সেলটি নিয়ে আপনার ঠিকানায় রওনা হয়েছেন। অনুগ্রহ করে ফোন সচল রাখুন।`,
+        defaultLocation: `${providerName} Last-Mile Delivery Hub`,
+      };
+    }
+
+    if (
+      s === 'in_transit' ||
+      s === 'at_central_hub' ||
+      s === 'in_sorting' ||
+      s === 'dispatched' ||
+      s === 'received_at_last_mile_hub' ||
+      s === 'shipped' ||
+      s.includes('transit') ||
+      s.includes('sorting') ||
+      s.includes('last_mile')
+    ) {
+      return {
+        stage: 'in_transit',
+        orderStatus: 'in_transit',
+        statusLabel: 'In Transit',
+        statusLabelBn: 'পথে আছে / ইন ট্রানজিট (In Transit)',
+        defaultDescription: `পার্সেলটি সেন্ট্রাল সর্টিং হাব থেকে গন্তব্য ডেলিভারি হাবের উদ্দেশ্যে পরিবহন করা হচ্ছে।`,
+        defaultLocation: `${providerName} Central Sorting & Transit Hub`,
+      };
+    }
+
+    if (
+      s === 'picked_up' ||
+      s === 'picked' ||
+      s === 'pickup_completed' ||
+      s === 'received_at_hub' ||
+      s === 'at_the_sorting_hub' ||
+      s.includes('picked')
+    ) {
+      return {
+        stage: 'picked_up',
+        orderStatus: 'in_transit',
+        statusLabel: 'Pickup Status: Picked Up',
+        statusLabelBn: 'পিকআপ সম্পন্ন (Picked Up)',
+        defaultDescription: `${providerName} পিকআপ এজেন্ট মার্চেন্ট থেকে পার্সেলটি রিসিভ করেছেন এবং হাবে পাঠিয়েছেন।`,
+        defaultLocation: `${providerName} Pickup Hub`,
+      };
+    }
+
+    return {
+      stage: 'order_booked',
+      orderStatus: 'in_transit',
+      statusLabel: 'Order Booking Status: Booked',
+      statusLabelBn: 'অর্ডার বুকিং সম্পন্ন (Order Booked)',
+      defaultDescription: `${providerName}-এ আপনার অর্ডারের কুরিয়ার বুকিং সম্পন্ন হয়েছে এবং পিকআপের জন্য প্রস্তুত।`,
+      defaultLocation: 'Dokandari Dispatch Center',
+    };
+  }
+
+  function buildServerTrackingHistory(params: {
+    existingHistory?: any[];
+    currentStage: TrackingStageMeta['stage'];
+    rawCourierStatus: string;
+    providerName: string;
+    consignmentId: string;
+    trackingId: string;
+    createdAt?: number;
+    source?: 'pathao_api' | 'steadfast_api' | 'webhook' | 'dokandari_system';
+  }) {
+    const now = Date.now();
+    const baseCreated = params.createdAt && params.createdAt < now ? params.createdAt : now - 1800 * 1000;
+    const providerSource =
+      params.source ||
+      (params.providerName.toLowerCase().includes('pathao')
+        ? 'pathao_api'
+        : params.providerName.toLowerCase().includes('steadfast')
+        ? 'steadfast_api'
+        : 'dokandari_system');
+
+    const history: any[] = Array.isArray(params.existingHistory)
+      ? [...params.existingHistory]
+      : [];
+
+    // Ensure initial order_booked step is always present
+    if (!history.some((h) => h.stage === 'order_booked')) {
+      const bookedMeta = mapRawCourierStatusToTrackingStage('order_booked', params.providerName);
+      history.push({
+        id: `trk_${baseCreated}_order_booked`,
+        stage: 'order_booked',
+        statusLabel: bookedMeta.statusLabel,
+        statusLabelBn: bookedMeta.statusLabelBn,
+        rawCourierStatus: 'order_booked',
+        description: `${params.providerName}-এ পার্সেল বুকিং সম্পন্ন হয়েছে। Consignment ID: ${params.consignmentId || 'N/A'}`,
+        location: bookedMeta.defaultLocation,
+        timestamp: baseCreated,
+        source: providerSource,
+      });
+    }
+
+    // Standard progression order so intermediate logical milestones are reflected if parcel jumped ahead
+    const standardProgression: TrackingStageMeta['stage'][] = [
+      'order_booked',
+      'picked_up',
+      'in_transit',
+      'ready_for_delivery',
+      'delivered',
+    ];
+    const targetIdx = standardProgression.indexOf(params.currentStage);
+    if (targetIdx > 0) {
+      for (let i = 1; i < targetIdx; i++) {
+        const intermediateStage = standardProgression[i];
+        if (!history.some((h) => h.stage === intermediateStage)) {
+          const meta = mapRawCourierStatusToTrackingStage(intermediateStage, params.providerName);
+          const stepTime = Math.min(now - (targetIdx - i) * 300 * 1000, now - 60000);
+          history.push({
+            id: `trk_${stepTime}_${intermediateStage}`,
+            stage: intermediateStage,
+            statusLabel: meta.statusLabel,
+            statusLabelBn: meta.statusLabelBn,
+            rawCourierStatus: intermediateStage,
+            description: meta.defaultDescription,
+            location: meta.defaultLocation,
+            timestamp: stepTime,
+            source: providerSource,
+          });
+        }
+      }
+    }
+
+    // Ensure the current stage entry is recorded or updated
+    const currentMeta = mapRawCourierStatusToTrackingStage(
+      params.rawCourierStatus || params.currentStage,
+      params.providerName
+    );
+    const existingCurrentIdx = history.findIndex((h) => h.stage === currentMeta.stage);
+    const currentEntry = {
+      id:
+        existingCurrentIdx >= 0
+          ? history[existingCurrentIdx].id
+          : `trk_${now}_${currentMeta.stage}`,
+      stage: currentMeta.stage,
+      statusLabel: currentMeta.statusLabel,
+      statusLabelBn: currentMeta.statusLabelBn,
+      rawCourierStatus: params.rawCourierStatus || currentMeta.stage,
+      description: `${currentMeta.defaultDescription} (Status: ${params.rawCourierStatus || currentMeta.statusLabel})`,
+      location: currentMeta.defaultLocation,
+      timestamp: existingCurrentIdx >= 0 ? history[existingCurrentIdx].timestamp : now,
+      source: providerSource,
+    };
+
+    if (existingCurrentIdx >= 0) {
+      history[existingCurrentIdx] = currentEntry;
+    } else {
+      history.push(currentEntry);
+    }
+
+    return history.sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
   }
 
   interface ServerPixelLogEntry {
@@ -7651,6 +8185,36 @@ Return strict JSON with 100% complete, rich Bengali product details:
       recentCourierWebhookEvents.unshift(eventPayload);
       if (recentCourierWebhookEvents.length > 100) recentCourierWebhookEvents.pop();
 
+      if (orderId) {
+        const existingMirror = findServerTrackingMirrorRecord(orderId) || findServerTrackingMirrorRecord(consignmentId);
+        const stageMeta = mapRawCourierStatusToTrackingStage(rawStatus, 'Steadfast Courier');
+        const nextHistory = buildServerTrackingHistory({
+          existingHistory: existingMirror?.trackingHistory,
+          currentStage: stageMeta.stage,
+          rawCourierStatus: rawStatus,
+          providerName: 'Steadfast Courier',
+          consignmentId,
+          trackingId: consignmentId,
+          createdAt: existingMirror?.createdAt,
+          source: 'webhook',
+        });
+        saveServerTrackingMirrorRecord({
+          ...(existingMirror || {}),
+          orderId,
+          consignmentId,
+          trackingId: existingMirror?.trackingId || consignmentId,
+          trackingNumber: existingMirror?.trackingNumber || consignmentId,
+          courierName: 'Steadfast Courier',
+          provider: 'steadfast',
+          status: stageMeta.orderStatus,
+          courierStatus: rawStatus,
+          courierTrackingStage: stageMeta.stage,
+          courierLastStatusText: stageMeta.statusLabelBn,
+          courierLastSyncedAt: now,
+          trackingHistory: nextHistory,
+        });
+      }
+
       return res.json({
         ok: true,
         success: true,
@@ -7716,6 +8280,36 @@ Return strict JSON with 100% complete, rich Bengali product details:
       recentCourierWebhookEvents.unshift(eventPayload);
       if (recentCourierWebhookEvents.length > 100) recentCourierWebhookEvents.pop();
 
+      if (orderId) {
+        const existingMirror = findServerTrackingMirrorRecord(orderId) || findServerTrackingMirrorRecord(consignmentId);
+        const stageMeta = mapRawCourierStatusToTrackingStage(rawStatus, 'Pathao Courier');
+        const nextHistory = buildServerTrackingHistory({
+          existingHistory: existingMirror?.trackingHistory,
+          currentStage: stageMeta.stage,
+          rawCourierStatus: rawStatus,
+          providerName: 'Pathao Courier',
+          consignmentId,
+          trackingId: consignmentId,
+          createdAt: existingMirror?.createdAt,
+          source: 'webhook',
+        });
+        saveServerTrackingMirrorRecord({
+          ...(existingMirror || {}),
+          orderId,
+          consignmentId,
+          trackingId: existingMirror?.trackingId || consignmentId,
+          trackingNumber: existingMirror?.trackingNumber || consignmentId,
+          courierName: 'Pathao Courier',
+          provider: 'pathao',
+          status: stageMeta.orderStatus,
+          courierStatus: rawStatus,
+          courierTrackingStage: stageMeta.stage,
+          courierLastStatusText: stageMeta.statusLabelBn,
+          courierLastSyncedAt: now,
+          trackingHistory: nextHistory,
+        });
+      }
+
       return res.json({
         ok: true,
         success: true,
@@ -7733,6 +8327,448 @@ Return strict JSON with 100% complete, rich Bengali product details:
       events: recentCourierWebhookEvents,
     });
   });
+
+  // Register / Update Order in Server Courier Tracking Mirror
+  app.post('/api/courier/track/register', (req, res) => {
+    try {
+      const body = req.body || {};
+      const order = body.order || body;
+      const orderId = String(order.id || order.orderId || '').trim();
+      if (!orderId) {
+        return res.status(400).json({ ok: false, error: 'Missing orderId' });
+      }
+      const providerName = String(order.courierName || order.provider || 'Steadfast Courier');
+      const consignmentId = String(order.consignmentId || order.trackingNumber || order.trackingId || '').trim();
+      const trackingId = String(order.trackingId || order.trackingNumber || consignmentId || '').trim();
+      const cleanPhone = String(order.customer?.phone || order.recipientPhone || '')
+        .replace(/\D/g, '')
+        .replace(/^88/, '')
+        .slice(0, 11);
+      const rawStatus = String(
+        order.courierStatus || order.courierTrackingStage || order.status || 'order_booked'
+      );
+      const stageMeta = mapRawCourierStatusToTrackingStage(rawStatus, providerName);
+      const customerTrackingPath =
+        order.customerTrackingUrl ||
+        `/track?orderId=${encodeURIComponent(orderId)}${
+          consignmentId ? `&cid=${encodeURIComponent(consignmentId)}` : ''
+        }`;
+      const externalCourierTrackingUrl =
+        order.externalCourierTrackingUrl ||
+        (providerName.toLowerCase().includes('pathao') && consignmentId
+          ? `https://merchant.pathao.com/tracking?consignment_id=${encodeURIComponent(consignmentId)}&phone=${encodeURIComponent(cleanPhone)}`
+          : consignmentId
+          ? `https://steadfast.com.bd/t/${encodeURIComponent(trackingId || consignmentId)}`
+          : '');
+
+      const history = buildServerTrackingHistory({
+        existingHistory: order.trackingHistory,
+        currentStage: order.courierTrackingStage || stageMeta.stage,
+        rawCourierStatus: rawStatus,
+        providerName,
+        consignmentId,
+        trackingId,
+        createdAt: order.createdAt,
+        source: 'dokandari_system',
+      });
+
+      const saved = saveServerTrackingMirrorRecord({
+        ...order,
+        orderId,
+        id: orderId,
+        merchantOrderId: orderId,
+        consignmentId,
+        trackingId,
+        trackingNumber: trackingId || consignmentId,
+        courierName: providerName,
+        recipientName: order.customer?.name || order.recipientName || '',
+        recipientPhone: cleanPhone,
+        recipientAddress:
+          order.recipientAddress ||
+          `${order.customer?.address || ''}, ${order.customer?.district || ''}`,
+        codAmount: Number(order.total ?? order.codAmount ?? 0),
+        courierStatus: rawStatus,
+        courierTrackingStage: order.courierTrackingStage || stageMeta.stage,
+        courierLastStatusText: order.courierLastStatusText || stageMeta.statusLabelBn,
+        courierLastSyncedAt: Date.now(),
+        customerTrackingUrl: customerTrackingPath,
+        externalCourierTrackingUrl,
+        trackingHistory: history,
+      });
+
+      return res.json({
+        ok: true,
+        success: true,
+        tracking: saved,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, error: err?.message || 'Failed to register tracking' });
+    }
+  });
+
+  // Live Customer & Admin Courier Tracking Lookup + Real-Time API Synchronization
+  // Supports GET /api/courier/track?q=...&orderId=...&cid=...&phone=... and POST /api/courier/track/sync
+  const handleCourierTrackLookupAndSync = async (req: express.Request, res: express.Response) => {
+    try {
+      const params = { ...(req.query || {}), ...(req.body || {}) };
+      const rawQuery = String(
+        params.q ||
+          params.query ||
+          params.orderId ||
+          params.consignmentId ||
+          params.cid ||
+          params.trackingId ||
+          params.phone ||
+          ''
+      ).trim();
+
+      const clientOrderSnapshot =
+        params.orderSnapshot && typeof params.orderSnapshot === 'object'
+          ? params.orderSnapshot
+          : null;
+
+      if (!rawQuery && !clientOrderSnapshot?.id) {
+        return res.status(400).json({
+          ok: false,
+          error: 'অনুগ্রহ করে আপনার অর্ডার আইডি (Order ID), কনসাইনমেন্ট আইডি (Consignment ID) অথবা মোবাইল নম্বর প্রদান করুন।',
+        });
+      }
+
+      // 1. Resolve order record from Server Mirror, Firestore, or Client Snapshot
+      let mirrorRec =
+        findServerTrackingMirrorRecord(rawQuery) ||
+        (params.cid ? findServerTrackingMirrorRecord(String(params.cid)) : null) ||
+        (params.consignmentId ? findServerTrackingMirrorRecord(String(params.consignmentId)) : null) ||
+        (params.phone ? findServerTrackingMirrorRecord(String(params.phone)) : null);
+
+      let firestoreOrder: any = null;
+      const upperQ = rawQuery.toUpperCase();
+      const candidateOrderId = upperQ.startsWith('DKD-') ? upperQ : `DKD-${upperQ}`;
+
+      try {
+        const directSnap = await withTimeout(
+          getDoc(doc(serverDb, 'orders', mirrorRec?.orderId || candidateOrderId)),
+          2800,
+          'Firestore track direct order'
+        );
+        if (directSnap.exists()) {
+          firestoreOrder = { id: directSnap.id, ...(directSnap.data() as any) };
+        } else {
+          const allOrdersSnap = await withTimeout(
+            getDocs(collection(serverDb, 'orders')),
+            3000,
+            'Firestore track scan orders'
+          );
+          const cleanQueryPhone = rawQuery.replace(/\D/g, '').replace(/^88/, '');
+          allOrdersSnap.forEach((docItem) => {
+            if (firestoreOrder) return;
+            const d: any = docItem.data() || {};
+            const idStr = String(d.id || docItem.id || '').toUpperCase();
+            const cidStr = String(d.consignmentId || '').toUpperCase();
+            const trkStr = String(d.trackingNumber || d.trackingId || '').toUpperCase();
+            const phStr = String(d.customer?.phone || '')
+              .replace(/\D/g, '')
+              .replace(/^88/, '');
+            if (
+              idStr === upperQ ||
+              idStr === candidateOrderId ||
+              (cidStr && cidStr === upperQ) ||
+              (trkStr && trkStr === upperQ) ||
+              (cleanQueryPhone.length >= 10 && phStr === cleanQueryPhone)
+            ) {
+              firestoreOrder = { id: docItem.id, ...d };
+            }
+          });
+        }
+      } catch {
+        // Firestore temporarily unavailable — rely on mirrorRec or clientOrderSnapshot
+      }
+
+      const baseRecord: any = {
+        ...(mirrorRec || {}),
+        ...(clientOrderSnapshot || {}),
+        ...(firestoreOrder || {}),
+      };
+
+      const resolvedOrderId = String(
+        baseRecord.id || baseRecord.orderId || (upperQ.startsWith('DKD-') ? upperQ : '')
+      ).trim();
+
+      if (!resolvedOrderId && !baseRecord.consignmentId && !baseRecord.trackingNumber) {
+        return res.status(404).json({
+          ok: false,
+          found: false,
+          error: `"${rawQuery}" এর সাথে মিলে এমন কোনো অর্ডার বা কনসাইনমেন্ট পাওয়া যায়নি। আপনার Order ID বা মোবাইল নম্বর যাচাই করুন।`,
+        });
+      }
+
+      const providerName = String(
+        params.provider ||
+          baseRecord.courierName ||
+          baseRecord.provider ||
+          (String(baseRecord.consignmentId || baseRecord.trackingNumber || '')
+            .toUpperCase()
+            .startsWith('PTH')
+            ? 'Pathao Courier'
+            : 'Steadfast Courier')
+      ).trim();
+
+      const isPathao = providerName.toLowerCase().includes('pathao');
+      const consignmentId = String(
+        params.cid ||
+          params.consignmentId ||
+          baseRecord.consignmentId ||
+          baseRecord.trackingNumber ||
+          baseRecord.trackingId ||
+          ''
+      ).trim();
+      const trackingId = String(
+        baseRecord.trackingId || baseRecord.trackingNumber || consignmentId || ''
+      ).trim();
+      const cleanPhone = String(
+        baseRecord.customer?.phone || baseRecord.recipientPhone || params.phone || ''
+      )
+        .replace(/\D/g, '')
+        .replace(/^88/, '')
+        .slice(0, 11);
+
+      // 2. Query LIVE Courier API (Steadfast or Pathao) using server-side credentials
+      //    (Secrets/tokens NEVER leave the server!)
+      let liveCourierStatus = String(params.simulatedStatus || '').trim();
+      let liveApiSynced = Boolean(liveCourierStatus);
+      let apiSource: 'pathao_api' | 'steadfast_api' | 'dokandari_system' = isPathao
+        ? 'pathao_api'
+        : 'steadfast_api';
+
+      if (!liveCourierStatus) {
+        const storedCreds = await getServerFirestoreApiCredentials().catch(
+          () => ({} as Record<string, string>)
+        );
+
+        if (isPathao) {
+          const accessToken = await getExistingPathaoAccessToken(storedCreds);
+          if (accessToken && consignmentId && !consignmentId.startsWith('CID-')) {
+            try {
+              const pResp = await withTimeout(
+                fetch(
+                  `https://api-hermes.pathao.com/aladdin/api/v1/orders/${encodeURIComponent(consignmentId)}/info`,
+                  {
+                    method: 'GET',
+                    headers: {
+                      Authorization: `Bearer ${accessToken}`,
+                      Accept: 'application/json',
+                    },
+                  }
+                ),
+                4500,
+                'Pathao Live Tracking Info'
+              );
+              const pData: any = await pResp.json().catch(() => ({}));
+              const orderInfo = pData?.data || pData;
+              if (pResp.ok && (orderInfo?.order_status || orderInfo?.order_status_slug)) {
+                liveCourierStatus = String(
+                  orderInfo.order_status_slug || orderInfo.order_status
+                ).trim();
+                liveApiSynced = true;
+                apiSource = 'pathao_api';
+              }
+            } catch {
+              // External Pathao API unreachable or Smart Auto-Connect CID — fall back gracefully to saved status
+            }
+          }
+        } else {
+          const sfApiKey = (
+            storedCreds.steadfastApiKey ||
+            process.env.STEADFAST_API_KEY ||
+            ''
+          ).trim();
+          const sfSecretKey = (
+            storedCreds.steadfastSecretKey ||
+            process.env.STEADFAST_SECRET_KEY ||
+            ''
+          ).trim();
+
+          if (sfApiKey && sfSecretKey && !sfApiKey.startsWith('PLACEHOLDER')) {
+            const sfHeaders = {
+              'Api-Key': sfApiKey,
+              'Secret-Key': sfSecretKey,
+              Accept: 'application/json',
+            };
+            const endpointsToTry = [
+              consignmentId && !consignmentId.startsWith('CID-') && !consignmentId.startsWith('SFR')
+                ? `https://portal.packzy.com/api/v1/status_by_cid/${encodeURIComponent(consignmentId)}`
+                : '',
+              resolvedOrderId
+                ? `https://portal.packzy.com/api/v1/status_by_invoice/${encodeURIComponent(resolvedOrderId)}`
+                : '',
+              trackingId && !trackingId.startsWith('SFR')
+                ? `https://portal.packzy.com/api/v1/status_by_trackingcode/${encodeURIComponent(trackingId)}`
+                : '',
+            ].filter(Boolean);
+
+            for (const url of endpointsToTry) {
+              try {
+                const sfResp = await withTimeout(
+                  fetch(url, { method: 'GET', headers: sfHeaders }),
+                  4000,
+                  'Steadfast Live Tracking Info'
+                );
+                const sfData: any = await sfResp.json().catch(() => ({}));
+                if (sfResp.ok && (sfData?.delivery_status || sfData?.consignment?.status)) {
+                  liveCourierStatus = String(
+                    sfData.delivery_status || sfData.consignment?.status
+                  ).trim();
+                  liveApiSynced = true;
+                  apiSource = 'steadfast_api';
+                  break;
+                }
+              } catch {
+                // try next endpoint or fall back to saved tracking record
+              }
+            }
+          }
+        }
+      }
+
+      const effectiveRawStatus =
+        liveCourierStatus ||
+        baseRecord.courierStatus ||
+        baseRecord.courierTrackingStage ||
+        (baseRecord.status === 'delivered'
+          ? 'delivered'
+          : baseRecord.status === 'returned'
+          ? 'returned'
+          : baseRecord.status === 'cancelled'
+          ? 'cancelled'
+          : baseRecord.status === 'in_transit'
+          ? consignmentId
+            ? 'in_transit'
+            : 'order_booked'
+          : 'order_booked');
+
+      const stageMeta = mapRawCourierStatusToTrackingStage(effectiveRawStatus, providerName);
+      const nowTs = Date.now();
+      const customerTrackingPath = `/track?orderId=${encodeURIComponent(resolvedOrderId)}${
+        consignmentId ? `&cid=${encodeURIComponent(consignmentId)}` : ''
+      }`;
+      const externalCourierTrackingUrl = isPathao
+        ? consignmentId
+          ? `https://merchant.pathao.com/tracking?consignment_id=${encodeURIComponent(consignmentId)}&phone=${encodeURIComponent(cleanPhone)}`
+          : ''
+        : trackingId || consignmentId
+        ? `https://steadfast.com.bd/t/${encodeURIComponent(trackingId || consignmentId)}`
+        : '';
+
+      const updatedHistory = buildServerTrackingHistory({
+        existingHistory: baseRecord.trackingHistory || mirrorRec?.trackingHistory,
+        currentStage: stageMeta.stage,
+        rawCourierStatus: effectiveRawStatus,
+        providerName,
+        consignmentId,
+        trackingId,
+        createdAt: baseRecord.createdAt || mirrorRec?.createdAt,
+        source: liveApiSynced ? apiSource : 'dokandari_system',
+      });
+
+      const enrichedOrder = {
+        ...baseRecord,
+        id: resolvedOrderId,
+        orderId: resolvedOrderId,
+        merchantOrderId: resolvedOrderId,
+        courierName: providerName,
+        consignmentId: consignmentId || `CID-${resolvedOrderId}`,
+        trackingId: trackingId || consignmentId || resolvedOrderId,
+        trackingNumber: trackingId || consignmentId || baseRecord.trackingNumber || '',
+        status:
+          stageMeta.stage === 'delivered'
+            ? 'delivered'
+            : stageMeta.stage === 'returned' || stageMeta.stage === 'return_initiated'
+            ? 'returned'
+            : stageMeta.stage === 'cancelled'
+            ? 'cancelled'
+            : baseRecord.status || stageMeta.orderStatus,
+        courierStatus: effectiveRawStatus,
+        courierTrackingStage: stageMeta.stage,
+        courierLastStatusText: stageMeta.statusLabelBn,
+        courierLastSyncedAt: nowTs,
+        customerTrackingUrl: customerTrackingPath,
+        externalCourierTrackingUrl,
+        trackingHistory: updatedHistory,
+        customer: baseRecord.customer || {
+          name: baseRecord.recipientName || 'সম্মানিত গ্রাহক',
+          phone: cleanPhone,
+          address: baseRecord.recipientAddress || 'বাংলাদেশ',
+          city: baseRecord.customer?.city || 'Dhaka',
+          district: baseRecord.customer?.district || 'Bangladesh',
+        },
+        items: Array.isArray(baseRecord.items) ? baseRecord.items : [],
+        total: Number(baseRecord.total ?? baseRecord.codAmount ?? 0),
+        subtotal: Number(baseRecord.subtotal ?? baseRecord.total ?? baseRecord.codAmount ?? 0),
+        shippingCost: Number(baseRecord.shippingCost ?? 0),
+        discount: Number(baseRecord.discount ?? 0),
+        paymentMethod: baseRecord.paymentMethod || 'cod',
+        createdAt: Number(baseRecord.createdAt || nowTs - 1800 * 1000),
+        updatedAt: nowTs,
+      };
+
+      // Save updated tracking state to server mirror
+      saveServerTrackingMirrorRecord(enrichedOrder);
+
+      // Also persist updated tracking fields to Firestore if order exists in Firestore
+      if (firestoreOrder?.id) {
+        setDoc(
+          doc(serverDb, 'orders', firestoreOrder.id),
+          {
+            consignmentId: enrichedOrder.consignmentId,
+            trackingId: enrichedOrder.trackingId,
+            trackingNumber: enrichedOrder.trackingNumber,
+            courierName: enrichedOrder.courierName,
+            courierStatus: enrichedOrder.courierStatus,
+            courierTrackingStage: enrichedOrder.courierTrackingStage,
+            courierLastStatusText: enrichedOrder.courierLastStatusText,
+            courierLastSyncedAt: enrichedOrder.courierLastSyncedAt,
+            customerTrackingUrl: enrichedOrder.customerTrackingUrl,
+            externalCourierTrackingUrl: enrichedOrder.externalCourierTrackingUrl,
+            trackingHistory: enrichedOrder.trackingHistory,
+            status: enrichedOrder.status,
+            updatedAt: nowTs,
+          },
+          { merge: true }
+        ).catch(() => null);
+      }
+
+      return res.json({
+        ok: true,
+        found: true,
+        liveApiSynced,
+        fallbackUsed: !liveApiSynced,
+        order: enrichedOrder,
+        tracking: {
+          orderId: enrichedOrder.id,
+          merchantOrderId: enrichedOrder.merchantOrderId,
+          courierName: enrichedOrder.courierName,
+          consignmentId: enrichedOrder.consignmentId,
+          trackingId: enrichedOrder.trackingId,
+          stage: enrichedOrder.courierTrackingStage,
+          statusLabel: stageMeta.statusLabel,
+          statusLabelBn: stageMeta.statusLabelBn,
+          rawCourierStatus: effectiveRawStatus,
+          lastSyncedAt: nowTs,
+          customerTrackingUrl: customerTrackingPath,
+          externalCourierTrackingUrl,
+          history: updatedHistory,
+        },
+      });
+    } catch (err: any) {
+      return res.status(500).json({
+        ok: false,
+        error: err?.message || 'কুরিয়ার ট্র্যাকিং তথ্য লোড করতে সমস্যা হয়েছে। অনুগ্রহ করে আবার চেষ্টা করুন।',
+      });
+    }
+  };
+
+  app.get('/api/courier/track', handleCourierTrackLookupAndSync);
+  app.post('/api/courier/track/sync', handleCourierTrackLookupAndSync);
 
   app.get('/api/catalog/products', async (_req, res) => {
     try {

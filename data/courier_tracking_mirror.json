@@ -1,0 +1,151 @@
+{
+  "DKD-PATHAO-849201": {
+    "id": "DKD-PATHAO-849201",
+    "courierName": "Pathao Courier",
+    "consignmentId": "PTH261116849201",
+    "trackingId": "PTH261116849201",
+    "customer": {
+      "name": "Sadia Sultana",
+      "phone": "01712345678",
+      "address": "House 24, Road 7, Banani",
+      "district": "Dhaka"
+    },
+    "total": 1320,
+    "status": "in_transit",
+    "courierStatus": "Assigned_for_Delivery",
+    "orderId": "DKD-PATHAO-849201",
+    "merchantOrderId": "DKD-PATHAO-849201",
+    "trackingNumber": "PTH261116849201",
+    "recipientName": "Sadia Sultana",
+    "recipientPhone": "01712345678",
+    "recipientAddress": "House 24, Road 7, Banani, Dhaka",
+    "codAmount": 1320,
+    "courierTrackingStage": "ready_for_delivery",
+    "courierLastStatusText": "ডেলিভারির জন্য প্রস্তুত (Out for Delivery)",
+    "courierLastSyncedAt": 1794839396368,
+    "customerTrackingUrl": "/track?orderId=DKD-PATHAO-849201&cid=PTH261116849201",
+    "externalCourierTrackingUrl": "https://merchant.pathao.com/tracking?consignment_id=PTH261116849201&phone=01712345678",
+    "trackingHistory": [
+      {
+        "id": "trk_1794839394989_ready_for_delivery",
+        "stage": "ready_for_delivery",
+        "statusLabel": "Ready for Delivery",
+        "statusLabelBn": "ডেলিভারির জন্য প্রস্তুত (Out for Delivery)",
+        "rawCourierStatus": "Assigned_for_Delivery",
+        "description": "ডেলিভারি রাইডার পার্সেলটি নিয়ে আপনার ঠিকানায় রওনা হয়েছেন। অনুগ্রহ করে ফোন সচল রাখুন। (Status: Assigned_for_Delivery)",
+        "location": "Pathao Courier Last-Mile Delivery Hub",
+        "timestamp": 1794839394989,
+        "source": "dokandari_system"
+      },
+      {
+        "id": "trk_1794839094989_in_transit",
+        "stage": "in_transit",
+        "statusLabel": "In Transit",
+        "statusLabelBn": "পথে আছে / ইন ট্রানজিট (In Transit)",
+        "rawCourierStatus": "in_transit",
+        "description": "পার্সেলটি সেন্ট্রাল সর্টিং হাব থেকে গন্তব্য ডেলিভারি হাবের উদ্দেশ্যে পরিবহন করা হচ্ছে।",
+        "location": "Pathao Courier Central Sorting & Transit Hub",
+        "timestamp": 1794839094989,
+        "source": "dokandari_system"
+      },
+      {
+        "id": "trk_1794838794989_picked_up",
+        "stage": "picked_up",
+        "statusLabel": "Pickup Status: Picked Up",
+        "statusLabelBn": "পিকআপ সম্পন্ন (Picked Up)",
+        "rawCourierStatus": "picked_up",
+        "description": "Pathao Courier পিকআপ এজেন্ট মার্চেন্ট থেকে পার্সেলটি রিসিভ করেছেন এবং হাবে পাঠিয়েছেন।",
+        "location": "Pathao Courier Pickup Hub",
+        "timestamp": 1794838794989,
+        "source": "dokandari_system"
+      },
+      {
+        "id": "trk_1794837594989_order_booked",
+        "stage": "order_booked",
+        "statusLabel": "Order Booking Status: Booked",
+        "statusLabelBn": "অর্ডার বুকিং সম্পন্ন (Order Booked)",
+        "rawCourierStatus": "order_booked",
+        "description": "Pathao Courier-এ পার্সেল বুকিং সম্পন্ন হয়েছে। Consignment ID: PTH261116849201",
+        "location": "Dokandari Dispatch Center",
+        "timestamp": 1794837594989,
+        "source": "dokandari_system"
+      }
+    ],
+    "updatedAt": 1794839396368,
+    "items": [],
+    "subtotal": 1320,
+    "shippingCost": 0,
+    "discount": 0,
+    "paymentMethod": "cod",
+    "createdAt": 1794837596368
+  },
+  "DKD-STEADFAST-951402": {
+    "id": "DKD-STEADFAST-951402",
+    "courierName": "Steadfast Courier",
+    "consignmentId": "SF261116951402",
+    "trackingId": "SFR951402BD",
+    "customer": {
+      "name": "Tanvir Ahmed",
+      "phone": "01812345678",
+      "address": "Gulshan 2",
+      "district": "Dhaka"
+    },
+    "total": 1450,
+    "status": "in_transit",
+    "courierStatus": "in_transit",
+    "orderId": "DKD-STEADFAST-951402",
+    "merchantOrderId": "DKD-STEADFAST-951402",
+    "trackingNumber": "SFR951402BD",
+    "recipientName": "Tanvir Ahmed",
+    "recipientPhone": "01812345678",
+    "recipientAddress": "Gulshan 2, Dhaka",
+    "codAmount": 1450,
+    "courierTrackingStage": "in_transit",
+    "courierLastStatusText": "পথে আছে / ইন ট্রানজিট (In Transit)",
+    "courierLastSyncedAt": 1794839396760,
+    "customerTrackingUrl": "/track?orderId=DKD-STEADFAST-951402&cid=SF261116951402",
+    "externalCourierTrackingUrl": "https://steadfast.com.bd/t/SFR951402BD",
+    "trackingHistory": [
+      {
+        "id": "trk_1794839396391_in_transit",
+        "stage": "in_transit",
+        "statusLabel": "In Transit",
+        "statusLabelBn": "পথে আছে / ইন ট্রানজিট (In Transit)",
+        "rawCourierStatus": "in_transit",
+        "description": "পার্সেলটি সেন্ট্রাল সর্টিং হাব থেকে গন্তব্য ডেলিভারি হাবের উদ্দেশ্যে পরিবহন করা হচ্ছে। (Status: in_transit)",
+        "location": "Steadfast Courier Central Sorting & Transit Hub",
+        "timestamp": 1794839396391,
+        "source": "dokandari_system"
+      },
+      {
+        "id": "trk_1794839096391_picked_up",
+        "stage": "picked_up",
+        "statusLabel": "Pickup Status: Picked Up",
+        "statusLabelBn": "পিকআপ সম্পন্ন (Picked Up)",
+        "rawCourierStatus": "picked_up",
+        "description": "Steadfast Courier পিকআপ এজেন্ট মার্চেন্ট থেকে পার্সেলটি রিসিভ করেছেন এবং হাবে পাঠিয়েছেন।",
+        "location": "Steadfast Courier Pickup Hub",
+        "timestamp": 1794839096391,
+        "source": "dokandari_system"
+      },
+      {
+        "id": "trk_1794837596391_order_booked",
+        "stage": "order_booked",
+        "statusLabel": "Order Booking Status: Booked",
+        "statusLabelBn": "অর্ডার বুকিং সম্পন্ন (Order Booked)",
+        "rawCourierStatus": "order_booked",
+        "description": "Steadfast Courier-এ পার্সেল বুকিং সম্পন্ন হয়েছে। Consignment ID: SF261116951402",
+        "location": "Dokandari Dispatch Center",
+        "timestamp": 1794837596391,
+        "source": "dokandari_system"
+      }
+    ],
+    "updatedAt": 1794839396760,
+    "items": [],
+    "subtotal": 1450,
+    "shippingCost": 0,
+    "discount": 0,
+    "paymentMethod": "cod",
+    "createdAt": 1794837596760
+  }
+}

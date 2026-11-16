@@ -263,6 +263,29 @@ export interface PixelTrackingInfo {
 
 export type OrderReturnCondition = 'sellable' | 'damaged' | 'pending_inspection';
 
+export type CourierTrackingStage =
+  | 'order_booked'
+  | 'picked_up'
+  | 'in_transit'
+  | 'ready_for_delivery'
+  | 'on_hold'
+  | 'delivered'
+  | 'return_initiated'
+  | 'returned'
+  | 'cancelled';
+
+export interface CourierTrackingHistoryEntry {
+  id: string;
+  stage: CourierTrackingStage;
+  statusLabel: string;
+  statusLabelBn: string;
+  rawCourierStatus?: string;
+  description: string;
+  location?: string;
+  timestamp: number;
+  source?: 'pathao_api' | 'steadfast_api' | 'webhook' | 'dokandari_system';
+}
+
 export interface Order {
   id: string;
   customer: CustomerInfo;
@@ -278,10 +301,18 @@ export interface Order {
   createdAt: number;
   updatedAt: number;
   trackingNumber?: string;
+  trackingId?: string;
   courierName?: string;
   consignmentId?: string;
+  merchantOrderId?: string;
   courierStatus?: string;
   courierBookingStatus?: string;
+  courierTrackingStage?: CourierTrackingStage;
+  courierLastStatusText?: string;
+  courierLastSyncedAt?: number;
+  customerTrackingUrl?: string;
+  externalCourierTrackingUrl?: string;
+  trackingHistory?: CourierTrackingHistoryEntry[];
   customerScreenshot?: string;
   pixelTracking?: PixelTrackingInfo;
   // Financial & Automation Engine fields

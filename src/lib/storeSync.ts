@@ -3443,6 +3443,25 @@ export function mergeAndPersistAllOrders(sources: {
   return sortedByNewest;
 }
 
+export function buildCustomerTrackingUrl(order: {
+  id: string;
+  consignmentId?: string;
+  trackingId?: string;
+  trackingNumber?: string;
+}): string {
+  const origin =
+    typeof window !== 'undefined' && window.location?.origin
+      ? window.location.origin
+      : 'https://www.dokandari.com';
+  const cid = String(
+    order.consignmentId || order.trackingId || order.trackingNumber || ''
+  ).trim();
+  const validCid = cid && !cid.startsWith('DKD-EXP-') ? cid : '';
+  return `${origin}/track?orderId=${encodeURIComponent(order.id)}${
+    validCid ? `&cid=${encodeURIComponent(validCid)}` : ''
+  }`;
+}
+
 export async function saveOrderPersisted(order: Order): Promise<Order> {
   // Ensure order is not marked as deleted if re-saved
   removeDeletedOrderIds([order.id]);
@@ -3461,8 +3480,29 @@ export async function saveOrderPersisted(order: Order): Promise<Order> {
     }
   }
 
+  const effectiveCid = String(
+    order.consignmentId ||
+      (order.trackingNumber && !order.trackingNumber.startsWith('DKD-EXP-')
+        ? order.trackingNumber
+        : '')
+  ).trim();
+  const effectiveTrackingId = String(
+    order.trackingId ||
+      (order.trackingNumber && !order.trackingNumber.startsWith('DKD-EXP-')
+        ? order.trackingNumber
+        : effectiveCid)
+  ).trim();
+
   const cleanOrder = sanitizeForFirestore({
     ...order,
+    merchantOrderId: order.merchantOrderId || order.id,
+    ...(effectiveCid ? { consignmentId: effectiveCid } : {}),
+    ...(effectiveTrackingId ? { trackingId: effectiveTrackingId } : {}),
+    customerTrackingUrl:
+      order.customerTrackingUrl ||
+      `/track?orderId=${encodeURIComponent(order.id)}${
+        effectiveCid ? `&cid=${encodeURIComponent(effectiveCid)}` : ''
+      }`,
     customerScreenshot: safeScreenshot,
     items: Array.isArray(order.items)
       ? order.items.map((item) => ({
@@ -3499,10 +3539,15 @@ export async function saveOrderPersisted(order: Order): Promise<Order> {
     }
   }
 
-  // 2. Save to Server Order Mirror + Server Firestore (`/api/orders`) and Client Firestore `orders` collection in parallel
+  // 2. Save to Server Order Mirror + Server Firestore (`/api/orders`), Server Courier Tracking Mirror (`/api/courier/track/register`), and Client Firestore `orders` collection in parallel
   const [fsRes, apiRes] = await Promise.allSettled([
     setDoc(doc(db, 'orders', cleanOrder.id), cleanOrder),
     fetch('/api/orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order: cleanOrder }),
+    }),
+    fetch('/api/courier/track/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ order: cleanOrder }),
