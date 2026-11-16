@@ -86,6 +86,7 @@ import {
   ProductCondition,
   InventoryMovement,
   PurchaseRecord,
+  ReinvestmentRecord,
 } from '../types';
 import {
   updateLeadStatus,
@@ -155,6 +156,10 @@ import {
   mergeAndPersistAllOrders,
   getPersistedPurchases,
   getDeletedPurchaseIds,
+  getPersistedReinvestments,
+  getDeletedReinvestmentIds,
+  addDeletedReinvestmentIds,
+  syncReinvestmentsToLocalCache,
   getDeletedReturnIds,
   addDeletedReturnIds,
   getPersistedCourierReturns,
@@ -178,6 +183,7 @@ import {
 import { OmniFlowStudio } from './OmniFlowStudio';
 import { PurchaseManagementPanel } from './PurchaseManagementPanel';
 import { EnterpriseDashboardHub } from './EnterpriseDashboardHub';
+import { ReinvestmentManagementPanel } from './ReinvestmentManagementPanel';
 import { DualHorizontalScrollWrapper } from './DualHorizontalScrollWrapper';
 
 type HeroSlide = StoreContent['heroSlides'][number];
@@ -212,7 +218,8 @@ export type AdminTool =
   | 'categories'
   | 'security'
   | 'purchase_management'
-  | 'business_command_center';
+  | 'business_command_center'
+  | 'reinvestment_management';
 
 export interface AdminNavConfigItem {
   id: AdminTool;
@@ -387,6 +394,15 @@ export const SHARED_ADMIN_MENU_ITEMS: AdminNavConfigItem[] = [
     badgeBg: 'bg-gradient-to-r from-amber-600 to-indigo-700 text-white',
     categoryGroup: 'orders',
   },
+  {
+    id: 'reinvestment_management',
+    serialBn: '১৯',
+    label: 'Reinvestment Management (পুনরায় বিনিয়োগ ব্যবস্থাপনা)',
+    subtitleBn: 'বিক্রয় পুনঃবিনিয়োগ, মালিকের মূলধন, ক্রয় হিস্ট্রি ও লাভ-ক্ষতি বিশ্লেষণ',
+    icon: ArrowRightLeft,
+    badgeBg: 'bg-gradient-to-r from-teal-600 to-emerald-700 text-white',
+    categoryGroup: 'orders',
+  },
 ];
 
 interface SavedCampaign extends AICampaignOutput {
@@ -457,8 +473,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setActiveTool(toolId);
     try {
       const url = new URL(window.location.href);
-      if (toolId === 'business_command_center') {
-        url.searchParams.set('tool', 'business_command_center');
+      if (toolId === 'business_command_center' || toolId === 'reinvestment_management') {
+        url.searchParams.set('tool', toolId);
       } else {
         url.searchParams.delete('tool');
       }
@@ -489,6 +505,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   }, []);
   const [orders, setOrders] = useState<Order[]>([]);
   const [purchases, setPurchases] = useState<PurchaseRecord[]>(() => getPersistedPurchases());
+  const [reinvestments, setReinvestments] = useState<ReinvestmentRecord[]>(() =>
+    getPersistedReinvestments()
+  );
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [productSearch, setProductSearch] = useState('');
@@ -1543,6 +1562,32 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           // ignore
         }
 
+        // Load Reinvestments (#19 পুনরায় বিনিয়োগ ব্যবস্থাপনা)
+        try {
+          const reinvSnap = await getDocs(collection(db, 'reinvestments'));
+          const delReinvSet = getDeletedReinvestmentIds();
+          const reinvMap = new Map<string, ReinvestmentRecord>();
+          for (const locReinv of getPersistedReinvestments()) {
+            if (locReinv && locReinv.id && !delReinvSet.has(locReinv.id)) {
+              reinvMap.set(locReinv.id, locReinv);
+            }
+          }
+          reinvSnap.forEach((d) => {
+            const rData = d.data() as ReinvestmentRecord;
+            const rId = rData?.id || d.id;
+            if (rData && rId && !delReinvSet.has(rId)) {
+              reinvMap.set(rId, { ...rData, id: rId });
+            }
+          });
+          const mergedReinv = Array.from(reinvMap.values()).sort(
+            (a, b) => (b.createdAt || 0) - (a.createdAt || 0)
+          );
+          setReinvestments(mergedReinv);
+          syncReinvestmentsToLocalCache(mergedReinv);
+        } catch {
+          // ignore
+        }
+
         let loadedApiCreds: Record<string, any> = {};
         try {
           const srvCredRes = await fetch('/api/courier/credentials');
@@ -1719,6 +1764,55 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           }
         });
         setPurchases(Array.from(purMap.values()).sort((a, b) => b.createdAt - a.createdAt));
+      },
+      () => {
+        // ignore
+      }
+    );
+
+    // Realtime live listener for deleted reinvestments
+    const unsubDeletedReinvestments = onSnapshot(
+      doc(db, 'settings', 'deleted_reinvestments'),
+      (snap) => {
+        if (snap.exists() && Array.isArray(snap.data()?.ids)) {
+          const ids = snap.data()!.ids as string[];
+          if (ids.length > 0) {
+            addDeletedReinvestmentIds(ids);
+            const delSet = getDeletedReinvestmentIds();
+            setReinvestments((prev) => {
+              const filtered = prev.filter((r) => !delSet.has(r.id));
+              syncReinvestmentsToLocalCache(filtered);
+              return filtered;
+            });
+          }
+        }
+      },
+      () => {}
+    );
+
+    // Realtime live listener for reinvestments (#19 পুনরায় বিনিয়োগ ব্যবস্থাপনা)
+    const unsubReinvestments = onSnapshot(
+      collection(db, 'reinvestments'),
+      (snap) => {
+        const delReinvSet = getDeletedReinvestmentIds();
+        const reinvMap = new Map<string, ReinvestmentRecord>();
+        for (const locReinv of getPersistedReinvestments()) {
+          if (locReinv && locReinv.id && !delReinvSet.has(locReinv.id)) {
+            reinvMap.set(locReinv.id, locReinv);
+          }
+        }
+        snap.forEach((d) => {
+          const rData = d.data() as ReinvestmentRecord;
+          const rId = rData?.id || d.id;
+          if (rData && rId && !delReinvSet.has(rId)) {
+            reinvMap.set(rId, { ...rData, id: rId });
+          }
+        });
+        const mergedReinv = Array.from(reinvMap.values()).sort(
+          (a, b) => (b.createdAt || 0) - (a.createdAt || 0)
+        );
+        setReinvestments(mergedReinv);
+        syncReinvestmentsToLocalCache(mergedReinv);
       },
       () => {
         // ignore
@@ -1921,6 +2015,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       unsubDeletedOrders();
       unsubOrders();
       unsubPurchases();
+      unsubDeletedReinvestments();
+      unsubReinvestments();
       unsubLeads();
       unsubStoreContent();
     };
@@ -4139,6 +4235,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       security: authorizedEmails.length,
       purchase_management: purchases.length,
       business_command_center: orders.length,
+      reinvestment_management: reinvestments.length,
     };
     return SHARED_ADMIN_MENU_ITEMS.map((item) => ({
       ...item,
@@ -4154,13 +4251,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     siteContent.heroSlides.length,
     authorizedEmails.length,
     purchases.length,
+    reinvestments.length,
   ]);
 
   const filteredAdminNavList = useMemo(() => {
     if (navCategoryFilter === 'all') return adminNavList;
     return adminNavList.filter(
       (item) =>
-        item.categoryGroup === navCategoryFilter || item.id === 'business_command_center'
+        item.categoryGroup === navCategoryFilter ||
+        item.id === 'business_command_center' ||
+        item.id === 'reinvestment_management'
     );
   }, [adminNavList, navCategoryFilter]);
 
@@ -4276,6 +4376,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               <TrendingUp className="w-4 h-4 text-amber-700 shrink-0" />
               <span>📊 #১৮ বিজনেস কমান্ড সেন্টার</span>
             </button>
+
+            {/* Module #19 Quick Button: Reinvestment Management (পুনরায় বিনিয়োগ ব্যবস্থাপনা) */}
+            <button
+              onClick={() => handleSelectAdminTool('reinvestment_management')}
+              className={`px-4 py-2.5 text-xs sm:text-sm font-extrabold rounded-2xl border-2 flex items-center gap-2 shadow-xs transition-all cursor-pointer ${
+                activeTool === 'reinvestment_management'
+                  ? 'bg-gradient-to-r from-teal-600 to-emerald-700 text-white border-teal-800'
+                  : 'bg-teal-50 hover:bg-teal-100 text-teal-950 border-teal-300'
+              }`}
+              title="#১৯ Reinvestment Management (পুনরায় বিনিয়োগ ব্যবস্থাপনা)"
+            >
+              <ArrowRightLeft className="w-4 h-4 text-teal-700 shrink-0" />
+              <span>🔄 #১৯ Reinvestment Management (পুনরায় বিনিয়োগ)</span>
+            </button>
           </div>
         </div>
 
@@ -4323,7 +4437,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
           </div>
 
-          {/* Prominent Mobile Feature #18 Card at Top of Admin Menu + Quick Selector */}
+          {/* Prominent Mobile Feature #18 & #19 Cards at Top of Admin Menu + Quick Selector */}
           <div className="md:hidden space-y-2.5">
             <button
               type="button"
@@ -4368,9 +4482,52 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </span>
             </button>
 
+            <button
+              type="button"
+              onClick={() => handleSelectAdminTool('reinvestment_management')}
+              className={`w-full p-3.5 rounded-2xl border-2 text-left transition-all cursor-pointer flex items-center justify-between gap-3 shadow-sm ${
+                activeTool === 'reinvestment_management'
+                  ? 'bg-gradient-to-r from-teal-600 to-emerald-700 text-white border-teal-900 ring-2 ring-teal-300'
+                  : 'bg-gradient-to-r from-teal-50 via-emerald-50 to-cyan-50 text-stone-900 border-teal-400 hover:border-emerald-600'
+              }`}
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div
+                  className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 font-extrabold text-xs shadow-2xs ${
+                    activeTool === 'reinvestment_management'
+                      ? 'bg-white/20 text-white'
+                      : 'bg-gradient-to-r from-teal-600 to-emerald-700 text-white'
+                  }`}
+                >
+                  ১৯
+                </div>
+                <div className="min-w-0">
+                  <div className="text-xs font-extrabold leading-snug break-words">
+                    ১৯ • Reinvestment Management (পুনরায় বিনিয়োগ ব্যবস্থাপনা)
+                  </div>
+                  <div
+                    className={`text-[10.5px] font-medium leading-snug break-words mt-0.5 ${
+                      activeTool === 'reinvestment_management' ? 'text-teal-100' : 'text-stone-600'
+                    }`}
+                  >
+                    বিক্রয় পুনঃবিনিয়োগ, মালিকের মূলধন, ক্রয় হিস্ট্রি ও লাভ-ক্ষতি বিশ্লেষণ
+                  </div>
+                </div>
+              </div>
+              <span
+                className={`text-[11px] font-mono px-2.5 py-0.5 rounded-full font-extrabold shrink-0 ${
+                  activeTool === 'reinvestment_management'
+                    ? 'bg-white text-teal-800'
+                    : 'bg-white text-teal-800 border border-teal-300'
+                }`}
+              >
+                {reinvestments.length}
+              </span>
+            </button>
+
             <div>
               <label htmlFor="mobile-admin-module-select" className="block text-[11px] font-extrabold text-stone-700 mb-1.5">
-                📱 মোবাইল কুইক মেনু সিলেক্টর (১৮টি মডিউল):
+                📱 মোবাইল কুইক মেনু সিলেক্টর ({adminNavList.length}টি মডিউল):
               </label>
               <select
                 id="mobile-admin-module-select"
@@ -4387,11 +4544,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
           </div>
 
-          {/* Grid Layout: Responsive 2-column on mobile (9 exact pairs: 01-18) & 5-column on desktop */}
+          {/* Grid Layout: Responsive 2-column on mobile (01-19) & 5-column on desktop */}
           <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2.5 sm:gap-3">
             {filteredAdminNavList.map((item) => {
               const Icon = item.icon;
               const isActive = activeTool === item.id;
+              const isCard19 = item.id === 'reinvestment_management';
               return (
                 <button
                   key={item.id}
@@ -4400,6 +4558,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   data-admin-serial={item.serialBn}
                   onClick={() => handleSelectAdminTool(item.id)}
                   className={`p-3 sm:p-4 rounded-2xl flex flex-col items-start justify-between min-h-[100px] sm:min-h-[104px] w-full min-w-0 transition-all cursor-pointer text-left border-2 ${
+                    isCard19 ? 'col-span-2 sm:col-span-1' : ''
+                  } ${
                     isActive
                       ? 'bg-gradient-to-br from-[#E11D48] to-[#BE123C] text-white border-[#9F1239] shadow-md ring-2 ring-rose-300'
                       : 'bg-[#FFF7F9] hover:bg-[#FFE4E9]/80 text-stone-900 border-rose-200 hover:border-rose-400 shadow-2xs'
@@ -11442,6 +11602,30 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             }}
             onNavigateTool={(toolId) => setActiveTool(toolId as AdminTool)}
             showToast={(msg) => {
+              setFeedback(msg);
+              setTimeout(() => setFeedback(''), 5500);
+            }}
+          />
+        )}
+
+        {/* =====================================================================
+            TOOL 19: REINVESTMENT MANAGEMENT (#১৯ Reinvestment Management / পুনরায় বিনিয়োগ ব্যবস্থাপনা)
+           ===================================================================== */}
+        {activeTool === 'reinvestment_management' && (
+          <ReinvestmentManagementPanel
+            products={products}
+            orders={orders}
+            purchases={purchases}
+            courierReturns={courierReturns}
+            reinvestments={reinvestments}
+            onReinvestmentsChange={setReinvestments}
+            onPurchasesChange={setPurchases}
+            onUpdateProduct={(updatedProd) => onAddProduct(updatedProd)}
+            onRecordMovement={(mov) =>
+              setInventoryMovements((prev) => [mov, ...prev.filter((m) => m.id !== mov.id)])
+            }
+            onNavigateTool={(toolId) => setActiveTool(toolId as AdminTool)}
+            onFeedback={(msg) => {
               setFeedback(msg);
               setTimeout(() => setFeedback(''), 5500);
             }}

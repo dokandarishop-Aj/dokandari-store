@@ -155,10 +155,10 @@ export const MenuDrawer: React.FC<MenuDrawerProps> = ({
             <div className="flex items-center justify-between px-1">
               <span className="text-[10px] font-extrabold uppercase tracking-wider text-rose-700 flex items-center gap-1.5">
                 <LayoutDashboard className="w-3.5 h-3.5 text-[#E11D48]" />
-                <span>অ্যাডমিন মেনু ও ফিচারসমূহ (মোট ১৮টি মডিউল)</span>
+                <span>অ্যাডমিন মেনু ও ফিচারসমূহ (মোট {SHARED_ADMIN_MENU_ITEMS.length}টি মডিউল)</span>
               </span>
               <span className="px-2 py-0.5 rounded-full bg-rose-100 text-[#E11D48] text-[9px] font-extrabold">
-                ০১–১৮
+                ০১–১৯
               </span>
             </div>
 
@@ -202,6 +202,7 @@ export const MenuDrawer: React.FC<MenuDrawerProps> = ({
               {SHARED_ADMIN_MENU_ITEMS.map((item) => {
                 const isSelected = activeAdminTool === item.id;
                 const isFeature18 = item.id === 'business_command_center';
+                const isFeature19 = item.id === 'reinvestment_management';
                 return (
                   <button
                     key={item.id}
@@ -224,11 +225,15 @@ export const MenuDrawer: React.FC<MenuDrawerProps> = ({
                       }
                       onClose();
                     }}
-                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-1 col-span-1 ${
+                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-1 ${
+                      isFeature19 ? 'col-span-2' : 'col-span-1'
+                    } ${
                       isSelected
                         ? 'bg-[#E11D48] text-white border-[#E11D48] shadow-sm ring-2 ring-rose-300'
                         : isFeature18
                         ? 'bg-gradient-to-r from-amber-50 via-rose-50 to-indigo-50 border-amber-300 text-stone-900 hover:border-rose-400'
+                        : isFeature19
+                        ? 'bg-gradient-to-r from-teal-50 via-emerald-50 to-cyan-50 border-teal-300 text-stone-900 hover:border-teal-500'
                         : 'bg-white hover:bg-rose-50/60 border-stone-200/90 text-stone-800'
                     }`}
                   >

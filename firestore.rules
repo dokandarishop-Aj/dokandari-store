@@ -70,9 +70,15 @@ service cloud.firestore {
       allow create, update, delete: if isValidId(purchaseId);
     }
 
+    match /reinvestments/{reinvestmentId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(reinvestmentId);
+    }
+
     match /ugc_reviews/{reviewId} {
       allow read: if true;
       allow create, update, delete: if isValidId(reviewId);
     }
   }
 }
+

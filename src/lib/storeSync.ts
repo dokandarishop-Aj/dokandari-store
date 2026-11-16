@@ -21,6 +21,7 @@ import {
   OrderReturnCondition,
   CustomerUgcCard,
   PurchaseRecord,
+  ReinvestmentRecord,
   CourierReturn,
   InventoryMovement,
   OperatingExpense,
@@ -39,6 +40,8 @@ const LS_ORDERS_BACKUP_KEY = 'dokandari_orders_backup_v1';
 const LS_DELETED_ORDER_IDS_KEY = 'dokandari_deleted_order_ids_v1';
 const LS_PURCHASES_BACKUP_KEY = 'dokandari_purchases_backup_v1';
 const LS_DELETED_PURCHASE_IDS_KEY = 'dokandari_deleted_purchase_ids_v1';
+const LS_REINVESTMENTS_BACKUP_KEY = 'dokandari_reinvestments_backup_v1';
+const LS_DELETED_REINVESTMENT_IDS_KEY = 'dokandari_deleted_reinvestment_ids_v1';
 const LS_COURIER_RETURNS_BACKUP_KEY = 'dokandari_courier_returns_backup_v1';
 const LS_DELETED_RETURN_IDS_KEY = 'dokandari_deleted_return_ids_v1';
 const LS_CUSTOMER_UGC_KEY = 'dokandari_customer_ugc_v1';
@@ -4098,6 +4101,118 @@ export async function deletePurchasePersisted(purchaseId: string): Promise<void>
     await deleteDoc(doc(db, 'purchases', purchaseId));
   } catch (err) {
     console.warn('Firestore purchase delete note:', err);
+  }
+}
+
+/**
+ * Reinvestment Management (#19 পুনরায় বিনিয়োগ ব্যবস্থাপনা) Persistence Helpers
+ */
+export function getDeletedReinvestmentIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(LS_DELETED_REINVESTMENT_IDS_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    return new Set(Array.isArray(parsed) ? parsed : []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function addDeletedReinvestmentIds(ids: string[]): void {
+  try {
+    const delSet = getDeletedReinvestmentIds();
+    for (const id of ids) {
+      const clean = String(id || '').trim();
+      if (clean) delSet.add(clean);
+    }
+    localStorage.setItem(LS_DELETED_REINVESTMENT_IDS_KEY, JSON.stringify(Array.from(delSet)));
+  } catch {
+    // ignore
+  }
+}
+
+export function getPersistedReinvestments(): ReinvestmentRecord[] {
+  try {
+    const deleted = getDeletedReinvestmentIds();
+    const raw = localStorage.getItem(LS_REINVESTMENTS_BACKUP_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((r) => r && r.id && !deleted.has(r.id));
+  } catch {
+    return [];
+  }
+}
+
+export function syncReinvestmentsToLocalCache(records: ReinvestmentRecord[]): void {
+  try {
+    const deleted = getDeletedReinvestmentIds();
+    const cleanList = (Array.isArray(records) ? records : []).filter(
+      (r) => r && r.id && !deleted.has(r.id)
+    );
+    localStorage.setItem(LS_REINVESTMENTS_BACKUP_KEY, JSON.stringify(cleanList));
+  } catch {
+    // ignore
+  }
+}
+
+export async function saveReinvestmentPersisted(
+  record: ReinvestmentRecord
+): Promise<ReinvestmentRecord> {
+  const clean = sanitizeForFirestore({
+    ...record,
+    updatedAt: Date.now(),
+  });
+
+  try {
+    const delSet = getDeletedReinvestmentIds();
+    if (delSet.has(clean.id)) {
+      delSet.delete(clean.id);
+      localStorage.setItem(LS_DELETED_REINVESTMENT_IDS_KEY, JSON.stringify(Array.from(delSet)));
+    }
+    const existing = getPersistedReinvestments();
+    const next = [clean, ...existing.filter((r) => r.id !== clean.id)].sort(
+      (a, b) => (b.createdAt || 0) - (a.createdAt || 0)
+    );
+    localStorage.setItem(LS_REINVESTMENTS_BACKUP_KEY, JSON.stringify(next));
+  } catch (e) {
+    console.warn('localStorage reinvestment save note:', e);
+  }
+
+  try {
+    await setDoc(doc(db, 'reinvestments', clean.id), clean, { merge: true });
+  } catch (err) {
+    console.warn('Firestore reinvestment save note:', err);
+  }
+
+  return clean;
+}
+
+export async function deleteReinvestmentPersisted(reinvestmentId: string): Promise<void> {
+  if (!reinvestmentId) return;
+  try {
+    const delSet = getDeletedReinvestmentIds();
+    delSet.add(reinvestmentId);
+    const delArray = Array.from(delSet);
+    localStorage.setItem(LS_DELETED_REINVESTMENT_IDS_KEY, JSON.stringify(delArray));
+
+    const existing = getPersistedReinvestments();
+    const next = existing.filter((r) => r.id !== reinvestmentId);
+    localStorage.setItem(LS_REINVESTMENTS_BACKUP_KEY, JSON.stringify(next));
+
+    await setDoc(
+      doc(db, 'settings', 'deleted_reinvestments'),
+      { ids: delArray, updatedAt: Date.now() },
+      { merge: true }
+    ).catch(() => null);
+  } catch {
+    // ignore
+  }
+
+  try {
+    await deleteDoc(doc(db, 'reinvestments', reinvestmentId));
+  } catch (err) {
+    console.warn('Firestore reinvestment delete note:', err);
   }
 }
 

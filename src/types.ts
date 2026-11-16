@@ -495,3 +495,40 @@ export interface PurchaseRecord {
   updatedAt: number;
 }
 
+export type ReinvestmentSourceType =
+  | 'sales_reinvestment'
+  | 'owner_investment'
+  | 'profit_reinvestment';
+
+export type ReinvestmentCategoryType =
+  | 'product_purchase'
+  | 'stock_restock'
+  | 'marketing_ads'
+  | 'packaging_logistics'
+  | 'equipment_operations'
+  | 'other_growth';
+
+export type ReinvestmentStatus = 'completed' | 'pending' | 'cancelled';
+
+export interface ReinvestmentRecord {
+  id: string;
+  date: string; // YYYY-MM-DD
+  title: string;
+  sourceType: ReinvestmentSourceType;
+  category: ReinvestmentCategoryType;
+  amount: number;
+  investorName: string;
+  paymentMethod: PurchasePaymentMethod;
+  linkedProductId?: string;
+  linkedProductName?: string;
+  linkedPurchaseId?: string;
+  quantityAdded?: number;
+  unitCost?: number;
+  expectedRoiPercent?: number;
+  status: ReinvestmentStatus;
+  stockApplied?: boolean;
+  notes: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
