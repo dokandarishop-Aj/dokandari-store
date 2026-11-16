@@ -281,6 +281,7 @@ export interface Order {
   courierName?: string;
   consignmentId?: string;
   courierStatus?: string;
+  courierBookingStatus?: string;
   customerScreenshot?: string;
   pixelTracking?: PixelTrackingInfo;
   // Financial & Automation Engine fields
@@ -293,8 +294,14 @@ export interface Order {
   returnCondition?: OrderReturnCondition;
   netOrderProfit?: number;
   stockDeducted?: boolean;
+  stockRestoredOnReturn?: boolean;
   manualFinancialOverride?: boolean;
   adminNotes?: string;
+  // Courier Return Automation & Settlement fields
+  actualDeliveryCharge?: number;
+  actualReturnCharge?: number;
+  chargeVerificationStatus?: ExpenseVerificationStatus;
+  returnIdempotencyKey?: string;
 }
 
 export type ExpenseCategoryType =
@@ -413,6 +420,39 @@ export type ReturnStatus =
 
 export type ProductCondition = 'sellable' | 'damaged';
 
+export type ExpenseVerificationStatus = 'verified' | 'pending_verification';
+
+export interface CourierReturnAuditEntry {
+  id: string;
+  returnId?: string;
+  timestamp: number;
+  action:
+    | 'api_status_sync'
+    | 'webhook_received'
+    | 'manual_entry'
+    | 'manual_created'
+    | 'manual_updated'
+    | 'status_resync'
+    | 'auto_sync_created'
+    | 'expense_edited'
+    | 'charge_verified'
+    | 'stock_restocked'
+    | 'damage_recorded'
+    | 'duplicate_blocked'
+    | 'deleted';
+  actor: string;
+  orderId: string;
+  consignmentId?: string;
+  provider?: string;
+  idempotencyKey?: string;
+  previousValue?: string;
+  newValue?: string;
+  previousValues?: Record<string, any>;
+  newValues?: Record<string, any>;
+  summary?: string;
+  details?: string;
+}
+
 export interface CourierReturn {
   id: string;
   orderId: string;
@@ -425,7 +465,16 @@ export interface CourierReturn {
   quantity: number;
   courierName: string;
   courierTracking?: string;
-  returnCharge: number;
+  consignmentId?: string;
+  provider?: 'Steadfast' | 'Pathao' | 'Other' | 'steadfast' | 'pathao' | 'other' | string;
+  idempotencyKey?: string;
+  deliveryCharge?: number;
+  returnCharge: number; // Total courier expense (or return charge when combined); for Steadfast 0 return fee -> only actual deliveryCharge
+  actualReturnFee?: number; // Explicit courier return fee (0 for Steadfast when return fee is 0)
+  totalCourierExpense?: number;
+  chargeVerificationStatus?: ExpenseVerificationStatus;
+  rawCourierStatus?: string;
+  lastSyncedAt?: number;
   returnReason: string;
   productCondition: ProductCondition;
   damageReason?: string;
@@ -435,6 +484,7 @@ export interface CourierReturn {
   expenseRecorded: boolean;
   returnDate: string; // YYYY-MM-DD
   notes?: string;
+  auditLog?: CourierReturnAuditEntry[];
   createdAt: number;
   updatedAt: number;
 }

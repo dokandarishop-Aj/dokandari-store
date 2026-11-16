@@ -30,6 +30,11 @@ service cloud.firestore {
       allow create, update, delete: if isValidId(returnId);
     }
 
+    match /courier_return_audit_logs/{auditId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(auditId);
+    }
+
     match /inventory_movements/{movementId} {
       allow read: if true;
       allow create, update, delete: if isValidId(movementId);

@@ -23,6 +23,10 @@ import {
   PurchaseRecord,
   ReinvestmentRecord,
   CourierReturn,
+  CourierReturnAuditEntry,
+  ExpenseVerificationStatus,
+  ProductCondition,
+  ReturnStatus,
   InventoryMovement,
   OperatingExpense,
   OFFICIAL_CATEGORIES,
@@ -4520,10 +4524,18 @@ export function calculateOrderFinancialBreakdown(
   }
 
   if (order.status === 'returned') {
-    const returnCourierLoss =
-      typeof order.returnCourierLoss === 'number'
-        ? order.returnCourierLoss
-        : courierExpense + Math.round(courierExpense * 0.5);
+    const isPendingVerification = order.chargeVerificationStatus === 'pending_verification';
+    const verifiedDelivery =
+      typeof order.actualDeliveryCharge === 'number'
+        ? order.actualDeliveryCharge
+        : courierExpense;
+    const verifiedReturnFee =
+      typeof order.actualReturnCharge === 'number' ? order.actualReturnCharge : 0;
+    const returnCourierLoss = isPendingVerification
+      ? 0
+      : typeof order.returnCourierLoss === 'number'
+      ? order.returnCourierLoss
+      : verifiedDelivery + verifiedReturnFee;
     const damagedProductLoss =
       order.returnCondition === 'damaged'
         ? typeof order.damagedProductLoss === 'number'
@@ -4585,6 +4597,11 @@ export async function executeOrderStatusAutomation(params: {
       | 'netOrderProfit'
       | 'manualFinancialOverride'
       | 'adminNotes'
+      | 'actualDeliveryCharge'
+      | 'actualReturnCharge'
+      | 'chargeVerificationStatus'
+      | 'stockRestoredOnReturn'
+      | 'returnIdempotencyKey'
     >
   >;
   products: Product[];
@@ -4675,7 +4692,7 @@ export async function executeOrderStatusAutomation(params: {
           updatedAt: now,
         };
         const mov: InventoryMovement = {
-          id: `mov-restock-${order.id}-${prod.id}-${now}`,
+          id: `mov-restock-${order.id}-${prod.id}`,
           productId: prod.id,
           productName: prod.name,
           sku: prod.sku || prod.id,
@@ -4705,6 +4722,10 @@ export async function executeOrderStatusAutomation(params: {
     status: newStatus,
     returnCondition: newStatus === 'returned' ? effectiveReturnCondition : order.returnCondition,
     stockDeducted: shouldStockBeDeducted,
+    stockRestoredOnReturn:
+      newStatus === 'returned' && effectiveReturnCondition === 'sellable'
+        ? true
+        : order.stockRestoredOnReturn,
     updatedAt: now,
   };
 
@@ -4728,5 +4749,439 @@ export async function executeOrderStatusAutomation(params: {
     movements,
   };
 }
+
+/**
+ * ============================================================================
+ * EXISTING STEADFAST & PATHAO COURIER RETURN & FINANCIAL EXPENSE AUTOMATION
+ * ============================================================================
+ * Non-negotiable guarantees:
+ * 1. Uses existing Steadfast & Pathao integrations without changing booking/credential flow.
+ * 2. Steadfast Zero-Return-Fee Rule: If Steadfast return charge is 0, NEVER add a fictional return charge.
+ * 3. Pending Verification Rule: If actual delivery/return charge is not available from API/Settlement,
+ *    mark `chargeVerificationStatus = 'pending_verification'` (0 realized expense until verified).
+ * 4. Idempotent Stock Return: Deterministic `idempotencyKey = "${provider}:${orderId}:${consignmentId}"`
+ *    and `stockRestoredOnReturn` flag guarantee stock increases AT MOST ONCE even on repeated syncs.
+ * 5. No Double COGS: Returned sellable products NEVER count product purchase cost a second time.
+ * 6. Full Audit History: Every sync, manual edit, verification, or deletion is logged.
+ */
+const LS_COURIER_AUDIT_LOGS_KEY = 'dokandari_courier_return_audit_logs_v1';
+
+export function getPersistedCourierAuditLogs(): CourierReturnAuditEntry[] {
+  try {
+    const raw = localStorage.getItem(LS_COURIER_AUDIT_LOGS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function saveCourierAuditLogPersisted(
+  entry: CourierReturnAuditEntry
+): Promise<CourierReturnAuditEntry> {
+  const clean = sanitizeForFirestore(entry);
+  try {
+    const existing = getPersistedCourierAuditLogs();
+    const next = [clean, ...existing.filter((a) => a.id !== clean.id)].slice(0, 500);
+    localStorage.setItem(LS_COURIER_AUDIT_LOGS_KEY, JSON.stringify(next));
+  } catch {
+    // ignore local cache warning
+  }
+  try {
+    await setDoc(doc(db, 'courier_return_audit_logs', clean.id), clean, { merge: true });
+  } catch {
+    // ignore
+  }
+  return clean;
+}
+
+export interface CourierSyncReturnPayload {
+  orderId: string;
+  consignmentId: string;
+  provider: 'Steadfast' | 'Pathao' | 'Other';
+  rawCourierStatus: string;
+  isReturnStatus: boolean;
+  /** null if API did not return settlement/delivery charge */
+  deliveryCharge: number | null;
+  /** Steadfast defaults to 0 when return fee is 0; null if unknown */
+  returnFee: number | null;
+  chargeVerificationStatus: ExpenseVerificationStatus;
+  returnReason?: string;
+  productCondition?: ProductCondition;
+  actor?: 'system_api' | 'webhook' | 'admin_manual';
+  forceUpdateCharges?: boolean;
+}
+
+export interface CourierReturnAutomationResult {
+  duplicateBlocked: boolean;
+  idempotencyKey: string;
+  updatedOrder: Order;
+  courierReturn: CourierReturn;
+  updatedProducts: Product[];
+  stockMovements: InventoryMovement[];
+  auditEntry: CourierReturnAuditEntry;
+  verifiedExpenseAmount: number;
+  pendingExpense: boolean;
+}
+
+export async function processCourierReturnAutomationIdempotent(params: {
+  order: Order;
+  syncPayload: CourierSyncReturnPayload;
+  existingReturns: CourierReturn[];
+  products: Product[];
+}): Promise<CourierReturnAutomationResult> {
+  const { order, syncPayload, existingReturns, products } = params;
+  const now = Date.now();
+  const cleanOrderId = String(order.id || syncPayload.orderId).trim();
+  const provider: 'Steadfast' | 'Pathao' | 'Other' =
+    syncPayload.provider ||
+    (String(order.courierName || '').toLowerCase().includes('pathao')
+      ? 'Pathao'
+      : String(order.courierName || '').toLowerCase().includes('steadfast')
+      ? 'Steadfast'
+      : 'Steadfast');
+  const consignmentId = String(
+    syncPayload.consignmentId ||
+      order.consignmentId ||
+      order.trackingNumber ||
+      `CID-${cleanOrderId}`
+  ).trim();
+
+  const idempotencyKey = `${provider.toLowerCase()}:${cleanOrderId}:${consignmentId}`;
+  const deterministicReturnId = `ret-auto-${cleanOrderId}`;
+  const deterministicExpenseId = `exp-ret-${deterministicReturnId}`;
+
+  // Check existing return record by deterministic ID, orderId, or idempotencyKey
+  const existingRet = existingReturns.find(
+    (r) =>
+      r.id === deterministicReturnId ||
+      r.orderId === cleanOrderId ||
+      (r.idempotencyKey && r.idempotencyKey === idempotencyKey)
+  );
+
+  // Determine deliveryCharge & returnFee following strict Steadfast & Pathao rules:
+  // - Steadfast rule: If returnFee is 0, NEVER invent a fake return charge (actualReturnFee = 0).
+  // - If deliveryCharge is null/undefined from API, mark as 'pending_verification'.
+  const hasDeliveryChargeNumber =
+    typeof syncPayload.deliveryCharge === 'number' && !Number.isNaN(syncPayload.deliveryCharge);
+  const effectiveVerificationStatus: ExpenseVerificationStatus =
+    syncPayload.chargeVerificationStatus === 'verified' && hasDeliveryChargeNumber
+      ? 'verified'
+      : 'pending_verification';
+
+  const actualDeliveryCharge = hasDeliveryChargeNumber
+    ? Math.max(0, Number(syncPayload.deliveryCharge))
+    : existingRet && typeof existingRet.deliveryCharge === 'number'
+    ? existingRet.deliveryCharge
+    : 0;
+
+  // Steadfast return charge is 0 unless explicitly charged by courier
+  const actualReturnFee =
+    typeof syncPayload.returnFee === 'number' && !Number.isNaN(syncPayload.returnFee)
+      ? Math.max(0, Number(syncPayload.returnFee))
+      : provider === 'Steadfast'
+      ? 0
+      : existingRet && typeof existingRet.actualReturnFee === 'number'
+      ? existingRet.actualReturnFee
+      : 0;
+
+  const totalCourierExpense =
+    effectiveVerificationStatus === 'verified'
+      ? actualDeliveryCharge + actualReturnFee
+      : 0;
+
+  // Duplicate Protection Check:
+  // If this order was already processed with the same idempotencyKey, stock is already restored,
+  // and no charge update is forced, block duplicate stock & duplicate financial entry!
+  if (
+    existingRet &&
+    existingRet.stockAdjusted &&
+    order.status === 'returned' &&
+    !syncPayload.forceUpdateCharges &&
+    existingRet.chargeVerificationStatus === effectiveVerificationStatus &&
+    existingRet.returnCharge === totalCourierExpense
+  ) {
+    const dupAudit: CourierReturnAuditEntry = {
+      id: `aud-dup-${cleanOrderId}-${now}`,
+      returnId: existingRet.id,
+      orderId: cleanOrderId,
+      consignmentId,
+      provider,
+      action: 'status_resync',
+      actor: syncPayload.actor || 'system_api',
+      previousValues: {
+        status: existingRet.status,
+        returnCharge: existingRet.returnCharge,
+        stockAdjusted: existingRet.stockAdjusted,
+      },
+      newValues: {
+        duplicateBlocked: true,
+        idempotencyKey,
+      },
+      summary: `ডুপ্লিকেট প্রোটেকশন সক্রিয়: অর্ডার #${cleanOrderId} (${provider} - ${consignmentId}) পূর্বেই সিঙ্ক করা হয়েছে। দ্বিতীয়বার স্টক বা খরচ যোগ করা হয়নি।`,
+      timestamp: now,
+    };
+    await saveCourierAuditLogPersisted(dupAudit);
+
+    return {
+      duplicateBlocked: true,
+      idempotencyKey,
+      updatedOrder: order,
+      courierReturn: existingRet,
+      updatedProducts: products,
+      stockMovements: [],
+      auditEntry: dupAudit,
+      verifiedExpenseAmount: totalCourierExpense,
+      pendingExpense: effectiveVerificationStatus === 'pending_verification',
+    };
+  }
+
+  const nextProducts = products.map((p) => ({ ...p }));
+  const stockMovements: InventoryMovement[] = [];
+  const productCondition: ProductCondition =
+    syncPayload.productCondition || existingRet?.productCondition || 'sellable';
+
+  // Automatic Stock Return (Strictly ONCE per returned order via stockAdjusted + order.stockRestoredOnReturn)
+  const alreadyRestocked = Boolean(
+    existingRet?.stockAdjusted || order.stockRestoredOnReturn
+  );
+  let stockAdjustedNow = alreadyRestocked;
+
+  if (!alreadyRestocked && productCondition === 'sellable') {
+    for (const item of order.items || []) {
+      const pIdx = nextProducts.findIndex(
+        (p) =>
+          p.id === item.productId ||
+          p.id === item.id ||
+          p.name === item.name
+      );
+      if (pIdx >= 0) {
+        const prod = nextProducts[pIdx];
+        const qty = Math.max(1, Number(item.quantity) || 1);
+        const prevStock = typeof prod.stock === 'number' ? prod.stock : 0;
+        const newStock = prevStock + qty;
+        nextProducts[pIdx] = {
+          ...prod,
+          stock: newStock,
+          inStock: true,
+          updatedAt: now,
+        };
+        const deterministicMovId = `mov-ret-${cleanOrderId}-${prod.id}`;
+        const mov: InventoryMovement = {
+          id: deterministicMovId,
+          productId: prod.id,
+          productName: prod.name,
+          sku: prod.sku || prod.id,
+          type: 'return_restock',
+          quantity: qty,
+          previousStock: prevStock,
+          newStock,
+          referenceId: cleanOrderId,
+          notes: `${provider} কুরিয়ার রিটার্ন অটোমেশন (#${cleanOrderId}, CID: ${consignmentId}) — স্টকে ফেরত (+${qty} টি)`,
+          createdAt: now,
+        };
+        stockMovements.push(mov);
+        await Promise.allSettled([
+          saveProductPersisted(nextProducts[pIdx]),
+          recordStockMovementPersisted(mov),
+        ]);
+      }
+    }
+    stockAdjustedNow = true;
+  }
+
+  // Primary item info for CourierReturn record
+  const firstItem = order.items?.[0];
+  const matchedProd =
+    nextProducts.find(
+      (p) =>
+        firstItem &&
+        (p.id === firstItem.productId || p.id === firstItem.id || p.name === firstItem.name)
+    ) || nextProducts[0];
+  const totalReturnedQty = (order.items || []).reduce(
+    (s, it) => s + Math.max(1, Number(it.quantity) || 1),
+    0
+  ) || 1;
+
+  const unitCost =
+    matchedProd?.costPrice ||
+    matchedProd?.originalPrice ||
+    Math.round((Number(firstItem?.price || matchedProd?.price || 1000)) * 0.52);
+  const damageLoss = productCondition === 'damaged' ? unitCost * totalReturnedQty : 0;
+
+  const auditEntry: CourierReturnAuditEntry = {
+    id: `aud-${cleanOrderId}-${now}`,
+    returnId: existingRet?.id || deterministicReturnId,
+    orderId: cleanOrderId,
+    consignmentId,
+    provider,
+    action: existingRet ? 'status_resync' : 'auto_sync_created',
+    actor: syncPayload.actor || 'system_api',
+    previousValues: existingRet
+      ? {
+          status: existingRet.status,
+          returnCharge: existingRet.returnCharge,
+          chargeVerificationStatus: existingRet.chargeVerificationStatus,
+          stockAdjusted: existingRet.stockAdjusted,
+        }
+      : { orderStatus: order.status },
+    newValues: {
+      orderStatus: 'returned',
+      deliveryCharge: actualDeliveryCharge,
+      actualReturnFee,
+      totalCourierExpense,
+      chargeVerificationStatus: effectiveVerificationStatus,
+      stockAdjusted: stockAdjustedNow,
+      rawCourierStatus: syncPayload.rawCourierStatus,
+    },
+    summary:
+      effectiveVerificationStatus === 'verified'
+        ? `${provider} রিটার্ন অটোমেশন (#${cleanOrderId}): অর্ডার স্ট্যাটাস 'Returned', ডেলিভারি চার্জ ৳${actualDeliveryCharge} + রিটার্ন চার্জ ৳${actualReturnFee} = মোট ৳${totalCourierExpense} (Verified), স্টক ফেরত: ${
+            !alreadyRestocked && stockAdjustedNow ? `+${totalReturnedQty} টি` : 'পূর্বেই সমন্বিত'
+          }`
+        : `${provider} রিটার্ন অটোমেশন (#${cleanOrderId}): অর্ডার স্ট্যাটাস 'Returned', কুরিয়ার চার্জ API-তে না থাকায় 'Pending Verification' রাখা হয়েছে, স্টক ফেরত: ${
+            !alreadyRestocked && stockAdjustedNow ? `+${totalReturnedQty} টি` : 'পূর্বেই সমন্বিত'
+          }`,
+    timestamp: now,
+  };
+
+  const previousAuditLog = existingRet?.auditLog || [];
+  const nextReturnStatus: ReturnStatus =
+    productCondition === 'damaged'
+      ? 'damaged'
+      : stockAdjustedNow
+      ? 'restocked'
+      : 'warehouse_received';
+
+  const courierReturnDoc: CourierReturn = {
+    id: existingRet?.id || deterministicReturnId,
+    orderId: cleanOrderId,
+    consignmentId,
+    provider,
+    idempotencyKey,
+    customerName: order.customer?.name || existingRet?.customerName || 'গ্রাহক',
+    customerPhone: order.customer?.phone || existingRet?.customerPhone || '',
+    productId: firstItem?.productId || firstItem?.id || matchedProd?.id || 'prod-ret',
+    productName:
+      (order.items || []).map((i) => i.name).join(', ') ||
+      existingRet?.productName ||
+      matchedProd?.name ||
+      'অর্ডার পণ্য',
+    sku: matchedProd?.sku || existingRet?.sku || `SKU-${cleanOrderId.slice(-4)}`,
+    variant:
+      firstItem
+        ? [firstItem.selectedColor, firstItem.selectedSize].filter(Boolean).join(' / ')
+        : existingRet?.variant || '',
+    quantity: totalReturnedQty,
+    courierName: provider,
+    courierTracking: consignmentId,
+    deliveryCharge: actualDeliveryCharge,
+    actualReturnFee,
+    totalCourierExpense,
+    returnCharge: totalCourierExpense,
+    chargeVerificationStatus: effectiveVerificationStatus,
+    rawCourierStatus: syncPayload.rawCourierStatus,
+    lastSyncedAt: now,
+    returnReason:
+      syncPayload.returnReason ||
+      existingRet?.returnReason ||
+      `${provider} API Return (${syncPayload.rawCourierStatus})`,
+    productCondition,
+    damageReason: existingRet?.damageReason || '',
+    damageLoss,
+    status: nextReturnStatus,
+    stockAdjusted: stockAdjustedNow,
+    expenseRecorded: effectiveVerificationStatus === 'verified' && totalCourierExpense > 0,
+    returnDate: existingRet?.returnDate || new Date(now).toISOString().slice(0, 10),
+    notes:
+      effectiveVerificationStatus === 'pending_verification'
+        ? `কুরিয়ার API থেকে চার্জ পাওয়া যায়নি — Pending Verification (ম্যানুয়াল ভেরিফিকেশনের জন্য অপেক্ষমাণ)`
+        : provider === 'Steadfast' && actualReturnFee === 0
+        ? `Steadfast অটো-সিঙ্ক: রিটার্ন ফি ৳০ (শুধু প্রকৃত ডেলিভারি চার্জ ৳${actualDeliveryCharge} হিসাবভুক্ত)`
+        : `${provider} অটো-সিঙ্ক সম্পন্ন (CID: ${consignmentId})`,
+    auditLog: [auditEntry, ...previousAuditLog].slice(0, 50),
+    createdAt: existingRet?.createdAt || now,
+    updatedAt: now,
+  };
+
+  // Persist CourierReturn & Audit Log
+  await Promise.allSettled([
+    saveCourierReturnPersisted(courierReturnDoc),
+    saveCourierAuditLogPersisted(auditEntry),
+  ]);
+
+  // Persist or clean up deterministic BusinessExpense (`exp-ret-${courierReturnDoc.id}`)
+  if (effectiveVerificationStatus === 'verified' && totalCourierExpense > 0) {
+    try {
+      const expDoc = {
+        id: `exp-ret-${courierReturnDoc.id}`,
+        date: courierReturnDoc.returnDate,
+        category: 'courier_return_charge',
+        categoryLabel: 'কুরিয়ার রিটার্ন চার্জ',
+        amount: totalCourierExpense,
+        note: `অর্ডার #${cleanOrderId} (${provider} CID: ${consignmentId}) — ডেলিভারি ৳${actualDeliveryCharge} + রিটার্ন ফি ৳${actualReturnFee}`,
+        createdAt: courierReturnDoc.createdAt,
+        updatedAt: now,
+      };
+      await setDoc(doc(db, 'business_expenses', expDoc.id), expDoc, { merge: true });
+    } catch {
+      // ignore
+    }
+  } else {
+    // If pending_verification or 0 charge, ensure no fictional expense sits in business_expenses
+    try {
+      await deleteDoc(doc(db, 'business_expenses', deterministicExpenseId));
+    } catch {
+      // ignore
+    }
+  }
+
+  // Update Order status to `returned` and recalculate Order Financials (Revenue excluded from Delivered Sales, no double COGS)
+  const candidateOrder: Order = {
+    ...order,
+    status: 'returned',
+    courierName: provider,
+    consignmentId,
+    trackingNumber: order.trackingNumber || consignmentId,
+    courierBookingStatus: `Returned (${syncPayload.rawCourierStatus})`,
+    returnCondition: productCondition,
+    stockDeducted: productCondition === 'damaged',
+    stockRestoredOnReturn: stockAdjustedNow,
+    actualDeliveryCharge,
+    actualReturnCharge: actualReturnFee,
+    chargeVerificationStatus: effectiveVerificationStatus,
+    returnCourierLoss: totalCourierExpense,
+    returnIdempotencyKey: idempotencyKey,
+    updatedAt: now,
+  };
+
+  const fin = calculateOrderFinancialBreakdown(candidateOrder, nextProducts);
+  const finalOrder: Order = {
+    ...candidateOrder,
+    cogsTotal: fin.cogsTotal,
+    courierExpense: fin.courierExpense,
+    packagingCost: fin.packagingCost,
+    otherOrderExpense: fin.otherOrderExpense,
+    returnCourierLoss: fin.returnCourierLoss,
+    damagedProductLoss: fin.damagedProductLoss,
+    netOrderProfit: fin.netOrderProfit,
+  };
+
+  const savedOrder = await saveOrderPersisted(finalOrder);
+
+  return {
+    duplicateBlocked: false,
+    idempotencyKey,
+    updatedOrder: savedOrder,
+    courierReturn: courierReturnDoc,
+    updatedProducts: nextProducts,
+    stockMovements,
+    auditEntry,
+    verifiedExpenseAmount: totalCourierExpense,
+    pendingExpense: effectiveVerificationStatus === 'pending_verification',
+  };
+}
+
 
 

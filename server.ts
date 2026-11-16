@@ -7310,6 +7310,430 @@ Return strict JSON with 100% complete, rich Bengali product details:
     }
   });
 
+  // ============================================================================
+  // EXISTING STEADFAST & PATHAO COURIER RETURN STATUS & EXPENSE SYNC AUTOMATION
+  // Uses existing Steadfast & Pathao credentials/tokens without modifying booking
+  // ============================================================================
+  const processedCourierSyncKeys = new Map<
+    string,
+    { count: number; firstSyncedAt: number; lastSyncedAt: number; payload: any }
+  >();
+  const recentCourierWebhookEvents: any[] = [];
+
+  const STEADFAST_RETURN_STATUSES = new Set([
+    'returned',
+    'cancelled',
+    'partial_delivered',
+    'return_in_transit',
+    'pending_return',
+    'returned_to_merchant',
+    'returned_approval_pending',
+    'cancelled_approval_pending',
+    'unknown_return',
+  ]);
+
+  const PATHAO_RETURN_STATUSES = new Set([
+    'return',
+    'returned',
+    'return_ongoing',
+    'delivery_failed',
+    'partial_delivery',
+    'returned_to_merchant',
+    'pickup_cancelled',
+    'cancelled',
+  ]);
+
+  async function getExistingPathaoAccessToken(mergedCreds: Record<string, string>): Promise<string> {
+    if (cachedPathaoToken && Date.now() < cachedPathaoToken.expiresAt) {
+      return cachedPathaoToken.token;
+    }
+    const clientId = (mergedCreds.pathaoClientId || process.env.PATHAO_CLIENT_ID || '').trim();
+    const clientSecret = (mergedCreds.pathaoClientSecret || process.env.PATHAO_CLIENT_SECRET || '').trim();
+    const username = (mergedCreds.pathaoUsername || process.env.PATHAO_USERNAME || '').trim();
+    const password = (mergedCreds.pathaoPassword || process.env.PATHAO_PASSWORD || '').trim();
+    if (!clientId || !clientSecret || !username || !password) {
+      return '';
+    }
+    try {
+      const tokenResp = await fetch('https://api-hermes.pathao.com/aladdin/api/v1/issue-token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          client_id: clientId,
+          client_secret: clientSecret,
+          username,
+          password,
+          grant_type: 'password',
+        }),
+      });
+      const tokenData: any = await tokenResp.json().catch(() => ({}));
+      if (tokenResp.ok && tokenData?.access_token) {
+        cachedPathaoToken = {
+          clientId,
+          username,
+          token: tokenData.access_token,
+          storeId: Number(mergedCreds.pathaoStoreId) || 148250,
+          expiresAt: Date.now() + 3600 * 1000,
+        };
+        return tokenData.access_token;
+      }
+    } catch {
+      // ignore network error
+    }
+    return '';
+  }
+
+  app.post('/api/courier/sync-status', async (req, res) => {
+    try {
+      const mergedCreds = readLocalCourierCredsMirror();
+      const steadfastApiKey = (
+        mergedCreds.steadfastApiKey ||
+        process.env.STEADFAST_API_KEY ||
+        '51555efbd342f6cc0db1f85bd0642c24'
+      ).trim();
+      const steadfastSecretKey = (
+        mergedCreds.steadfastSecretKey ||
+        process.env.STEADFAST_SECRET_KEY ||
+        '86bc050095694f35484664026b6d3f9c'
+      ).trim();
+
+      const rawOrders = Array.isArray(req.body?.orders)
+        ? req.body.orders
+        : req.body?.orderId
+        ? [req.body]
+        : [];
+
+      const syncResults: any[] = [];
+
+      for (const item of rawOrders) {
+        const orderId = String(item.orderId || item.id || '').trim();
+        if (!orderId) continue;
+
+        const providerRaw = String(item.provider || item.courierName || 'Steadfast').trim();
+        const provider: 'Steadfast' | 'Pathao' | 'Other' = providerRaw
+          .toLowerCase()
+          .includes('pathao')
+          ? 'Pathao'
+          : providerRaw.toLowerCase().includes('steadfast')
+          ? 'Steadfast'
+          : 'Steadfast';
+
+        const consignmentId = String(
+          item.consignmentId || item.trackingNumber || `CID-${orderId}`
+        ).trim();
+
+        let rawCourierStatus = String(item.simulatedStatus || '').trim();
+        let apiDeliveryCharge: number | null =
+          typeof item.simulatedDeliveryCharge === 'number'
+            ? item.simulatedDeliveryCharge
+            : null;
+        let apiReturnFee: number | null =
+          typeof item.simulatedReturnFee === 'number' ? item.simulatedReturnFee : null;
+        let liveApiChecked = false;
+
+        // 1. Live API Status Check using existing Steadfast or Pathao integration
+        if (!rawCourierStatus) {
+          if (provider === 'Steadfast' && steadfastApiKey && steadfastSecretKey) {
+            const sfHeaders = {
+              'Api-Key': steadfastApiKey,
+              'Secret-Key': steadfastSecretKey,
+              Accept: 'application/json',
+            };
+            const endpointsToTry = [
+              consignmentId && !consignmentId.startsWith('CID-')
+                ? `https://portal.packzy.com/api/v1/status_by_cid/${encodeURIComponent(consignmentId)}`
+                : '',
+              `https://portal.packzy.com/api/v1/status_by_invoice/${encodeURIComponent(orderId)}`,
+              item.trackingNumber
+                ? `https://portal.packzy.com/api/v1/status_by_trackingcode/${encodeURIComponent(String(item.trackingNumber))}`
+                : '',
+            ].filter(Boolean);
+
+            for (const url of endpointsToTry) {
+              try {
+                const sfResp = await fetch(url, { method: 'GET', headers: sfHeaders });
+                const sfData: any = await sfResp.json().catch(() => ({}));
+                if (sfResp.ok && (sfData?.delivery_status || sfData?.status === 200)) {
+                  liveApiChecked = true;
+                  rawCourierStatus = String(
+                    sfData.delivery_status || sfData.consignment?.status || 'in_review'
+                  ).trim();
+                  if (typeof sfData.delivery_charge === 'number') {
+                    apiDeliveryCharge = sfData.delivery_charge;
+                  } else if (typeof sfData.consignment?.delivery_charge === 'number') {
+                    apiDeliveryCharge = sfData.consignment.delivery_charge;
+                  }
+                  if (typeof sfData.return_charge === 'number') {
+                    apiReturnFee = sfData.return_charge;
+                  } else {
+                    // Steadfast Rule: Return charge is 0 unless explicitly billed
+                    apiReturnFee = 0;
+                  }
+                  break;
+                }
+              } catch {
+                // try next endpoint
+              }
+            }
+          } else if (provider === 'Pathao') {
+            const accessToken = await getExistingPathaoAccessToken(mergedCreds);
+            if (accessToken && consignmentId && !consignmentId.startsWith('CID-')) {
+              try {
+                const pResp = await fetch(
+                  `https://api-hermes.pathao.com/aladdin/api/v1/orders/${encodeURIComponent(consignmentId)}/info`,
+                  {
+                    method: 'GET',
+                    headers: {
+                      Authorization: `Bearer ${accessToken}`,
+                      Accept: 'application/json',
+                    },
+                  }
+                );
+                const pData: any = await pResp.json().catch(() => ({}));
+                const orderInfo = pData?.data || pData;
+                if (pResp.ok && orderInfo?.order_status) {
+                  liveApiChecked = true;
+                  rawCourierStatus = String(
+                    orderInfo.order_status_slug || orderInfo.order_status
+                  ).trim();
+                  if (typeof orderInfo.delivery_fee === 'number') {
+                    apiDeliveryCharge = orderInfo.delivery_fee;
+                  } else if (typeof orderInfo.total_fee === 'number') {
+                    apiDeliveryCharge = orderInfo.total_fee;
+                  }
+                  if (typeof orderInfo.return_fee === 'number') {
+                    apiReturnFee = orderInfo.return_fee;
+                  }
+                }
+              } catch {
+                // ignore network error
+              }
+            }
+          }
+        }
+
+        const normalizedStatus = (rawCourierStatus || String(item.currentStatus || 'pending'))
+          .toLowerCase()
+          .replace(/\s+/g, '_');
+
+        const isReturnStatus =
+          provider === 'Steadfast'
+            ? STEADFAST_RETURN_STATUSES.has(normalizedStatus) ||
+              normalizedStatus.includes('return')
+            : PATHAO_RETURN_STATUSES.has(normalizedStatus) ||
+              normalizedStatus.includes('return') ||
+              normalizedStatus.includes('delivery_failed');
+
+        // Enforce Section A & B Charge Rules:
+        // - Steadfast: If return charge is 0, NEVER add any imaginary return charge (returnFee = 0).
+        // - Both Steadfast & Pathao: If actual delivery charge is NOT available from API/Settlement (null),
+        //   mark as 'pending_verification' instead of inventing a fake number.
+        const effectiveReturnFee =
+          provider === 'Steadfast'
+            ? typeof apiReturnFee === 'number'
+              ? Math.max(0, apiReturnFee)
+              : 0
+            : typeof apiReturnFee === 'number'
+            ? Math.max(0, apiReturnFee)
+            : 0;
+
+        const hasVerifiedDeliveryCharge =
+          typeof apiDeliveryCharge === 'number' && !Number.isNaN(apiDeliveryCharge);
+
+        const chargeVerificationStatus: 'verified' | 'pending_verification' =
+          hasVerifiedDeliveryCharge ? 'verified' : 'pending_verification';
+
+        const idempotencyKey = `${provider.toLowerCase()}:${orderId}:${consignmentId}`;
+        const existingSyncEntry = processedCourierSyncKeys.get(idempotencyKey);
+        const now = Date.now();
+        const serverDuplicateSeen = Boolean(
+          existingSyncEntry &&
+            isReturnStatus &&
+            existingSyncEntry.payload?.chargeVerificationStatus === chargeVerificationStatus &&
+            existingSyncEntry.payload?.deliveryCharge ===
+              (hasVerifiedDeliveryCharge ? apiDeliveryCharge : null) &&
+            existingSyncEntry.payload?.returnFee === effectiveReturnFee &&
+            !item.forceUpdateCharges
+        );
+
+        const resultPayload = {
+          orderId,
+          consignmentId,
+          provider,
+          rawCourierStatus: rawCourierStatus || normalizedStatus,
+          isReturnStatus,
+          deliveryCharge: hasVerifiedDeliveryCharge ? apiDeliveryCharge : null,
+          returnFee: effectiveReturnFee,
+          totalVerifiedExpense: hasVerifiedDeliveryCharge
+            ? Number(apiDeliveryCharge) + effectiveReturnFee
+            : 0,
+          chargeVerificationStatus,
+          idempotencyKey,
+          liveApiChecked,
+          serverDuplicateSeen,
+          syncCount: existingSyncEntry ? existingSyncEntry.count + 1 : 1,
+          syncedAt: now,
+        };
+
+        if (isReturnStatus) {
+          processedCourierSyncKeys.set(idempotencyKey, {
+            count: existingSyncEntry ? existingSyncEntry.count + 1 : 1,
+            firstSyncedAt: existingSyncEntry ? existingSyncEntry.firstSyncedAt : now,
+            lastSyncedAt: now,
+            payload: resultPayload,
+          });
+        }
+
+        syncResults.push(resultPayload);
+      }
+
+      return res.json({
+        ok: true,
+        success: true,
+        results: syncResults,
+        returnedCount: syncResults.filter((r) => r.isReturnStatus).length,
+      });
+    } catch (err: any) {
+      return res.status(500).json({
+        ok: false,
+        success: false,
+        error: err?.message || 'Courier return status sync failed',
+      });
+    }
+  });
+
+  // Steadfast Webhook Endpoint (Idempotent Return & Settlement Status Receiver)
+  app.post('/api/courier/webhook/steadfast', (req, res) => {
+    try {
+      const body = req.body || {};
+      const orderId = String(body.invoice || body.order_id || body.orderId || '').trim();
+      const consignmentId = String(
+        body.consignment_id || body.cid || body.tracking_code || `SF-${orderId}`
+      ).trim();
+      const rawStatus = String(body.status || body.delivery_status || 'returned').trim();
+      const deliveryCharge =
+        typeof body.delivery_charge === 'number' ? body.delivery_charge : null;
+      // Steadfast zero-return-fee rule: default return_charge to 0 unless explicitly provided
+      const returnFee = typeof body.return_charge === 'number' ? body.return_charge : 0;
+      const chargeVerificationStatus =
+        typeof deliveryCharge === 'number' ? 'verified' : 'pending_verification';
+      const idempotencyKey = `steadfast:${orderId}:${consignmentId}`;
+      const existing = processedCourierSyncKeys.get(idempotencyKey);
+      const duplicateBlocked = Boolean(existing);
+      const now = Date.now();
+
+      const eventPayload = {
+        id: `wh-sf-${orderId}-${now}`,
+        provider: 'Steadfast',
+        orderId,
+        consignmentId,
+        rawCourierStatus: rawStatus,
+        isReturnStatus:
+          STEADFAST_RETURN_STATUSES.has(rawStatus.toLowerCase()) ||
+          rawStatus.toLowerCase().includes('return'),
+        deliveryCharge,
+        returnFee,
+        chargeVerificationStatus,
+        idempotencyKey,
+        duplicateBlocked,
+        receivedAt: now,
+      };
+
+      processedCourierSyncKeys.set(idempotencyKey, {
+        count: existing ? existing.count + 1 : 1,
+        firstSyncedAt: existing ? existing.firstSyncedAt : now,
+        lastSyncedAt: now,
+        payload: eventPayload,
+      });
+      recentCourierWebhookEvents.unshift(eventPayload);
+      if (recentCourierWebhookEvents.length > 100) recentCourierWebhookEvents.pop();
+
+      return res.json({
+        ok: true,
+        success: true,
+        duplicateBlocked,
+        event: eventPayload,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, error: err?.message || 'Steadfast webhook error' });
+    }
+  });
+
+  // Pathao Webhook Endpoint (Idempotent Return & Settlement Status Receiver)
+  app.post('/api/courier/webhook/pathao', (req, res) => {
+    try {
+      const body = req.body || {};
+      const orderId = String(
+        body.merchant_order_id || body.order_id || body.orderId || ''
+      ).trim();
+      const consignmentId = String(
+        body.consignment_id || body.cid || `PTH-${orderId}`
+      ).trim();
+      const rawStatus = String(
+        body.order_status_slug || body.order_status || body.status || 'Return'
+      ).trim();
+      const deliveryCharge =
+        typeof body.delivery_fee === 'number'
+          ? body.delivery_fee
+          : typeof body.total_fee === 'number'
+          ? body.total_fee
+          : null;
+      const returnFee = typeof body.return_fee === 'number' ? body.return_fee : 0;
+      const chargeVerificationStatus =
+        typeof deliveryCharge === 'number' ? 'verified' : 'pending_verification';
+      const idempotencyKey = `pathao:${orderId}:${consignmentId}`;
+      const existing = processedCourierSyncKeys.get(idempotencyKey);
+      const duplicateBlocked = Boolean(existing);
+      const now = Date.now();
+
+      const eventPayload = {
+        id: `wh-pth-${orderId}-${now}`,
+        provider: 'Pathao',
+        orderId,
+        consignmentId,
+        rawCourierStatus: rawStatus,
+        isReturnStatus:
+          PATHAO_RETURN_STATUSES.has(rawStatus.toLowerCase().replace(/\s+/g, '_')) ||
+          rawStatus.toLowerCase().includes('return') ||
+          rawStatus.toLowerCase().includes('failed'),
+        deliveryCharge,
+        returnFee,
+        chargeVerificationStatus,
+        idempotencyKey,
+        duplicateBlocked,
+        receivedAt: now,
+      };
+
+      processedCourierSyncKeys.set(idempotencyKey, {
+        count: existing ? existing.count + 1 : 1,
+        firstSyncedAt: existing ? existing.firstSyncedAt : now,
+        lastSyncedAt: now,
+        payload: eventPayload,
+      });
+      recentCourierWebhookEvents.unshift(eventPayload);
+      if (recentCourierWebhookEvents.length > 100) recentCourierWebhookEvents.pop();
+
+      return res.json({
+        ok: true,
+        success: true,
+        duplicateBlocked,
+        event: eventPayload,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, error: err?.message || 'Pathao webhook error' });
+    }
+  });
+
+  app.get('/api/courier/webhook/events', (_req, res) => {
+    return res.json({
+      ok: true,
+      events: recentCourierWebhookEvents,
+    });
+  });
+
   app.get('/api/catalog/products', async (_req, res) => {
     try {
       const products = await getCombinedCatalogProducts(false);

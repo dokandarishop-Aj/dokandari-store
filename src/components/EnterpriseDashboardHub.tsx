@@ -297,8 +297,22 @@ export const EnterpriseDashboardHub: React.FC<EnterpriseDashboardHubProps> = ({
     const deliveredOrders = filteredOrders.filter((o) => o.status === 'delivered');
     const deliveredOrdersCount = deliveredOrders.length;
     const returnedOrdersInTable = filteredOrders.filter((o) => o.status === 'returned');
-    const returnedOrdersCount = returnedOrdersInTable.length + filteredReturns.length;
+    const returnedOrderIdSet = new Set<string>(
+      returnedOrdersInTable.map((o) => String(o.id || '').trim()).filter(Boolean)
+    );
+    const standaloneReturns = filteredReturns.filter(
+      (r) => !returnedOrderIdSet.has(String(r.orderId || '').trim())
+    );
+    const returnedOrdersCount = returnedOrdersInTable.length + standaloneReturns.length;
     const cancelledOrdersCount = filteredOrders.filter((o) => o.status === 'cancelled').length;
+
+    // Map return records by orderId for authoritative verified/pending return charge lookup
+    const returnRecordByOrderId = new Map<string, CourierReturn>();
+    for (const r of filteredReturns) {
+      if (r && r.orderId) {
+        returnRecordByOrderId.set(String(r.orderId).trim(), r);
+      }
+    }
 
     // Financials from Delivered & Returned Orders + Operating Expenses
     let grossSales = 0;
@@ -312,7 +326,7 @@ export const EnterpriseDashboardHub: React.FC<EnterpriseDashboardHubProps> = ({
 
     for (const ord of filteredOrders) {
       const fin = calculateOrderFinancialBreakdown(ord, products);
-      if (ord.status !== 'cancelled') {
+      if (ord.status !== 'cancelled' && ord.status !== 'returned') {
         grossSales += Number(ord.subtotal || ord.total || 0);
         totalDiscounts += Number(ord.discount || 0);
         pipelineRevenue += Number(ord.total || 0);
@@ -324,29 +338,46 @@ export const EnterpriseDashboardHub: React.FC<EnterpriseDashboardHubProps> = ({
         orderPackagingExpenses += fin.packagingCost;
       } else if (ord.status === 'returned') {
         orderPackagingExpenses += fin.packagingCost;
-        returnLosses += fin.returnCourierLoss + fin.damagedProductLoss;
+        const linkedRet = returnRecordByOrderId.get(String(ord.id).trim());
+        if (linkedRet) {
+          const verifiedCharge =
+            linkedRet.chargeVerificationStatus === 'pending_verification'
+              ? 0
+              : Number(linkedRet.returnCharge || 0);
+          returnLosses += verifiedCharge + Number(linkedRet.damageLoss || 0);
+        } else {
+          returnLosses += fin.returnCourierLoss + fin.damagedProductLoss;
+        }
       }
     }
 
-    // Add standalone CourierReturn losses
-    for (const ret of filteredReturns) {
-      returnLosses += Number(ret.returnCharge || 0) + Number(ret.damageLoss || 0);
+    // Add standalone CourierReturn losses (only for returns whose orderId is not already in returnedOrdersInTable)
+    for (const ret of standaloneReturns) {
+      const verifiedCharge =
+        ret.chargeVerificationStatus === 'pending_verification'
+          ? 0
+          : Number(ret.returnCharge || 0);
+      returnLosses += verifiedCharge + Number(ret.damageLoss || 0);
     }
 
-    // Operating & Ad Expenses from `business_expenses`
-    const adExpenses = filteredExpenses
+    // Operating & Ad Expenses from `business_expenses` (excluding auto-generated exp-ret-* which are already in returnLosses)
+    const nonAutoReturnExpenses = filteredExpenses.filter(
+      (e) => !String(e.id || '').startsWith('exp-ret-')
+    );
+
+    const adExpenses = nonAutoReturnExpenses
       .filter((e) => ['facebook_ads', 'tiktok_ads', 'google_ads'].includes(e.category))
       .reduce((s, e) => s + Number(e.amount || 0), 0);
 
-    const extraCourierExp = filteredExpenses
+    const extraCourierExp = nonAutoReturnExpenses
       .filter((e) => e.category === 'courier_expense')
       .reduce((s, e) => s + Number(e.amount || 0), 0);
 
-    const extraPackagingExp = filteredExpenses
+    const extraPackagingExp = nonAutoReturnExpenses
       .filter((e) => e.category === 'packaging_expense')
       .reduce((s, e) => s + Number(e.amount || 0), 0);
 
-    const otherOperatingExp = filteredExpenses
+    const otherOperatingExp = nonAutoReturnExpenses
       .filter(
         (e) =>
           ![
