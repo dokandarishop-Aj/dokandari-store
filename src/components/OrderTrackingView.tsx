@@ -22,7 +22,7 @@ import {
   RotateCcw,
   XCircle,
   PauseCircle,
-  ExternalLink,
+  MessageCircle,
 } from 'lucide-react';
 import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
@@ -516,10 +516,8 @@ export const OrderTrackingView: React.FC<OrderTrackingViewProps> = ({
       courierTrackingStage: 'ready_for_delivery',
       courierLastStatusText: 'ডেলিভারির জন্য প্রস্তুত (Out for Delivery)',
       courierLastSyncedAt: now,
-      customerTrackingUrl: `/track?orderId=${encodeURIComponent(orderId)}&cid=${encodeURIComponent(consignmentId)}`,
-      externalCourierTrackingUrl: isPathao
-        ? `https://merchant.pathao.com/tracking?consignment_id=${encodeURIComponent(consignmentId)}&phone=${encodeURIComponent(customerPhone)}`
-        : `https://steadfast.com.bd/t/${encodeURIComponent(trackingId)}`,
+      customerTrackingUrl: `https://www.dokandari.com/track?orderId=${encodeURIComponent(orderId)}&cid=${encodeURIComponent(consignmentId)}`,
+      externalCourierTrackingUrl: undefined,
       trackingHistory: testHistory,
     };
 
@@ -1002,19 +1000,19 @@ export const OrderTrackingView: React.FC<OrderTrackingViewProps> = ({
                   className="px-3 py-1.5 rounded-lg bg-[#E11D48] hover:bg-[#BE123C] text-white font-bold text-[11px] flex items-center gap-1 cursor-pointer"
                 >
                   {copiedLink ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copiedLink ? 'কপি সম্পন্ন!' : 'লিংক কপি করুন'}</span>
+                  <span>{copiedLink ? 'কপি সম্পন্ন!' : 'Dokandari ট্র্যাকিং লিংক কপি করুন'}</span>
                 </button>
-                {order.externalCourierTrackingUrl && (
-                  <a
-                    href={order.externalCourierTrackingUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="px-3 py-1.5 rounded-lg bg-white hover:bg-stone-100 text-stone-700 border border-stone-300 font-bold text-[11px] inline-flex items-center gap-1"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                    <span>{order.courierName || 'Courier'} পোর্টাল ভেরিফিকেশন</span>
-                  </a>
-                )}
+                <a
+                  href={`https://wa.me/?text=${encodeURIComponent(
+                    `আসসালামু আলাইকুম, Dokandari.com অর্ডার ট্র্যাকিং:\nঅর্ডার আইডি: #${order.id}\nকুরিয়ার: ${order.courierName || 'Assigned Courier'}\nকনসাইনমেন্ট আইডি: ${order.consignmentId || order.trackingId || order.trackingNumber || 'N/A'}\nবর্তমান স্ট্যাটাস: ${activeStageDef.titleBn}\n\nDokandari.com নিজস্ব লাইভ ট্র্যাকিং লিংক:\n${shareableTrackingUrl}`
+                  )}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] inline-flex items-center gap-1"
+                >
+                  <MessageCircle className="w-3.5 h-3.5" />
+                  <span>WhatsApp-এ শেয়ার করুন</span>
+                </a>
               </div>
             </div>
 

@@ -2397,6 +2397,94 @@ export function navigateToStoreRoute(
 }
 
 /**
+ * Universal URL Order Tracking Route Extractor:
+ * Supports `/track`, `/tracking`, `/track/:id`, `?track=:id`, `?orderId=:id` on `/track`, `#/track`,
+ * and AI Studio `appParams` so customer tracking links open Dokandari.com's own Tracking Page immediately.
+ */
+export function extractUrlTrackingRoute(): {
+  isTrackingRoute: boolean;
+  targetQuery: string;
+} {
+  if (typeof window === 'undefined') {
+    return { isTrackingRoute: false, targetQuery: '' };
+  }
+  let pathname = window.location.pathname || '';
+  try {
+    if (pathname.includes('%2F') || pathname.includes('%2f')) {
+      pathname = decodeURIComponent(pathname);
+    }
+  } catch {
+    // ignore
+  }
+  const normalizedPath = pathname.replace(/\/+$/, '') || '/';
+  const sp = new URLSearchParams(window.location.search || '');
+  const hash = window.location.hash || '';
+  const appParams = extractDecodedAppParams();
+
+  const checkPathAndParams = (pathStr: string, searchObj: URLSearchParams): {
+    matched: boolean;
+    query: string;
+  } => {
+    const cleanPath = (pathStr.split('?')[0] || '').split('#')[0].replace(/\/+$/, '') || '/';
+    const isTrackPath =
+      cleanPath === '/track' ||
+      cleanPath === '/tracking' ||
+      cleanPath.startsWith('/track/') ||
+      cleanPath.startsWith('/tracking/');
+    const pathId = cleanPath.startsWith('/track/')
+      ? decodeURIComponent(cleanPath.replace('/track/', '').split('/')[0])
+      : cleanPath.startsWith('/tracking/')
+      ? decodeURIComponent(cleanPath.replace('/tracking/', '').split('/')[0])
+      : '';
+    const paramId = (
+      searchObj.get('orderId') ||
+      searchObj.get('cid') ||
+      searchObj.get('consignmentId') ||
+      searchObj.get('trackingId') ||
+      searchObj.get('track') ||
+      pathId ||
+      ''
+    ).trim();
+
+    if (isTrackPath || Boolean(searchObj.get('track'))) {
+      return { matched: true, query: paramId };
+    }
+    return { matched: false, query: '' };
+  };
+
+  // 1. Direct Pathname or Query (?track=..., /track?orderId=...)
+  const direct = checkPathAndParams(normalizedPath, sp);
+  if (direct.matched) {
+    return { isTrackingRoute: true, targetQuery: direct.query };
+  }
+
+  // 2. Hash Route (#/track?orderId=...)
+  if (hash === '#/track' || hash.startsWith('#/track')) {
+    const hashQueryIdx = hash.indexOf('?');
+    const hashSp =
+      hashQueryIdx >= 0 ? new URLSearchParams(hash.slice(hashQueryIdx + 1)) : sp;
+    const hashCheck = checkPathAndParams(hash.slice(1), hashSp);
+    return {
+      isTrackingRoute: true,
+      targetQuery: hashCheck.query || direct.query,
+    };
+  }
+
+  // 3. AI Studio appParams wrapper (?appParams=%2Ftrack%3ForderId%3D...)
+  if (appParams) {
+    const cleanedAp = appParams.replace(/^#/, '');
+    const [apPath, apQuery] = cleanedAp.split('?');
+    const apSp = new URLSearchParams(apQuery || '');
+    const apCheck = checkPathAndParams(apPath || '/', apSp);
+    if (apCheck.matched) {
+      return { isTrackingRoute: true, targetQuery: apCheck.query };
+    }
+  }
+
+  return { isTrackingRoute: false, targetQuery: '' };
+}
+
+/**
  * Universal URL Product Route Extractor:
  * Supports `/products/:id`, `/product/:id`, `/p/:id`, `?product=:id`, `?id=:id`, `#/products/:id`,
  * and AI Studio `appParams` across all external, desktop, and mobile in-app browsers.
@@ -3449,10 +3537,17 @@ export function buildCustomerTrackingUrl(order: {
   trackingId?: string;
   trackingNumber?: string;
 }): string {
-  const origin =
-    typeof window !== 'undefined' && window.location?.origin
-      ? window.location.origin
-      : 'https://www.dokandari.com';
+  let origin = 'https://www.dokandari.com';
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    const host = (window.location.hostname || '').toLowerCase();
+    if (
+      !host.includes('.run.app') &&
+      !host.includes('localhost') &&
+      !host.includes('127.0.0.1')
+    ) {
+      origin = window.location.origin.trim().replace(/\/+$/, '');
+    }
+  }
   const cid = String(
     order.consignmentId || order.trackingId || order.trackingNumber || ''
   ).trim();
@@ -3493,16 +3588,20 @@ export async function saveOrderPersisted(order: Order): Promise<Order> {
         : effectiveCid)
   ).trim();
 
+  const dokandariOwnTrackingUrl = buildCustomerTrackingUrl({
+    id: order.id,
+    consignmentId: effectiveCid,
+    trackingId: effectiveTrackingId,
+    trackingNumber: order.trackingNumber,
+  });
+
   const cleanOrder = sanitizeForFirestore({
     ...order,
     merchantOrderId: order.merchantOrderId || order.id,
     ...(effectiveCid ? { consignmentId: effectiveCid } : {}),
     ...(effectiveTrackingId ? { trackingId: effectiveTrackingId } : {}),
-    customerTrackingUrl:
-      order.customerTrackingUrl ||
-      `/track?orderId=${encodeURIComponent(order.id)}${
-        effectiveCid ? `&cid=${encodeURIComponent(effectiveCid)}` : ''
-      }`,
+    customerTrackingUrl: dokandariOwnTrackingUrl,
+    externalCourierTrackingUrl: undefined,
     customerScreenshot: safeScreenshot,
     items: Array.isArray(order.items)
       ? order.items.map((item) => ({

@@ -5,14 +5,15 @@
     "consignmentId": "PTH261116849201",
     "trackingId": "PTH261116849201",
     "customer": {
-      "name": "Sadia Sultana",
+      "name": "সাদিয়া সুলতানা (Pathao Verified)",
       "phone": "01712345678",
-      "address": "House 24, Road 7, Banani",
+      "address": "House 24, Road 7, Block F, Banani",
+      "city": "Dhaka",
       "district": "Dhaka"
     },
     "total": 1320,
     "status": "in_transit",
-    "courierStatus": "Assigned_for_Delivery",
+    "courierStatus": "ready_for_delivery",
     "orderId": "DKD-PATHAO-849201",
     "merchantOrderId": "DKD-PATHAO-849201",
     "trackingNumber": "PTH261116849201",
@@ -22,62 +23,75 @@
     "codAmount": 1320,
     "courierTrackingStage": "ready_for_delivery",
     "courierLastStatusText": "ডেলিভারির জন্য প্রস্তুত (Out for Delivery)",
-    "courierLastSyncedAt": 1794839396368,
+    "courierLastSyncedAt": 1794841075304,
     "customerTrackingUrl": "/track?orderId=DKD-PATHAO-849201&cid=PTH261116849201",
     "externalCourierTrackingUrl": "https://merchant.pathao.com/tracking?consignment_id=PTH261116849201&phone=01712345678",
     "trackingHistory": [
       {
-        "id": "trk_1794839394989_ready_for_delivery",
+        "id": "trk_1794839274953_ready",
         "stage": "ready_for_delivery",
         "statusLabel": "Ready for Delivery",
         "statusLabelBn": "ডেলিভারির জন্য প্রস্তুত (Out for Delivery)",
-        "rawCourierStatus": "Assigned_for_Delivery",
-        "description": "ডেলিভারি রাইডার পার্সেলটি নিয়ে আপনার ঠিকানায় রওনা হয়েছেন। অনুগ্রহ করে ফোন সচল রাখুন। (Status: Assigned_for_Delivery)",
+        "rawCourierStatus": "ready_for_delivery",
+        "description": "ডেলিভারি রাইডার পার্সেলটি নিয়ে আপনার ঠিকানায় রওনা হয়েছেন। অনুগ্রহ করে ফোন সচল রাখুন। (Status: ready_for_delivery)",
         "location": "Pathao Courier Last-Mile Delivery Hub",
-        "timestamp": 1794839394989,
-        "source": "dokandari_system"
+        "timestamp": 1794839274953,
+        "source": "pathao_api"
       },
       {
-        "id": "trk_1794839094989_in_transit",
+        "id": "trk_1794833874953_transit",
         "stage": "in_transit",
         "statusLabel": "In Transit",
-        "statusLabelBn": "পথে আছে / ইন ট্রানজিট (In Transit)",
+        "statusLabelBn": "পথে আছে (In Transit)",
         "rawCourierStatus": "in_transit",
-        "description": "পার্সেলটি সেন্ট্রাল সর্টিং হাব থেকে গন্তব্য ডেলিভারি হাবের উদ্দেশ্যে পরিবহন করা হচ্ছে।",
-        "location": "Pathao Courier Central Sorting & Transit Hub",
-        "timestamp": 1794839094989,
-        "source": "dokandari_system"
+        "description": "পার্সেলটি সেন্ট্রাল সর্টিং হাব থেকে আঞ্চলিক ডেলিভারি হাবে পৌঁছেছে।",
+        "location": "Pathao Courier Central Sorting Hub, Dhaka",
+        "timestamp": 1794833874953,
+        "source": "pathao_api"
       },
       {
-        "id": "trk_1794838794989_picked_up",
+        "id": "trk_1794826674953_picked",
         "stage": "picked_up",
         "statusLabel": "Pickup Status: Picked Up",
         "statusLabelBn": "পিকআপ সম্পন্ন (Picked Up)",
         "rawCourierStatus": "picked_up",
-        "description": "Pathao Courier পিকআপ এজেন্ট মার্চেন্ট থেকে পার্সেলটি রিসিভ করেছেন এবং হাবে পাঠিয়েছেন।",
-        "location": "Pathao Courier Pickup Hub",
-        "timestamp": 1794838794989,
-        "source": "dokandari_system"
+        "description": "Pathao Courier পিকআপ এজেন্ট Dokandari.com ওয়্যারহাউজ থেকে পার্সেলটি পিকআপ করেছেন।",
+        "location": "Dokandari Warehouse Dispatch",
+        "timestamp": 1794826674953,
+        "source": "pathao_api"
       },
       {
-        "id": "trk_1794837594989_order_booked",
+        "id": "trk_1794819474953_booked",
         "stage": "order_booked",
         "statusLabel": "Order Booking Status: Booked",
-        "statusLabelBn": "অর্ডার বুকিং সম্পন্ন (Order Booked)",
+        "statusLabelBn": "অর্ডার বুকিং সম্পন্ন (Pathao Courier)",
         "rawCourierStatus": "order_booked",
-        "description": "Pathao Courier-এ পার্সেল বুকিং সম্পন্ন হয়েছে। Consignment ID: PTH261116849201",
-        "location": "Dokandari Dispatch Center",
-        "timestamp": 1794837594989,
-        "source": "dokandari_system"
+        "description": "Pathao Courier-এ অর্ডার বুকিং সম্পন্ন। Consignment ID: PTH261116849201, Tracking ID: PTH261116849201",
+        "location": "Dokandari System & Courier Portal",
+        "timestamp": 1794819474953,
+        "source": "pathao_api"
       }
     ],
-    "updatedAt": 1794839396368,
-    "items": [],
-    "subtotal": 1320,
-    "shippingCost": 0,
+    "updatedAt": 1794841075304,
+    "items": [
+      {
+        "id": "item-trk-demo-1",
+        "productId": "dkd-flexible-unbreakable-mirror-sheet",
+        "name": "প্রিমিয়াম আনব্রেকএবল ওয়াল মিরর শিট (HD ফ্লেক্সিবল আয়না)",
+        "price": 1250,
+        "quantity": 1,
+        "selectedColor": "Silver HD",
+        "selectedSize": "Large (60x90cm)",
+        "image": "/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg",
+        "category": "home_decor"
+      }
+    ],
+    "subtotal": 1250,
+    "shippingCost": 70,
     "discount": 0,
     "paymentMethod": "cod",
-    "createdAt": 1794837596368
+    "createdAt": 1794819474953,
+    "userId": null
   },
   "DKD-STEADFAST-951402": {
     "id": "DKD-STEADFAST-951402",
@@ -147,5 +161,89 @@
     "discount": 0,
     "paymentMethod": "cod",
     "createdAt": 1794837596760
+  },
+  "DK-TEST-PATHAO-01": {
+    "id": "DK-TEST-PATHAO-01",
+    "consignmentId": "PT-9084127",
+    "trackingId": "PT-9084127",
+    "courierName": "Pathao Courier",
+    "total": 1320,
+    "customer": {
+      "name": "তানভীর আহমেদ (Pathao Test)",
+      "phone": "01711223344",
+      "address": "House 14, Road 7, Dhanmondi",
+      "district": "Dhaka"
+    },
+    "orderId": "DK-TEST-PATHAO-01",
+    "merchantOrderId": "DK-TEST-PATHAO-01",
+    "trackingNumber": "PT-9084127",
+    "status": "in_transit",
+    "courierStatus": "order_booked",
+    "courierTrackingStage": "order_booked",
+    "courierLastStatusText": "অর্ডার বুকিং সম্পন্ন (Order Booked)",
+    "courierLastSyncedAt": 1794841884624,
+    "customerTrackingUrl": "https://www.dokandari.com/track?orderId=DK-TEST-PATHAO-01&cid=PT-9084127",
+    "trackingHistory": [
+      {
+        "id": "trk_1794840084064_order_booked",
+        "stage": "order_booked",
+        "statusLabel": "Order Booking Status: Booked",
+        "statusLabelBn": "অর্ডার বুকিং সম্পন্ন (Order Booked)",
+        "rawCourierStatus": "order_booked",
+        "description": "Pathao Courier-এ আপনার অর্ডারের কুরিয়ার বুকিং সম্পন্ন হয়েছে এবং পিকআপের জন্য প্রস্তুত। (Status: order_booked)",
+        "location": "Dokandari Dispatch Center",
+        "timestamp": 1794840084064,
+        "source": "dokandari_system"
+      }
+    ],
+    "items": [],
+    "subtotal": 1320,
+    "shippingCost": 0,
+    "discount": 0,
+    "paymentMethod": "cod",
+    "createdAt": 1794840084064,
+    "updatedAt": 1794841884624
+  },
+  "DK-TEST-STEADFAST-01": {
+    "id": "DK-TEST-STEADFAST-01",
+    "consignmentId": "SF-7845129",
+    "trackingId": "SF-7845129",
+    "courierName": "Steadfast Courier",
+    "total": 1320,
+    "customer": {
+      "name": "নুসরাত জাহান (Steadfast Test)",
+      "phone": "01819887766",
+      "address": "House 14, Road 7, Dhanmondi",
+      "district": "Dhaka"
+    },
+    "orderId": "DK-TEST-STEADFAST-01",
+    "merchantOrderId": "DK-TEST-STEADFAST-01",
+    "trackingNumber": "SF-7845129",
+    "status": "in_transit",
+    "courierStatus": "order_booked",
+    "courierTrackingStage": "order_booked",
+    "courierLastStatusText": "অর্ডার বুকিং সম্পন্ন (Order Booked)",
+    "courierLastSyncedAt": 1794841899055,
+    "customerTrackingUrl": "https://www.dokandari.com/track?orderId=DK-TEST-STEADFAST-01&cid=SF-7845129",
+    "trackingHistory": [
+      {
+        "id": "trk_1794840098697_order_booked",
+        "stage": "order_booked",
+        "statusLabel": "Order Booking Status: Booked",
+        "statusLabelBn": "অর্ডার বুকিং সম্পন্ন (Order Booked)",
+        "rawCourierStatus": "order_booked",
+        "description": "Steadfast Courier-এ আপনার অর্ডারের কুরিয়ার বুকিং সম্পন্ন হয়েছে এবং পিকআপের জন্য প্রস্তুত। (Status: order_booked)",
+        "location": "Dokandari Dispatch Center",
+        "timestamp": 1794840098697,
+        "source": "dokandari_system"
+      }
+    ],
+    "items": [],
+    "subtotal": 1320,
+    "shippingCost": 0,
+    "discount": 0,
+    "paymentMethod": "cod",
+    "createdAt": 1794840098697,
+    "updatedAt": 1794841899056
   }
 }

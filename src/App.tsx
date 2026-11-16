@@ -56,6 +56,7 @@ import {
   resolveCategoryIdFromUrl,
   extractUrlProductRoute,
   extractUrlCatalogRoute,
+  extractUrlTrackingRoute,
   navigateToStoreRoute,
   uploadBannerImageToServer,
 } from './lib/storeSync';
@@ -77,6 +78,7 @@ function StoreMain() {
   const [products, setProducts] = useState<Product[]>(() => mergeCatalogProducts());
   const initialUrlProdRoute = useMemo(() => extractUrlProductRoute(), []);
   const initialUrlCatRoute = useMemo(() => extractUrlCatalogRoute(), []);
+  const initialUrlTrackRoute = useMemo(() => extractUrlTrackingRoute(), []);
   const [activeCategory, setActiveCategory] = useState<ProductCategory>(() =>
     !initialUrlProdRoute.rawProdId && initialUrlCatRoute ? initialUrlCatRoute : 'all'
   );
@@ -164,8 +166,12 @@ function StoreMain() {
     return initialStore.categoryOrder || OFFICIAL_CATEGORIES.map((c) => c.id);
   });
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
-  const [isTrackingOpen, setIsTrackingOpen] = useState(false);
-  const [trackingOrderId, setTrackingOrderId] = useState<string | undefined>(undefined);
+  const [isTrackingOpen, setIsTrackingOpen] = useState<boolean>(
+    () => initialUrlTrackRoute.isTrackingRoute
+  );
+  const [trackingOrderId, setTrackingOrderId] = useState<string | undefined>(
+    () => initialUrlTrackRoute.targetQuery || undefined
+  );
   const { isAdmin: authIsAdmin } = useAuth();
   const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [selectedAdminTool, setSelectedAdminTool] = useState<AdminTool | undefined>(undefined);
@@ -693,47 +699,23 @@ function StoreMain() {
         setIsTrackingOpen(false);
         setIsAdminOpen(false);
         return;
-      } else if (
-        normalizedPath === '/track' ||
-        normalizedPath === '/tracking' ||
-        normalizedPath.startsWith('/track/') ||
-        normalizedPath.startsWith('/tracking/') ||
-        hash === '#/track' ||
-        hash.startsWith('#/track') ||
-        Boolean(sp.get('track'))
-      ) {
-        const hashQueryIdx = hash.indexOf('?');
-        const hashParams =
-          hashQueryIdx >= 0 ? new URLSearchParams(hash.slice(hashQueryIdx + 1)) : null;
-        const pathTrackId = normalizedPath.startsWith('/track/')
-          ? decodeURIComponent(normalizedPath.replace('/track/', '').split('/')[0])
-          : normalizedPath.startsWith('/tracking/')
-          ? decodeURIComponent(normalizedPath.replace('/tracking/', '').split('/')[0])
-          : '';
-        const targetTrackParam = (
-          sp.get('orderId') ||
-          sp.get('cid') ||
-          sp.get('consignmentId') ||
-          sp.get('trackingId') ||
-          sp.get('track') ||
-          hashParams?.get('orderId') ||
-          hashParams?.get('cid') ||
-          hashParams?.get('track') ||
-          pathTrackId ||
-          ''
-        ).trim();
-        if (targetTrackParam) {
-          setTrackingOrderId(targetTrackParam);
+      } else {
+        const trackRoute = extractUrlTrackingRoute();
+        if (trackRoute.isTrackingRoute) {
+          if (trackRoute.targetQuery) {
+            setTrackingOrderId(trackRoute.targetQuery);
+          }
+          setIsTrackingOpen(true);
+          setDetailedProduct(null);
+          setActiveCategoryPage(null);
+          setIsAboutOpen(false);
+          setIsVideoGalleryOpen(false);
+          setIsPolicyOpen(false);
+          setIsAdminOpen(false);
+          return;
         }
-        setIsTrackingOpen(true);
-        setDetailedProduct(null);
-        setActiveCategoryPage(null);
-        setIsAboutOpen(false);
-        setIsVideoGalleryOpen(false);
-        setIsPolicyOpen(false);
-        setIsAdminOpen(false);
-        return;
-      } else if (
+      }
+      if (
         normalizedPath === '/admin' ||
         normalizedPath.startsWith('/admin/') ||
         hash === '#/admin' ||

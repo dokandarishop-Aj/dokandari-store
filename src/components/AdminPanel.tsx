@@ -141,6 +141,7 @@ import {
   StoreContent,
   getInitialStoreContent,
   saveStoreContentPersisted,
+  navigateToStoreRoute,
   uploadBannerImageToServer,
   saveProductPersisted,
   deleteProductPersisted,
@@ -3586,10 +3587,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         courierTrackingStage: data.courierTrackingStage || 'order_booked',
         courierLastStatusText: `অর্ডার বুকিং সম্পন্ন (${courierName})`,
         courierLastSyncedAt: nowTs,
-        customerTrackingUrl:
-          data.customerTrackingPath ||
-          `/track?orderId=${encodeURIComponent(order.id)}&cid=${encodeURIComponent(consignmentId)}`,
-        externalCourierTrackingUrl: data.externalCourierTrackingUrl || undefined,
+        customerTrackingUrl: buildCustomerTrackingUrl({
+          id: order.id,
+          consignmentId,
+          trackingId,
+          trackingNumber,
+        }),
+        externalCourierTrackingUrl: undefined,
         trackingHistory: Array.isArray(data.trackingHistory)
           ? data.trackingHistory
           : [
@@ -7363,12 +7367,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                       </span>
                                     ) : null}
                                   </div>
-                                  <div className="flex items-center gap-1 pt-0.5">
+                                  <div className="flex flex-wrap items-center gap-1 pt-0.5">
                                     <button
                                       type="button"
                                       onClick={() => handleCopyCustomerTrackingLink(o)}
                                       className="px-2 py-1 rounded bg-stone-100 hover:bg-stone-200 text-stone-800 border border-stone-300 text-[10px] font-bold cursor-pointer transition-colors"
-                                      title="কাস্টমার ট্র্যাকিং লিংক কপি করুন (লগইন ছাড়া দেখা যাবে)"
+                                      title="Dokandari.com নিজস্ব কাস্টমার ট্র্যাকিং লিংক কপি করুন (লগইন ছাড়া দেখা যাবে)"
                                     >
                                       🔗 ট্র্যাকিং লিংক
                                     </button>
@@ -7376,9 +7380,23 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                       type="button"
                                       onClick={() => sendTrackingLinkViaWhatsApp(o)}
                                       className="px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold cursor-pointer transition-colors"
-                                      title="কাস্টমারকে WhatsApp-এ লাইভ ট্র্যাকিং লিংক পাঠান"
+                                      title="কাস্টমারকে WhatsApp-এ Dokandari.com লাইভ ট্র্যাকিং লিংক পাঠান"
                                     >
                                       💬 WA ট্র্যাকিং
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const cid = o.consignmentId || o.trackingId || o.trackingNumber || '';
+                                        const path = cid
+                                          ? `/track?orderId=${encodeURIComponent(o.id)}&cid=${encodeURIComponent(cid)}`
+                                          : `/track?orderId=${encodeURIComponent(o.id)}`;
+                                        navigateToStoreRoute(path);
+                                      }}
+                                      className="px-2 py-1 rounded bg-rose-50 hover:bg-rose-100 text-[#E11D48] border border-rose-200 text-[10px] font-bold cursor-pointer transition-colors"
+                                      title="Dokandari.com নিজস্ব কাস্টমার ট্র্যাকিং পেজে ওপেন করুন"
+                                    >
+                                      🔍 ট্র্যাকিং পেজ
                                     </button>
                                   </div>
                                 </div>
@@ -7589,6 +7607,24 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold cursor-pointer"
                           >
                             💬 WhatsApp-এ ট্র্যাকিং পাঠান
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const cid =
+                                selectedOrderForView.consignmentId ||
+                                selectedOrderForView.trackingId ||
+                                selectedOrderForView.trackingNumber ||
+                                '';
+                              const path = cid
+                                ? `/track?orderId=${encodeURIComponent(selectedOrderForView.id)}&cid=${encodeURIComponent(cid)}`
+                                : `/track?orderId=${encodeURIComponent(selectedOrderForView.id)}`;
+                              setSelectedOrderForView(null);
+                              navigateToStoreRoute(path);
+                            }}
+                            className="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-[10px] font-bold cursor-pointer"
+                          >
+                            🔍 Dokandari ট্র্যাকিং পেজ দেখুন
                           </button>
                           <button
                             type="button"
