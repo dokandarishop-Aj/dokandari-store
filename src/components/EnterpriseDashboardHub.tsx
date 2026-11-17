@@ -50,6 +50,8 @@ import {
   OperatingExpense,
   ExpenseCategoryType,
   InventoryMovement,
+  PackagingType,
+  PACKAGING_TYPES_LIST,
 } from '../types';
 import {
   calculateOrderFinancialBreakdown,
@@ -58,6 +60,9 @@ import {
   saveOperatingExpensePersisted,
   deleteOperatingExpensePersisted,
   normalizeExpenseCategory,
+  buildOrderPackagingSnapshot,
+  appendOrderPackagingCostHistory,
+  resolveOrderPackagingCost,
   getExpenseCategoryLabelBn,
   parseExpenseDateToTimestamp,
   getPersistedStockMovements,
@@ -175,6 +180,9 @@ export const EnterpriseDashboardHub: React.FC<EnterpriseDashboardHubProps> = ({
   const [overrideCogs, setOverrideCogs] = useState<string>('');
   const [overrideCourier, setOverrideCourier] = useState<string>('');
   const [overridePackaging, setOverridePackaging] = useState<string>('');
+  const [overridePackagingType, setOverridePackagingType] = useState<PackagingType>('Poly Bag');
+  const [overrideExtraPackaging, setOverrideExtraPackaging] = useState<string>('0');
+  const [confirmDeleteOverridePackaging, setConfirmDeleteOverridePackaging] = useState<boolean>(false);
   const [overrideOtherExp, setOverrideOtherExp] = useState<string>('');
   const [overrideReturnCondition, setOverrideReturnCondition] =
     useState<OrderReturnCondition>('sellable');
@@ -394,8 +402,14 @@ export const EnterpriseDashboardHub: React.FC<EnterpriseDashboardHubProps> = ({
       .filter((e) => normalizeExpenseCategory(e.category, e.categoryLabel) === 'courier_charge')
       .reduce((s, e) => s + Number(e.amount || 0), 0);
 
+    // Exclude any expense linked to a specific order (`referenceId` or `order_expense_auto`) to prevent double-counting with orderPackagingExpenses
     const extraPackagingExp = nonAutoReturnExpenses
-      .filter((e) => normalizeExpenseCategory(e.category, e.categoryLabel) === 'packaging')
+      .filter(
+        (e) =>
+          normalizeExpenseCategory(e.category, e.categoryLabel) === 'packaging' &&
+          !e.referenceId &&
+          e.source !== 'order_expense_auto'
+      )
       .reduce((s, e) => s + Number(e.amount || 0), 0);
 
     const otherOperatingExp = nonAutoReturnExpenses
@@ -665,10 +679,53 @@ export const EnterpriseDashboardHub: React.FC<EnterpriseDashboardHubProps> = ({
       const cogsTotal = Math.max(0, Number(overrideCogs) || 0);
       const courierExpense = Math.max(0, Number(overrideCourier) || 0);
       const packagingCost = Math.max(0, Number(overridePackaging) || 0);
+      const extraPackagingCost = Math.max(0, Number(overrideExtraPackaging) || 0);
       const otherOrderExpense = Math.max(0, Number(overrideOtherExp) || 0);
 
+      const previousPackagingCost = resolveOrderPackagingCost(overrideOrder);
+      const previousPackagingType =
+        overrideOrder.packagingType || overrideOrder.packagingSnapshot?.packagingType || 'Poly Bag';
+
+      const baseSnap = buildOrderPackagingSnapshot({
+        items: overrideOrder.items || [],
+        products,
+        orderPackagingType: overridePackagingType,
+        extraPackagingCost,
+        existingSnapshot: overrideOrder.packagingSnapshot,
+      });
+      const updatedSnapshot = {
+        ...baseSnap,
+        packagingType: overridePackagingType,
+        extraPackagingCost,
+        totalPackagingCost: packagingCost,
+        capturedAt: new Date().toISOString(),
+        isSnapshotRecorded: true,
+      };
+      const updatedHistory =
+        previousPackagingCost !== packagingCost || previousPackagingType !== overridePackagingType
+          ? appendOrderPackagingCostHistory({
+              existingHistory: overrideOrder.packagingCostHistory,
+              previousCost: previousPackagingCost,
+              newCost: packagingCost,
+              previousType: previousPackagingType,
+              newType: overridePackagingType,
+              extraPackagingCost,
+              action: packagingCost === 0 && previousPackagingCost > 0 ? 'delete_reset' : 'manual_edit',
+              note: overrideNotes || 'বিজনেস কমান্ড সেন্টার থেকে অর্ডার প্যাকেজিং খরচ আপডেট',
+            })
+          : overrideOrder.packagingCostHistory;
+
+      const orderWithPackaging: Order = {
+        ...overrideOrder,
+        packagingCost,
+        packagingType: overridePackagingType,
+        extraPackagingCost,
+        packagingSnapshot: updatedSnapshot,
+        packagingCostHistory: updatedHistory,
+      };
+
       const result = await executeOrderStatusAutomation({
-        order: overrideOrder,
+        order: orderWithPackaging,
         newStatus: overrideOrder.status,
         returnCondition: overrideReturnCondition,
         manualFinancials: {
@@ -681,13 +738,22 @@ export const EnterpriseDashboardHub: React.FC<EnterpriseDashboardHubProps> = ({
         },
         products,
       });
-      await onUpdateOrder(result.updatedOrder);
+      const finalOrder: Order = {
+        ...result.updatedOrder,
+        packagingCost,
+        packagingType: overridePackagingType,
+        extraPackagingCost,
+        packagingSnapshot: updatedSnapshot,
+        packagingCostHistory: updatedHistory,
+      };
+      await onUpdateOrder(finalOrder);
       if (onUpdateProductsList) {
         onUpdateProductsList(result.updatedProducts);
       }
       setMovements(getPersistedStockMovements());
       setOverrideOrder(null);
-      notify(`✅ অর্ডার #${overrideOrder.id}-এর ফিন্যান্সিয়াল হিসাব সফলভাবে আপডেট হয়েছে!`);
+      setConfirmDeleteOverridePackaging(false);
+      notify(`✅ অর্ডার #${overrideOrder.id}-এর ফিন্যান্সিয়াল ও প্যাকেজিং হিসাব সফলভাবে আপডেট হয়েছে!`);
     } finally {
       setIsExecutingAutomation(null);
     }
@@ -1687,6 +1753,13 @@ export const EnterpriseDashboardHub: React.FC<EnterpriseDashboardHubProps> = ({
                                 setOverrideCogs(String(fin.cogsTotal));
                                 setOverrideCourier(String(fin.courierExpense));
                                 setOverridePackaging(String(fin.packagingCost));
+                                setOverridePackagingType(
+                                  ord.packagingType || ord.packagingSnapshot?.packagingType || 'Poly Bag'
+                                );
+                                setOverrideExtraPackaging(
+                                  String(ord.extraPackagingCost ?? ord.packagingSnapshot?.extraPackagingCost ?? 0)
+                                );
+                                setConfirmDeleteOverridePackaging(false);
                                 setOverrideOtherExp(String(fin.otherOrderExpense));
                                 setOverrideReturnCondition(ord.returnCondition || 'sellable');
                                 setOverrideNotes(ord.adminNotes || '');
@@ -1719,14 +1792,17 @@ export const EnterpriseDashboardHub: React.FC<EnterpriseDashboardHubProps> = ({
           {/* Manual Financial Override Modal */}
           {overrideOrder && (
             <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-              <div className={`w-full max-w-lg rounded-2xl border p-6 space-y-4 ${cardBg}`}>
+              <div className={`w-full max-w-xl rounded-2xl border p-6 space-y-4 max-h-[90vh] overflow-y-auto ${cardBg}`}>
                 <div className="flex items-center justify-between">
                   <h4 className="font-extrabold text-base">
-                    অর্ডার #{overrideOrder.id} — ফিন্যান্সিয়াল ওভাররাইড (COGS, কুরিয়ার ও প্যাকেজিং)
+                    অর্ডার #{overrideOrder.id} — ফিন্যান্সিয়াল ও প্যাকেজিং ওভাররাইড
                   </h4>
                   <button
                     type="button"
-                    onClick={() => setOverrideOrder(null)}
+                    onClick={() => {
+                      setOverrideOrder(null);
+                      setConfirmDeleteOverridePackaging(false);
+                    }}
                     className="text-xs font-bold text-rose-500 cursor-pointer"
                   >
                     ✕ বন্ধ করুন
@@ -1752,9 +1828,68 @@ export const EnterpriseDashboardHub: React.FC<EnterpriseDashboardHubProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="font-bold block mb-1">প্যাকেজিং খরচ (৳)</label>
+                    <label className="font-bold block mb-1">প্যাকেজিং ধরন (Packaging Type)</label>
+                    <select
+                      value={overridePackagingType}
+                      onChange={(e) => setOverridePackagingType(e.target.value as PackagingType)}
+                      className="w-full px-3 py-2 rounded-xl border border-stone-300 dark:border-slate-700 bg-transparent font-bold"
+                    >
+                      {PACKAGING_TYPES_LIST.map((pt) => (
+                        <option key={pt} value={pt} className="text-slate-900">
+                          {pt}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="font-bold block mb-1">অতিরিক্ত যৌথ প্যাকেজিং খরচ (৳)</label>
                     <input
                       type="number"
+                      min="0"
+                      value={overrideExtraPackaging}
+                      onChange={(e) => {
+                        const extraVal = e.target.value;
+                        setOverrideExtraPackaging(extraVal);
+                        const snap = buildOrderPackagingSnapshot({
+                          items: overrideOrder.items || [],
+                          products,
+                          orderPackagingType: overridePackagingType,
+                          extraPackagingCost: Math.max(0, Number(extraVal) || 0),
+                          existingSnapshot: overrideOrder.packagingSnapshot,
+                        });
+                        setOverridePackaging(String(snap.itemsPackagingTotal + (Math.max(0, Number(extraVal) || 0))));
+                      }}
+                      className="w-full px-3 py-2 rounded-xl border border-stone-300 dark:border-slate-700 bg-transparent font-bold"
+                    />
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="font-bold">মোট অর্ডার প্যাকেজিং খরচ (৳)</label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const freshSnap = buildOrderPackagingSnapshot({
+                            items: overrideOrder.items || [],
+                            products,
+                            orderPackagingType: overridePackagingType,
+                            extraPackagingCost: Math.max(0, Number(overrideExtraPackaging) || 0),
+                          });
+                          setOverridePackaging(String(freshSnap.totalPackagingCost));
+                        }}
+                        className="text-[10px] font-bold text-indigo-500 hover:underline cursor-pointer"
+                      >
+                        ↻ প্রোডাক্ট ডিফল্ট ({
+                          buildOrderPackagingSnapshot({
+                            items: overrideOrder.items || [],
+                            products,
+                            extraPackagingCost: Math.max(0, Number(overrideExtraPackaging) || 0),
+                          }).totalPackagingCost
+                        }৳)
+                      </button>
+                    </div>
+                    <input
+                      type="number"
+                      min="0"
                       value={overridePackaging}
                       onChange={(e) => setOverridePackaging(e.target.value)}
                       className="w-full px-3 py-2 rounded-xl border border-stone-300 dark:border-slate-700 bg-transparent font-bold"
@@ -1770,6 +1905,62 @@ export const EnterpriseDashboardHub: React.FC<EnterpriseDashboardHubProps> = ({
                     />
                   </div>
                 </div>
+
+                {/* Delete / Reset Packaging Cost with Confirmation */}
+                <div className="flex items-center justify-between p-2.5 rounded-xl border border-rose-200 dark:border-rose-900/50 bg-rose-50/40 dark:bg-rose-950/20 text-xs">
+                  <span className="font-bold text-rose-700 dark:text-rose-300">
+                    প্যাকেজিং খরচ মুছতে বা ০ (শূন্য) করতে চান?
+                  </span>
+                  {!confirmDeleteOverridePackaging ? (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteOverridePackaging(true)}
+                      className="px-2.5 py-1 rounded-lg bg-rose-100 dark:bg-rose-900/50 text-rose-700 dark:text-rose-200 font-bold cursor-pointer"
+                    >
+                      🗑️ প্যাকেজিং খরচ মুছুন
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOverridePackaging('0');
+                          setOverrideExtraPackaging('0');
+                          setConfirmDeleteOverridePackaging(false);
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-rose-600 text-white font-extrabold cursor-pointer"
+                      >
+                        হ্যাঁ, ০৳ নিশ্চিত করুন
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteOverridePackaging(false)}
+                        className="px-2 py-1 rounded-lg border border-stone-300 font-bold cursor-pointer"
+                      >
+                        না
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Packaging Cost History Log */}
+                {Array.isArray(overrideOrder.packagingCostHistory) &&
+                  overrideOrder.packagingCostHistory.length > 0 && (
+                    <div className="p-2.5 rounded-xl border border-stone-200 dark:border-slate-800 bg-stone-50/60 dark:bg-slate-900/40 text-[11px] space-y-1 max-h-28 overflow-y-auto">
+                      <div className="font-extrabold text-stone-600 dark:text-slate-300">
+                        📜 প্যাকেজিং খরচ পরিবর্তনের ইতিহাস (Before & After):
+                      </div>
+                      {overrideOrder.packagingCostHistory.map((h) => (
+                        <div key={h.id} className="flex items-center justify-between text-stone-500 dark:text-slate-400">
+                          <span>
+                            ৳{h.previousCost} → <strong className="text-emerald-600">৳{h.newCost}</strong> ({h.newType || 'Poly Bag'})
+                          </span>
+                          <span>{new Date(h.changedAt).toLocaleString('bn-BD')}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                 <div>
                   <label className="font-bold text-xs block mb-1">অ্যাডমিন নোট</label>
                   <input
@@ -1783,7 +1974,10 @@ export const EnterpriseDashboardHub: React.FC<EnterpriseDashboardHubProps> = ({
                 <div className="flex justify-end gap-2 pt-2">
                   <button
                     type="button"
-                    onClick={() => setOverrideOrder(null)}
+                    onClick={() => {
+                      setOverrideOrder(null);
+                      setConfirmDeleteOverridePackaging(false);
+                    }}
                     className="px-4 py-2 rounded-xl text-xs font-bold border border-stone-300 cursor-pointer"
                   >
                     বাতিল

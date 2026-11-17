@@ -16,9 +16,14 @@ import { db } from './firebase';
 import { INITIAL_PRODUCTS } from '../data/initialCatalog';
 import {
   Product,
+  CartItem,
   Order,
   OrderStatus,
   OrderReturnCondition,
+  PackagingType,
+  OrderPackagingSnapshot,
+  OrderPackagingItemSnapshot,
+  OrderPackagingCostHistoryEntry,
   CustomerUgcCard,
   PurchaseRecord,
   ReinvestmentRecord,
@@ -3598,30 +3603,108 @@ export async function saveOrderPersisted(order: Order): Promise<Order> {
     trackingNumber: order.trackingNumber,
   });
 
+  const existingOrdersList = getPersistedOrders();
+  const prevStoredOrder = existingOrdersList.find((o) => o && o.id === order.id);
+
+  // Determine packaging snapshot & fields:
+  // - If caller passed packagingSnapshot or order already had packagingSnapshot, preserve it.
+  // - If this is a newly created order (created within the last 5 minutes and not previously stored) and no packagingSnapshot is present yet,
+  //   automatically build the immutable Order Packaging Snapshot from the ordered Products' `defaultPackagingCost` (Cost × Quantity, or 0 if not set).
+  // - If this is a pre-existing legacy order being updated (without packagingSnapshot), preserve its existing packagingCost untouched.
+  let effectivePackagingSnapshot = order.packagingSnapshot ?? prevStoredOrder?.packagingSnapshot;
+  let effectivePackagingCost =
+    typeof order.packagingCost === 'number'
+      ? order.packagingCost
+      : prevStoredOrder?.packagingCost;
+  let effectivePackagingType = order.packagingType ?? prevStoredOrder?.packagingType;
+  let effectiveExtraPackagingCost =
+    typeof order.extraPackagingCost === 'number'
+      ? order.extraPackagingCost
+      : prevStoredOrder?.extraPackagingCost;
+  let effectivePackagingHistory =
+    order.packagingCostHistory ?? prevStoredOrder?.packagingCostHistory;
+
+  const isBrandNewOrder =
+    !prevStoredOrder &&
+    !effectivePackagingSnapshot &&
+    typeof effectivePackagingCost !== 'number' &&
+    Date.now() - Number(order.createdAt || Date.now()) < 300000;
+
+  if (isBrandNewOrder) {
+    const catalogProducts = getMergedLocalProducts();
+    const autoSnapshot = buildOrderPackagingSnapshot({
+      items: order.items || [],
+      products: catalogProducts,
+      extraPackagingCost: effectiveExtraPackagingCost || 0,
+      packagingType: effectivePackagingType,
+      useLiveProductDefaults: true,
+    });
+    effectivePackagingSnapshot = autoSnapshot;
+    effectivePackagingCost = autoSnapshot.totalPackagingCost;
+    effectivePackagingType = autoSnapshot.packagingType;
+    effectiveExtraPackagingCost = autoSnapshot.extraPackagingCost;
+    effectivePackagingHistory = appendOrderPackagingCostHistory(effectivePackagingHistory, {
+      action: 'snapshot_created',
+      actor: 'System (Order Creation Snapshot)',
+      previousPackagingCost: 0,
+      newPackagingCost: autoSnapshot.totalPackagingCost,
+      previousExtraCost: 0,
+      newExtraCost: autoSnapshot.extraPackagingCost,
+      newPackagingType: autoSnapshot.packagingType,
+      note: `অর্ডার তৈরির সময় প্রোডাক্টের ডিফল্ট প্যাকেজিং খরচ অনুযায়ী অটো স্ন্যাপশট (মোট: ৳${autoSnapshot.totalPackagingCost})`,
+    });
+  }
+
   const cleanOrder = sanitizeForFirestore({
     ...order,
     merchantOrderId: order.merchantOrderId || order.id,
     ...(effectiveCid ? { consignmentId: effectiveCid } : {}),
     ...(effectiveTrackingId ? { trackingId: effectiveTrackingId } : {}),
+    ...(typeof effectivePackagingCost === 'number' ? { packagingCost: effectivePackagingCost } : {}),
+    ...(effectivePackagingType ? { packagingType: effectivePackagingType } : {}),
+    ...(typeof effectiveExtraPackagingCost === 'number'
+      ? { extraPackagingCost: effectiveExtraPackagingCost }
+      : {}),
+    ...(effectivePackagingSnapshot ? { packagingSnapshot: effectivePackagingSnapshot } : {}),
+    ...(Array.isArray(effectivePackagingHistory) && effectivePackagingHistory.length > 0
+      ? { packagingCostHistory: effectivePackagingHistory }
+      : {}),
     customerTrackingUrl: dokandariOwnTrackingUrl,
     externalCourierTrackingUrl: undefined,
     customerScreenshot: safeScreenshot,
     items: Array.isArray(order.items)
-      ? order.items.map((item) => ({
-          ...item,
-          image:
-            typeof item.image === 'string' && item.image.startsWith('data:') && item.image.length > 20000
-              ? getFallbackProductImage({ id: item.productId || item.id, name: item.name, category: item.category }, 0)
-              : item.image,
-        }))
+      ? order.items.map((item, idx) => {
+          const snapItem = effectivePackagingSnapshot?.items?.[idx];
+          return {
+            ...item,
+            ...(typeof item.unitPackagingCost === 'number'
+              ? { unitPackagingCost: item.unitPackagingCost }
+              : snapItem && typeof snapItem.unitPackagingCost === 'number'
+              ? { unitPackagingCost: snapItem.unitPackagingCost }
+              : {}),
+            ...(item.packagingType
+              ? { packagingType: item.packagingType }
+              : snapItem?.packagingType
+              ? { packagingType: snapItem.packagingType }
+              : {}),
+            image:
+              typeof item.image === 'string' &&
+              item.image.startsWith('data:') &&
+              item.image.length > 20000
+                ? getFallbackProductImage(
+                    { id: item.productId || item.id, name: item.name, category: item.category },
+                    0
+                  )
+                : item.image,
+          };
+        })
       : [],
   });
 
   // 1. Save to localStorage backup so customer & admin never lose an order (supports unlimited consecutive orders)
   try {
-    const existing = getPersistedOrders();
     const deletedIds = getDeletedOrderIds();
-    const filtered = existing.filter(
+    const filtered = existingOrdersList.filter(
       (o) => o && o.id && o.id !== cleanOrder.id && !deletedIds.has(o.id)
     );
     filtered.unshift(cleanOrder);
@@ -5324,6 +5407,126 @@ export async function deleteOperatingExpensePersisted(expenseId: string): Promis
 }
 
 /**
+ * Builds an immutable Order-wise Packaging Cost Snapshot at order creation or manual recalculation time.
+ * Rules:
+ * - For each item, uses the item's snapshot `unitPackagingCost` if already set, otherwise the Product's `defaultPackagingCost`.
+ * - If no `defaultPackagingCost` is set on the Product, uses `0` (NEVER guesses or fabricates any amount).
+ * - Multiplies each item's `unitPackagingCost × quantity` and adds optional `extraPackagingCost` (joint packaging cost).
+ */
+export function buildOrderPackagingSnapshot(params: {
+  items: CartItem[];
+  products: Product[];
+  extraPackagingCost?: number;
+  packagingType?: PackagingType;
+  useLiveProductDefaults?: boolean;
+}): OrderPackagingSnapshot {
+  const {
+    items,
+    products,
+    extraPackagingCost = 0,
+    packagingType,
+    useLiveProductDefaults = true,
+  } = params;
+
+  const productMap = new Map<string, Product>();
+  for (const p of Array.isArray(products) ? products : []) {
+    if (p && p.id) productMap.set(p.id, p);
+  }
+
+  const snapshotItems: OrderPackagingItemSnapshot[] = [];
+  let itemsPackagingTotal = 0;
+  let detectedType: PackagingType | undefined = packagingType;
+
+  for (const it of Array.isArray(items) ? items : []) {
+    const qty = Math.max(1, Number(it.quantity) || 1);
+    const matchedProd =
+      productMap.get(it.productId) ||
+      productMap.get(it.id) ||
+      (Array.isArray(products) ? products.find((p) => p.name === it.name) : undefined);
+
+    const hasExplicitItemPkgCost =
+      typeof it.unitPackagingCost === 'number' && !Number.isNaN(it.unitPackagingCost);
+    const hasProdDefaultPkgCost =
+      matchedProd &&
+      typeof matchedProd.defaultPackagingCost === 'number' &&
+      !Number.isNaN(matchedProd.defaultPackagingCost);
+
+    const unitPkgCost = hasExplicitItemPkgCost
+      ? Math.max(0, Number(it.unitPackagingCost))
+      : useLiveProductDefaults && hasProdDefaultPkgCost
+      ? Math.max(0, Number(matchedProd!.defaultPackagingCost))
+      : 0;
+
+    const itemPkgType: PackagingType | undefined =
+      it.packagingType || matchedProd?.defaultPackagingType;
+    if (!detectedType && itemPkgType) {
+      detectedType = itemPkgType;
+    }
+
+    const linePkgCost = unitPkgCost * qty;
+    itemsPackagingTotal += linePkgCost;
+
+    snapshotItems.push({
+      productId: it.productId || it.id,
+      productName: it.name,
+      quantity: qty,
+      unitPackagingCost: unitPkgCost,
+      linePackagingCost: linePkgCost,
+      packagingType: itemPkgType,
+    });
+  }
+
+  const cleanExtra = Math.max(0, Number(extraPackagingCost) || 0);
+  const totalPackagingCost = itemsPackagingTotal + cleanExtra;
+
+  return {
+    isSnapshotRecorded: true,
+    items: snapshotItems,
+    itemsPackagingTotal,
+    extraPackagingCost: cleanExtra,
+    packagingType: detectedType || 'Bubble Wrap',
+    totalPackagingCost,
+    snapshotAt: Date.now(),
+  };
+}
+
+/**
+ * Resolves the authoritative Packaging Cost for an Order:
+ * - If the Order has an explicit `packagingCost` number (or `packagingSnapshot.isSnapshotRecorded`), uses that exact stored value.
+ *   This guarantees:
+ *   1. Changing a Product's `defaultPackagingCost` in the future NEVER mutates any existing/old Order's packaging cost.
+ *   2. New orders with no Product `defaultPackagingCost` have `packagingCost = 0` (via `packagingSnapshot.isSnapshotRecorded = true`).
+ *   3. Pre-existing legacy orders that had `packagingCost === undefined` (and no `packagingSnapshot`) preserve their historical `15` BDT value so old financial records (such as the historical ৳225 across 15 orders) remain 100% intact unless manually edited by Admin.
+ */
+export function resolveOrderPackagingCost(order: Order): number {
+  if (typeof order.packagingCost === 'number' && !Number.isNaN(order.packagingCost)) {
+    return Math.max(0, Number(order.packagingCost));
+  }
+  if (
+    order.packagingSnapshot &&
+    order.packagingSnapshot.isSnapshotRecorded &&
+    typeof order.packagingSnapshot.totalPackagingCost === 'number'
+  ) {
+    return Math.max(0, Number(order.packagingSnapshot.totalPackagingCost));
+  }
+  // Legacy historical order fallback (preserves the exact pre-existing ৳225 calculation for untouched legacy orders)
+  return 15;
+}
+
+export function appendOrderPackagingCostHistory(
+  existingHistory: OrderPackagingCostHistoryEntry[] | undefined,
+  entry: Omit<OrderPackagingCostHistoryEntry, 'id' | 'timestamp'>
+): OrderPackagingCostHistoryEntry[] {
+  const now = Date.now();
+  const newEntry: OrderPackagingCostHistoryEntry = {
+    ...entry,
+    id: `pkg-hist-${now}-${Math.floor(100 + Math.random() * 899)}`,
+    timestamp: now,
+  };
+  return [newEntry, ...(Array.isArray(existingHistory) ? existingHistory : [])].slice(0, 50);
+}
+
+/**
  * Calculates exact COGS, Courier Expense, Packaging Cost, Return/Damage Loss, and Net Profit/Loss
  * for any Order using the live product catalog cost prices.
  *
@@ -5377,8 +5580,7 @@ export function calculateOrderFinancialBreakdown(
       : typeof order.courierExpense === 'number' && order.courierExpense > 0
       ? order.courierExpense
       : defaultShipping;
-  const packagingCost =
-    typeof order.packagingCost === 'number' ? order.packagingCost : 15;
+  const packagingCost = resolveOrderPackagingCost(order);
   const otherOrderExpense =
     typeof order.otherOrderExpense === 'number' ? order.otherOrderExpense : 0;
 
@@ -5448,14 +5650,6 @@ export function calculateOrderFinancialBreakdown(
 
 /**
  * Transaction-safe, idempotent Status-Based Order Automation Engine (Master Prompt Section 4).
- * Handles all transitions cleanly:
- * - Pending / Processing -> Delivered: Deducts stock once (`stockDeducted = true`), records sale movement, realizes profit.
- * - Delivered -> Returned:
- *   - If `sellable`: Restores stock (`stockDeducted = false`), records return restock movement, records return courier loss.
- *   - If `damaged`: Keeps stock deducted (`stockDeducted = true`), records damage write-off movement, records damaged product loss + courier loss.
- *   - If `pending_inspection`: Holds stock restoration until inspection completes.
- * - Any status -> Cancelled:
- *   - If stock was previously deducted (`stockDeducted === true`), restores stock (`stockDeducted = false`) and reverses revenue/profit.
  */
 export async function executeOrderStatusAutomation(params: {
   order: Order;
@@ -5467,6 +5661,10 @@ export async function executeOrderStatusAutomation(params: {
       | 'cogsTotal'
       | 'courierExpense'
       | 'packagingCost'
+      | 'packagingType'
+      | 'extraPackagingCost'
+      | 'packagingSnapshot'
+      | 'packagingCostHistory'
       | 'otherOrderExpense'
       | 'returnCourierLoss'
       | 'damagedProductLoss'

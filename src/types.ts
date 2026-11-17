@@ -150,6 +150,56 @@ export interface ProductComboConfig {
   pkg3FreeDelivery?: boolean;
 }
 
+export type PackagingType =
+  | 'Bubble Wrap'
+  | 'Small Carton'
+  | 'Large Carton'
+  | 'Poly Bag'
+  | 'Bubble + Carton'
+  | 'Other';
+
+export const PACKAGING_TYPES_LIST: Array<{ value: PackagingType; labelBn: string }> = [
+  { value: 'Bubble Wrap', labelBn: 'Bubble Wrap (বাবল র‍্যাপ)' },
+  { value: 'Small Carton', labelBn: 'Small Carton (ছোট কার্টন)' },
+  { value: 'Large Carton', labelBn: 'Large Carton (বড় কার্টন)' },
+  { value: 'Poly Bag', labelBn: 'Poly Bag (পলি ব্যাগ)' },
+  { value: 'Bubble + Carton', labelBn: 'Bubble + Carton (বাবল + কার্টন)' },
+  { value: 'Other', labelBn: 'Other (অন্যান্য)' },
+];
+
+export interface OrderPackagingItemSnapshot {
+  productId: string;
+  productName: string;
+  quantity: number;
+  unitPackagingCost: number;
+  linePackagingCost: number;
+  packagingType?: PackagingType;
+}
+
+export interface OrderPackagingSnapshot {
+  isSnapshotRecorded: boolean;
+  items: OrderPackagingItemSnapshot[];
+  itemsPackagingTotal: number;
+  extraPackagingCost: number;
+  packagingType?: PackagingType;
+  totalPackagingCost: number;
+  snapshotAt: number;
+}
+
+export interface OrderPackagingCostHistoryEntry {
+  id: string;
+  timestamp: number;
+  action: 'snapshot_created' | 'edited' | 'extra_cost_added' | 'deleted_reset';
+  actor: string;
+  previousPackagingCost: number;
+  newPackagingCost: number;
+  previousExtraCost?: number;
+  newExtraCost?: number;
+  previousPackagingType?: string;
+  newPackagingType?: string;
+  note?: string;
+}
+
 export interface Product {
   id: string;
   name: string;
@@ -173,6 +223,8 @@ export interface Product {
   inStock: boolean;
   stock?: number;
   costPrice?: number;
+  defaultPackagingCost?: number;
+  defaultPackagingType?: PackagingType;
   rating: number;
   reviewCount: number;
   tag?: string;
@@ -218,6 +270,8 @@ export interface CartItem {
   selectedColor?: string;
   selectedSize?: string;
   category: string;
+  unitPackagingCost?: number;
+  packagingType?: PackagingType;
 }
 
 export type PaymentMethod = 'cod' | 'bkash' | 'nagad' | 'rocket';
@@ -319,6 +373,10 @@ export interface Order {
   cogsTotal?: number;
   courierExpense?: number;
   packagingCost?: number;
+  packagingType?: PackagingType;
+  extraPackagingCost?: number;
+  packagingSnapshot?: OrderPackagingSnapshot;
+  packagingCostHistory?: OrderPackagingCostHistoryEntry[];
   otherOrderExpense?: number;
   returnCourierLoss?: number;
   damagedProductLoss?: number;
