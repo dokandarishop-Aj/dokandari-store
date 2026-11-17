@@ -335,7 +335,19 @@ export interface Order {
   returnIdempotencyKey?: string;
 }
 
+export type CanonicalExpenseCategory =
+  | 'ad_cost'
+  | 'product_buying'
+  | 'transport_fare'
+  | 'courier_charge'
+  | 'courier_return_charge'
+  | 'packaging'
+  | 'office_utility'
+  | 'other'
+  | 'unclassified';
+
 export type ExpenseCategoryType =
+  | CanonicalExpenseCategory
   | 'facebook_ads'
   | 'tiktok_ads'
   | 'google_ads'
@@ -346,15 +358,56 @@ export type ExpenseCategoryType =
   | 'utilities'
   | 'miscellaneous';
 
+export interface ExpenseAuditEntry {
+  id: string;
+  timestamp: number;
+  action:
+    | 'created'
+    | 'edited'
+    | 'category_changed'
+    | 'amount_changed'
+    | 'date_changed'
+    | 'soft_deleted'
+    | 'restored'
+    | 'auto_synced';
+  actor: string;
+  summary: string;
+  previousValues?: {
+    date?: string;
+    category?: string;
+    amount?: number;
+    description?: string;
+    notes?: string;
+    isDeleted?: boolean;
+  };
+  newValues?: {
+    date?: string;
+    category?: string;
+    amount?: number;
+    description?: string;
+    notes?: string;
+    isDeleted?: boolean;
+  };
+}
+
 export interface OperatingExpense {
   id: string;
   date: string; // YYYY-MM-DD
   category: ExpenseCategoryType;
+  rawCategory?: string;
+  categoryLabel?: string;
   title: string;
+  description?: string;
+  note?: string;
   amount: number;
   paymentMethod?: string;
   referenceId?: string;
   notes?: string;
+  isDeleted?: boolean;
+  deletedAt?: number | null;
+  idempotencyKey?: string;
+  source?: 'manual' | 'courier_return_auto' | 'order_expense_auto' | 'purchase_auto' | 'system';
+  auditLog?: ExpenseAuditEntry[];
   createdAt: number;
   updatedAt: number;
 }

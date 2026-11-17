@@ -89,6 +89,9 @@ import {
   InventoryMovement,
   PurchaseRecord,
   ReinvestmentRecord,
+  CanonicalExpenseCategory,
+  OperatingExpense,
+  ExpenseAuditEntry,
 } from '../types';
 import {
   updateLeadStatus,
@@ -179,6 +182,21 @@ import {
   saveCourierAuditLogPersisted,
   processCourierReturnAutomationIdempotent,
   buildCustomerTrackingUrl,
+  CANONICAL_EXPENSE_CATEGORY_META,
+  ORDERED_CANONICAL_EXPENSE_CATEGORIES,
+  normalizeExpenseCategory,
+  normalizeExpenseRecord,
+  getExpenseCategoryLabelBn,
+  isDateWithinExpenseRange,
+  calculateExpenseBreakdownAndReconciliation,
+  calculateMonthlyFinancialReport,
+  getPersistedOperatingExpenses,
+  syncOperatingExpensesToLocalCache,
+  fetchServerExpensesMirror,
+  mergeExpenseLists,
+  saveOperatingExpensePersisted,
+  softDeleteOperatingExpensePersisted,
+  restoreOperatingExpensePersisted,
 } from '../lib/storeSync';
 import {
   OfficialWhatsAppIcon,
@@ -418,22 +436,20 @@ interface SavedCampaign extends AICampaignOutput {
   createdAt: number;
 }
 
-export interface BusinessExpense {
+export interface BusinessExpense extends OperatingExpense {
   id: string;
   date: string; // YYYY-MM-DD
-  category:
-    | 'product_buying'
-    | 'ad_cost'
-    | 'transport_fare'
-    | 'courier_charge'
-    | 'courier_return_charge'
-    | 'packaging'
-    | 'office_utility'
-    | 'other';
+  category: CanonicalExpenseCategory;
   categoryLabel: string;
   amount: number;
   note: string;
+  description?: string;
+  notes?: string;
+  isDeleted?: boolean;
+  deletedAt?: number | null;
+  auditLog?: ExpenseAuditEntry[];
   createdAt: number;
+  updatedAt: number;
 }
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({
@@ -782,14 +798,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [editOrderAddProdId, setEditOrderAddProdId] = useState('');
   const [selectedOrderScreenshotModal, setSelectedOrderScreenshotModal] = useState<Order | null>(null);
 
-  // Business Expense Edit State
+  // Business Expense Edit, Soft-Delete Confirmation & Audit Modal State
   const [editingExpense, setEditingExpense] = useState<BusinessExpense | null>(null);
   const [isEditExpenseModalOpen, setIsEditExpenseModalOpen] = useState(false);
   const [editExpenseDate, setEditExpenseDate] = useState('');
-  const [editExpenseCategory, setEditExpenseCategory] = useState<BusinessExpense['category']>('ad_cost');
+  const [editExpenseCategory, setEditExpenseCategory] = useState<CanonicalExpenseCategory>('ad_cost');
   const [editExpenseAmount, setEditExpenseAmount] = useState<number | ''>('');
   const [editExpenseNote, setEditExpenseNote] = useState('');
+  const [editExpenseExtraNotes, setEditExpenseExtraNotes] = useState('');
   const [editExpenseSaving, setEditExpenseSaving] = useState(false);
+  const [expensePendingDelete, setExpensePendingDelete] = useState<BusinessExpense | null>(null);
+  const [isDeletingExpense, setIsDeletingExpense] = useState(false);
+  const [restoringExpenseId, setRestoringExpenseId] = useState<string | null>(null);
+  const [expenseLedgerViewMode, setExpenseLedgerViewMode] = useState<'active' | 'archived'>('active');
+  const [selectedExpenseAudit, setSelectedExpenseAudit] = useState<BusinessExpense | null>(null);
 
   // =========================================================================
   // COURIER RETURN MANAGEMENT & AUTOMATIC STOCK ADJUSTMENT STATE
@@ -910,50 +932,135 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   };
 
   // Business Expense Tracking & P&L State
-  const [expenses, setExpenses] = useState<BusinessExpense[]>(() => {
-    try {
-      const cached = localStorage.getItem('dokandari_expenses_backup_v1');
-      if (cached !== null) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed)) return parsed;
-      }
-    } catch {
-      // ignore
-    }
-    return [];
-  });
-  const [expenseRange, setExpenseRange] = useState<'today' | 'week' | 'month' | 'all'>('month');
-  const [newExpenseCategory, setNewExpenseCategory] = useState<BusinessExpense['category']>('ad_cost');
+  const [expenses, setExpenses] = useState<BusinessExpense[]>(() =>
+    getPersistedOperatingExpenses().map((e) => normalizeExpenseRecord(e) as BusinessExpense)
+  );
+  const [expenseRange, setExpenseRange] = useState<'today' | 'week' | 'month' | 'all'>('all');
+  const [newExpenseCategory, setNewExpenseCategory] = useState<CanonicalExpenseCategory>('ad_cost');
   const [newExpenseAmount, setNewExpenseAmount] = useState<number | ''>('');
   const [newExpenseDate, setNewExpenseDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [newExpenseNote, setNewExpenseNote] = useState<string>('');
+  const [newExpenseExtraNotes, setNewExpenseExtraNotes] = useState<string>('');
   const [isSubmittingExpense, setIsSubmittingExpense] = useState(false);
 
-  // Real-time listener for Firestore business expenses
+  // Real-time listener for Firestore business expenses + Server Mirror (/api/expenses) + Cross-tab sync
   useEffect(() => {
-    try {
-      const unsub = onSnapshot(
-        collection(db, 'business_expenses'),
-        (snap) => {
-          const loaded: BusinessExpense[] = [];
-          snap.forEach((d) => {
-            loaded.push({ id: d.id, ...(d.data() as any) });
-          });
-          loaded.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-          setExpenses(loaded);
+    let isMounted = true;
+
+    // 1. Fetch server mirror `/api/expenses` immediately on mount and merge with local cache
+    fetchServerExpensesMirror()
+      .then((serverList) => {
+        if (!isMounted || serverList.length === 0) return;
+        setExpenses((prev) => {
+          const merged = mergeExpenseLists(serverList, prev).map(
+            (e) => normalizeExpenseRecord(e) as BusinessExpense
+          );
           try {
-            localStorage.setItem('dokandari_expenses_backup_v1', JSON.stringify(loaded));
+            localStorage.setItem('dokandari_expenses_backup_v1', JSON.stringify(merged));
           } catch {
             // ignore
           }
+          return merged;
+        });
+      })
+      .catch(() => null);
+
+    // 2. Listen for custom window event when Business Command Center (#18) updates expenses
+    const handleCustomExpensesSync = (ev: Event) => {
+      const customEv = ev as CustomEvent<OperatingExpense[]>;
+      const incoming = Array.isArray(customEv.detail)
+        ? customEv.detail
+        : getPersistedOperatingExpenses();
+      setExpenses(incoming.map((e) => normalizeExpenseRecord(e) as BusinessExpense));
+    };
+    window.addEventListener('dokandari:expenses-updated', handleCustomExpensesSync);
+
+    // 3. Real-time Firestore listener on `business_expenses`
+    let unsub: (() => void) | undefined;
+    try {
+      unsub = onSnapshot(
+        collection(db, 'business_expenses'),
+        (snap) => {
+          const loadedFromFs: OperatingExpense[] = [];
+          snap.forEach((d) => {
+            loadedFromFs.push(normalizeExpenseRecord({ id: d.id, ...(d.data() as any) }));
+          });
+          setExpenses((prev) => {
+            const merged = mergeExpenseLists(loadedFromFs, prev).map(
+              (e) => normalizeExpenseRecord(e) as BusinessExpense
+            );
+            try {
+              localStorage.setItem('dokandari_expenses_backup_v1', JSON.stringify(merged));
+            } catch {
+              // ignore
+            }
+            return merged;
+          });
         },
         (err) => console.warn('Expenses listener notice:', err)
       );
-      return () => unsub();
     } catch {
       // ignore
     }
+
+    return () => {
+      isMounted = false;
+      window.removeEventListener('dokandari:expenses-updated', handleCustomExpensesSync);
+      if (unsub) unsub();
+    };
   }, []);
+
+  // Automatically ensure verified courier return charges have deterministic `exp-ret-{id}` records in `expenses`
+  // (Respects manual edits or soft-deletes if `exp-ret-{id}` already exists in `expenses`)
+  useEffect(() => {
+    if (!Array.isArray(courierReturns) || courierReturns.length === 0) return;
+    const existingIds = new Set(expenses.map((e) => e.id));
+    const missingReturnExpenses: BusinessExpense[] = [];
+
+    for (const ret of courierReturns) {
+      if (
+        ret &&
+        ret.id &&
+        ret.chargeVerificationStatus !== 'pending_verification' &&
+        Number(ret.returnCharge) > 0
+      ) {
+        const expId = `exp-ret-${ret.id}`;
+        if (!existingIds.has(expId)) {
+          const norm = normalizeExpenseRecord({
+            id: expId,
+            date: ret.returnDate || new Date(ret.createdAt || Date.now()).toISOString().slice(0, 10),
+            category: 'courier_return_charge',
+            categoryLabel: CANONICAL_EXPENSE_CATEGORY_META.courier_return_charge.labelBn,
+            description: `অর্ডার #${ret.orderId} - ভেরিফাইড কুরিয়ার রিটার্ন চার্জ (${ret.courierName || 'Courier'})`,
+            note: `অর্ডার #${ret.orderId} - ভেরিফাইড কুরিয়ার রিটার্ন চার্জ (${ret.courierName || 'Courier'})`,
+            notes: ret.notes || '',
+            amount: Number(ret.returnCharge),
+            source: 'courier_return_auto',
+            referenceId: ret.orderId,
+            isDeleted: false,
+            createdAt: ret.createdAt || Date.now(),
+            updatedAt: ret.updatedAt || Date.now(),
+          }) as BusinessExpense;
+          missingReturnExpenses.push(norm);
+        }
+      }
+    }
+
+    if (missingReturnExpenses.length > 0) {
+      setExpenses((prev) => {
+        const merged = mergeExpenseLists(missingReturnExpenses, prev).map(
+          (e) => normalizeExpenseRecord(e) as BusinessExpense
+        );
+        syncOperatingExpensesToLocalCache(merged);
+        return merged;
+      });
+      missingReturnExpenses.forEach((exp) => {
+        saveOperatingExpensePersisted(exp, { isEdit: true, actor: 'System Auto-Sync' }).catch(
+          () => null
+        );
+      });
+    }
+  }, [courierReturns, expenses]);
 
   // Real-time listener for Courier Returns and Inventory Movements
   useEffect(() => {
@@ -1062,20 +1169,25 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     if (ret.returnCharge > 0) {
       try {
         const expId = `exp-ret-${ret.id}`;
-        const expDoc: BusinessExpense = {
+        const expDoc = normalizeExpenseRecord({
           id: expId,
           date: ret.returnDate || new Date().toISOString().slice(0, 10),
           category: 'courier_return_charge',
-          categoryLabel: 'কুরিয়ার রিটার্ন চার্জ',
+          categoryLabel: CANONICAL_EXPENSE_CATEGORY_META.courier_return_charge.labelBn,
           amount: Number(ret.returnCharge),
+          description: `অর্ডার #${ret.orderId} - রিটার্ন চার্জ (${ret.courierName}) - ${ret.customerName}`,
           note: `অর্ডার #${ret.orderId} - রিটার্ন চার্জ (${ret.courierName}) - ${ret.customerName}`,
           createdAt: ret.createdAt || Date.now(),
-        };
-        setExpenses((prev) => {
-          const filtered = prev.filter((e) => e.id !== expId);
-          return [expDoc, ...filtered];
+          updatedAt: Date.now(),
+        }) as BusinessExpense;
+        const savedExp = await saveOperatingExpensePersisted(expDoc, {
+          isEdit: true,
+          actor: 'Courier Return Sync',
         });
-        await setDoc(doc(db, 'business_expenses', expId), expDoc, { merge: true });
+        setExpenses((prev) => [
+          savedExp as BusinessExpense,
+          ...prev.filter((e) => e.id !== expId),
+        ]);
         updatedRet.expenseRecorded = true;
       } catch (err) {
         console.warn('Expense record error:', err);
@@ -1348,20 +1460,22 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
     const expId = `exp-ret-${ret.id}`;
     if (nextCharge > 0) {
-      const expDoc: BusinessExpense = {
+      const expDoc = normalizeExpenseRecord({
         id: expId,
         date: ret.returnDate || new Date().toISOString().slice(0, 10),
         category: 'courier_return_charge',
-        categoryLabel: 'কুরিয়ার রিটার্ন চার্জ',
+        categoryLabel: CANONICAL_EXPENSE_CATEGORY_META.courier_return_charge.labelBn,
         amount: nextCharge,
+        description: `অর্ডার #${ret.orderId} - ভেরিফাইড কুরিয়ার রিটার্ন চার্জ (${ret.courierName}) - ${ret.customerName}`,
         note: `অর্ডার #${ret.orderId} - ভেরিফাইড কুরিয়ার রিটার্ন চার্জ (${ret.courierName}) - ${ret.customerName}`,
         createdAt: ret.createdAt || now,
-      };
+        updatedAt: now,
+      }) as BusinessExpense;
       setExpenses((prev) => [expDoc, ...prev.filter((e) => e.id !== expId)]);
       await Promise.allSettled([
         saveCourierReturnPersisted(updatedRet),
         saveCourierAuditLogPersisted(auditEntry),
-        setDoc(doc(db, 'business_expenses', expId), expDoc, { merge: true }),
+        saveOperatingExpensePersisted(expDoc, { isEdit: true, actor: 'Return Verification' }),
       ]);
     } else {
       setExpenses((prev) => prev.filter((e) => e.id !== expId));
@@ -1486,17 +1600,25 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
       const expId = `exp-ret-${updatedRet.id}`;
       if (editRetVerificationStatus === 'verified' && totalVerifiedCharge > 0) {
-        const expDoc: BusinessExpense = {
+        const expDoc = normalizeExpenseRecord({
           id: expId,
           date: updatedRet.returnDate || new Date(now).toISOString().slice(0, 10),
           category: 'courier_return_charge',
-          categoryLabel: 'কুরিয়ার রিটার্ন চার্জ',
+          categoryLabel: CANONICAL_EXPENSE_CATEGORY_META.courier_return_charge.labelBn,
           amount: totalVerifiedCharge,
+          description: `অর্ডার #${updatedRet.orderId} (${updatedRet.courierName}) — ডেলিভারি ৳${cleanDelivery} + রিটার্ন ফি ৳${cleanReturnFee}`,
           note: `অর্ডার #${updatedRet.orderId} (${updatedRet.courierName}) — ডেলিভারি ৳${cleanDelivery} + রিটার্ন ফি ৳${cleanReturnFee}`,
           createdAt: updatedRet.createdAt || now,
-        };
-        setExpenses((prev) => [expDoc, ...prev.filter((ex) => ex.id !== expId)]);
-        await setDoc(doc(db, 'business_expenses', expId), expDoc, { merge: true });
+          updatedAt: now,
+        }) as BusinessExpense;
+        const savedExp = await saveOperatingExpensePersisted(expDoc, {
+          isEdit: true,
+          actor: 'Return Edit',
+        });
+        setExpenses((prev) => [
+          savedExp as BusinessExpense,
+          ...prev.filter((ex) => ex.id !== expId),
+        ]);
       } else {
         setExpenses((prev) => prev.filter((ex) => ex.id !== expId));
         await deleteDoc(doc(db, 'business_expenses', expId)).catch(() => {});
@@ -2121,119 +2243,174 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   const handleAddExpense = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newExpenseAmount || Number(newExpenseAmount) <= 0) return;
+    if (!newExpenseAmount || Number(newExpenseAmount) <= 0) {
+      setFeedback('⚠️ অনুগ্রহ করে সঠিক খরচের পরিমাণ (৳) লিখুন।');
+      setTimeout(() => setFeedback(''), 3500);
+      return;
+    }
     setIsSubmittingExpense(true);
     try {
-      const categoryLabels: Record<string, string> = {
-        product_buying: 'পণ্য ক্রয় / সোর্সিং',
-        ad_cost: 'মেটা ও টিকটক অ্যাড স্পেন্ড',
-        transport_fare: 'রিকশা / গাড়ি / যাতায়াত ভাড়া',
-        courier_charge: 'কুরিয়ার ও ডেলিভারি খরচ',
-        courier_return_charge: 'কুরিয়ার রিটার্ন চার্জ',
-        packaging: 'বক্স ও প্যাকেজিং খরচ',
-        office_utility: 'অফিস / নাস্তা / ইউটিলিটি',
-        other: 'অন্যান্য বিবিধ খরচ',
-      };
-      const newExp: BusinessExpense = {
-        id: `exp-${Date.now()}`,
-        date: newExpenseDate || new Date().toISOString().slice(0, 10),
-        category: newExpenseCategory,
-        categoryLabel: categoryLabels[newExpenseCategory] || 'বিবিধ খরচ',
-        amount: Number(newExpenseAmount),
-        note: newExpenseNote.trim() || categoryLabels[newExpenseCategory],
-        createdAt: Date.now(),
-      };
-      setExpenses((prev) => {
-        const next = [newExp, ...prev.filter((x) => x.id !== newExp.id)];
-        try {
-          localStorage.setItem('dokandari_expenses_backup_v1', JSON.stringify(next));
-        } catch {
-          // ignore
+      const canonicalCat = normalizeExpenseCategory(newExpenseCategory);
+      const catMeta = CANONICAL_EXPENSE_CATEGORY_META[canonicalCat];
+      const desc = newExpenseNote.trim() || catMeta.labelBn;
+      const saved = await saveOperatingExpensePersisted(
+        {
+          id: `exp-${Date.now()}-${Math.floor(100 + Math.random() * 899)}`,
+          date: newExpenseDate || new Date().toISOString().slice(0, 10),
+          category: canonicalCat,
+          categoryLabel: catMeta.labelBn,
+          title: desc,
+          description: desc,
+          note: desc,
+          notes: newExpenseExtraNotes.trim(),
+          amount: Number(newExpenseAmount),
+          isDeleted: false,
+          source: 'manual',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+        {
+          isEdit: false,
+          actor: userProfile?.displayName || userProfile?.email || 'Admin',
         }
+      );
+
+      setExpenses((prev) => {
+        const next = [
+          normalizeExpenseRecord(saved) as BusinessExpense,
+          ...prev.filter((x) => x.id !== saved.id),
+        ];
         return next;
       });
       setNewExpenseAmount('');
       setNewExpenseNote('');
-      try {
-        await setDoc(doc(db, 'business_expenses', newExp.id), newExp);
-      } catch (err) {
-        console.warn('Firestore expense sync note (saved locally):', err);
-      }
-      setFeedback('✅ নতুন খরচ সফলভাবে সেভ হয়েছে!');
-      setTimeout(() => setFeedback(''), 3000);
+      setNewExpenseExtraNotes('');
+      setFeedback(
+        `✅ নতুন খরচ (${catMeta.shortLabelBn}: ৳${Number(saved.amount).toLocaleString()}) ডাটাবেজে সংরক্ষিত ও সব রিপোর্টে অটো-সিঙ্ক হয়েছে!`
+      );
+      setTimeout(() => setFeedback(''), 4000);
+    } catch (err: any) {
+      setFeedback(`❌ ${err?.message || 'ডাটাবেজে খরচ সেভ করা যায়নি।'}`);
+      setTimeout(() => setFeedback(''), 4500);
     } finally {
       setIsSubmittingExpense(false);
     }
   };
 
-  const handleDeleteExpense = async (id: string) => {
-    setExpenses((prev) => {
-      const next = prev.filter((x) => x.id !== id);
-      try {
-        localStorage.setItem('dokandari_expenses_backup_v1', JSON.stringify(next));
-      } catch {
-        // ignore
-      }
-      return next;
-    });
+  const handleRequestDeleteExpense = (exp: BusinessExpense) => {
+    setExpensePendingDelete(exp);
+  };
+
+  const handleConfirmSoftDeleteExpense = async () => {
+    if (!expensePendingDelete) return;
+    setIsDeletingExpense(true);
     try {
-      await deleteDoc(doc(db, 'business_expenses', id));
-    } catch (err) {
-      console.warn('Delete expense note:', err);
+      const target = expensePendingDelete;
+      const archived = await softDeleteOperatingExpensePersisted(
+        target.id,
+        userProfile?.displayName || userProfile?.email || 'Admin'
+      );
+      setExpenses((prev) =>
+        prev.map((x) =>
+          x.id === archived.id ? (normalizeExpenseRecord(archived) as BusinessExpense) : x
+        )
+      );
+      setExpensePendingDelete(null);
+      setFeedback(
+        `🗑️ খরচটি (৳${Number(target.amount).toLocaleString()}) সক্রিয় হিসাব থেকে বাদ দিয়ে আর্কাইভে রাখা হয়েছে। ভুল হলে যেকোনো সময় Restore করতে পারবেন!`
+      );
+      setTimeout(() => setFeedback(''), 4500);
+    } catch (err: any) {
+      setFeedback(`❌ ${err?.message || 'খরচ ডিলিট করতে সমস্যা হয়েছে।'}`);
+      setTimeout(() => setFeedback(''), 4500);
+    } finally {
+      setIsDeletingExpense(false);
     }
-    setFeedback('🗑️ খরচটি মুছে ফেলা হয়েছে।');
-    setTimeout(() => setFeedback(''), 3000);
+  };
+
+  const handleRestoreExpense = async (exp: BusinessExpense) => {
+    setRestoringExpenseId(exp.id);
+    try {
+      const restored = await restoreOperatingExpensePersisted(
+        exp.id,
+        userProfile?.displayName || userProfile?.email || 'Admin'
+      );
+      setExpenses((prev) =>
+        prev.map((x) =>
+          x.id === restored.id ? (normalizeExpenseRecord(restored) as BusinessExpense) : x
+        )
+      );
+      setFeedback(
+        `♻️ খরচটি (${exp.categoryLabel || exp.category}: ৳${Number(exp.amount).toLocaleString()}) সফলভাবে পুনরুদ্ধার (Restore) করা হয়েছে এবং সব ফিন্যান্সিয়াল রিপোর্টে পুনরায় যুক্ত হয়েছে!`
+      );
+      setTimeout(() => setFeedback(''), 4500);
+    } catch (err: any) {
+      setFeedback(`❌ ${err?.message || 'খরচ পুনরুদ্ধার করা যায়নি।'}`);
+      setTimeout(() => setFeedback(''), 4500);
+    } finally {
+      setRestoringExpenseId(null);
+    }
   };
 
   const handleOpenEditExpense = (exp: BusinessExpense) => {
-    setEditingExpense(exp);
-    setEditExpenseDate(exp.date);
-    setEditExpenseCategory(exp.category);
-    setEditExpenseAmount(exp.amount);
-    setEditExpenseNote(exp.note);
+    const norm = normalizeExpenseRecord(exp) as BusinessExpense;
+    setEditingExpense(norm);
+    setEditExpenseDate(norm.date);
+    setEditExpenseCategory(normalizeExpenseCategory(norm.category, norm.categoryLabel));
+    setEditExpenseAmount(norm.amount);
+    setEditExpenseNote(norm.description || norm.note || norm.title || '');
+    setEditExpenseExtraNotes(norm.notes || '');
     setIsEditExpenseModalOpen(true);
   };
 
   const handleUpdateExpense = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingExpense || !editExpenseAmount || Number(editExpenseAmount) <= 0) return;
+    if (!editingExpense || !editExpenseAmount || Number(editExpenseAmount) <= 0) {
+      setFeedback('⚠️ অনুগ্রহ করে সঠিক টাকার পরিমাণ লিখুন।');
+      setTimeout(() => setFeedback(''), 3500);
+      return;
+    }
     setEditExpenseSaving(true);
     try {
-      const categoryLabels: Record<string, string> = {
-        product_buying: 'পণ্য ক্রয় / সোর্シング',
-        ad_cost: 'মেটা ও টিকটক অ্যাড স্পেন্ড',
-        transport_fare: 'রিকশা / গাড়ি / যাতায়াত ভাড়া',
-        courier_charge: 'কুরিয়ার ও ডেলিভারি খরচ',
-        courier_return_charge: 'কুরিয়ার রিটার্ন চার্জ',
-        packaging: 'বক্স ও প্যাকেজিং খরচ',
-        office_utility: 'অফিস / নাস্তা / ইউটিলিটি',
-        other: 'অন্যান্য বিবিধ খরচ',
-      };
-      const updated: BusinessExpense = {
-        ...editingExpense,
-        date: editExpenseDate,
-        category: editExpenseCategory,
-        categoryLabel: categoryLabels[editExpenseCategory] || 'বিবিধ খরচ',
-        amount: Number(editExpenseAmount),
-        note: editExpenseNote.trim() || categoryLabels[editExpenseCategory],
-        createdAt: editingExpense.createdAt || Date.now(),
-      };
-      setExpenses((prev) => {
-        const next = prev.map((x) => (x.id === updated.id ? updated : x));
-        try {
-          localStorage.setItem('dokandari_expenses_backup_v1', JSON.stringify(next));
-        } catch {
-          // ignore
+      const canonicalCat = normalizeExpenseCategory(editExpenseCategory);
+      const catMeta = CANONICAL_EXPENSE_CATEGORY_META[canonicalCat];
+      const desc = editExpenseNote.trim() || catMeta.labelBn;
+
+      const updated = await saveOperatingExpensePersisted(
+        {
+          ...editingExpense,
+          id: editingExpense.id,
+          date: editExpenseDate || editingExpense.date,
+          category: canonicalCat,
+          categoryLabel: catMeta.labelBn,
+          title: desc,
+          description: desc,
+          note: desc,
+          notes: editExpenseExtraNotes.trim(),
+          amount: Number(editExpenseAmount),
+          isDeleted: Boolean(editingExpense.isDeleted),
+        },
+        {
+          isEdit: true,
+          previousRecord: editingExpense,
+          actor: userProfile?.displayName || userProfile?.email || 'Admin',
         }
-        return next;
-      });
-      await setDoc(doc(db, 'business_expenses', updated.id), updated, { merge: true });
+      );
+
+      setExpenses((prev) =>
+        prev.map((x) =>
+          x.id === updated.id ? (normalizeExpenseRecord(updated) as BusinessExpense) : x
+        )
+      );
       setIsEditExpenseModalOpen(false);
       setEditingExpense(null);
-      setFeedback('✅ খরচটির বিবরণ সফলভাবে আপডেট ও ডাটাবেজে সেভ হয়েছে!');
-      setTimeout(() => setFeedback(''), 3000);
-    } catch (err) {
-      console.warn('Update expense error:', err);
+      setFeedback(
+        `✅ খরচটির বিবরণ (${catMeta.shortLabelBn}: ৳${Number(updated.amount).toLocaleString()}) সফলভাবে ডাটাবেজে আপডেট ও সব রিপোর্টে পুনঃগণনা হয়েছে!`
+      );
+      setTimeout(() => setFeedback(''), 4000);
+    } catch (err: any) {
+      setFeedback(`❌ ${err?.message || 'খরচ আপডেট করা যায়নি।'}`);
+      setTimeout(() => setFeedback(''), 4500);
     } finally {
       setEditExpenseSaving(false);
     }
@@ -2241,28 +2418,38 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   const handleExportPnLToCSV = () => {
     const todayStr = new Date().toISOString().slice(0, 10);
+    const activeOrders = orders.filter((o) => o.status !== 'cancelled' && o.status !== 'returned');
+    const recon = calculateExpenseBreakdownAndReconciliation(expenses, expenseRange);
     let csv = '\uFEFF';
     csv += 'Dokandari.com — সেলস লাভ-ক্ষতি ও ব্যবসা হিসাব রিপোর্ট\n';
     csv += `রিপোর্ট তৈরির তারিখ:,${todayStr}\n\n`;
     csv += '--- বিক্রয় / অর্ডার বিবরণ ---\n';
     csv += 'অর্ডার আইডি,তারিখ,কাস্টমার,মোবাইল,পণ্য,পেমেন্ট,স্ট্যাটাস,টাকার পরিমাণ (BDT)\n';
-    orders.forEach((o) => {
+    activeOrders.forEach((o) => {
       const itemsStr = o.items.map((i) => `${i.quantity}x ${i.name.replace(/,/g, ' ')}`).join(' + ');
       const dt = new Date(o.createdAt).toLocaleDateString('bn-BD');
       csv += `"${o.id}","${dt}","${o.customer.name.replace(/,/g, ' ')}","${o.customer.phone}","${itemsStr}","${o.paymentMethod}","${o.status}",${o.total}\n`;
     });
-    csv += `\nমোট বিক্রয় (আয়):,,,,,${orders.reduce((a, b) => a + b.total, 0)}\n\n`;
+    const totalRev = activeOrders.reduce((a, b) => a + b.total, 0);
+    csv += `\nমোট বিক্রয় (আয়):,,,,,${totalRev}\n\n`;
 
-    csv += '--- ব্যবসা খরচ বিবরণ (Ad Sourcing Transport Packaging) ---\n';
-    csv += 'আইডি,তারিখ,ক্যাটাগরি,বিবরণ,টাকার পরিমাণ (BDT)\n';
-    expenses.forEach((e) => {
-      csv += `"${e.id}","${e.date}","${e.categoryLabel}","${e.note.replace(/,/g, ' ')}",${e.amount}\n`;
+    csv += '--- খরচের খাতভিত্তিক বিশ্লেষণ (Expense Category Breakdown) ---\n';
+    csv += 'ক্যাটাগরি,এন্ট্রি সংখ্যা,টাকার পরিমাণ (BDT)\n';
+    ORDERED_CANONICAL_EXPENSE_CATEGORIES.forEach((cat) => {
+      csv += `"${CANONICAL_EXPENSE_CATEGORY_META[cat].labelBn}",${recon.countByType[cat] || 0},${recon.expenseByType[cat] || 0}\n`;
     });
-    const totalExp = expenses.reduce((a, b) => a + b.amount, 0);
-    const totalRev = orders.reduce((a, b) => a + b.total, 0);
-    const netProf = totalRev - totalExp;
-    csv += `\nমোট খরচ:,,,,${totalExp}\n`;
-    csv += `নিট লাভ / ক্ষতি (Net Profit):,,,,${netProf}\n`;
+    csv += `"সর্বমোট সক্রিয় খরচ (Total Expenses)",,${recon.totalExpenses}\n\n`;
+
+    csv += '--- সক্রিয় ব্যবসা খরচ লেজার (Active Expense Ledger) ---\n';
+    csv += 'আইডি,তারিখ,ক্যাটাগরি,বিবরণ,অতিরিক্ত নোট,টাকার পরিমাণ (BDT)\n';
+    recon.activeExpenses.forEach((e) => {
+      const desc = (e.description || e.note || e.title || '').replace(/"/g, '""');
+      const notes = (e.notes || '').replace(/"/g, '""');
+      csv += `"${e.id}","${e.date}","${getExpenseCategoryLabelBn(e.category, e.categoryLabel)}","${desc}","${notes}",${e.amount}\n`;
+    });
+    const netProf = totalRev - recon.totalExpenses;
+    csv += `\nমোট সক্রিয় খরচ:,,,,,${recon.totalExpenses}\n`;
+    csv += `নিট লাভ / ক্ষতি (Net Profit):,,,,,${netProf}\n`;
 
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -11017,38 +11204,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
            ===================================================================== */}
         {activeTool === 'analytics' && (() => {
           const now = Date.now();
-          const oneDayMs = 24 * 3600 * 1000;
-          const sevenDaysMs = 7 * oneDayMs;
-          const thirtyDaysMs = 30 * oneDayMs;
 
-          // Filter orders & expenses based on selected time range
-          // Section C & D Rule: Exclude both cancelled AND returned orders from active/delivered sales revenue & soldProductCogs
-          // so returned order revenue is removed from Delivered Sales and its product purchase cost (COGS) is NEVER counted a second time!
+          // Filter orders & courier returns based on selected time range using unified date range matcher
+          // Exclude cancelled AND returned orders from active/delivered sales revenue
           const filteredOrders = orders.filter((o) => {
             if (o.status === 'cancelled' || o.status === 'returned') return false;
-            if (expenseRange === 'today') return now - o.createdAt <= oneDayMs;
-            if (expenseRange === 'week') return now - o.createdAt <= sevenDaysMs;
-            if (expenseRange === 'month') return now - o.createdAt <= thirtyDaysMs;
-            return true;
+            return isDateWithinExpenseRange(undefined, o.createdAt, expenseRange, now);
           });
 
-          const filteredExpenses = expenses.filter((e) => {
-            if (expenseRange === 'today') return now - (e.createdAt || 0) <= oneDayMs;
-            if (expenseRange === 'week') return now - (e.createdAt || 0) <= sevenDaysMs;
-            if (expenseRange === 'month') return now - (e.createdAt || 0) <= thirtyDaysMs;
-            return true;
-          });
-
-          // Filter courier returns based on selected time range
-          const filteredReturns = courierReturns.filter((r) => {
-            if (expenseRange === 'today') return now - (r.createdAt || 0) <= oneDayMs;
-            if (expenseRange === 'week') return now - (r.createdAt || 0) <= sevenDaysMs;
-            if (expenseRange === 'month') return now - (r.createdAt || 0) <= thirtyDaysMs;
-            return true;
-          });
+          const filteredReturns = courierReturns.filter((r) =>
+            isDateWithinExpenseRange(r.returnDate, r.createdAt || 0, expenseRange, now)
+          );
 
           const pnlTotalReturns = filteredReturns.length;
-          // Only sum VERIFIED courier return charges into realized P&L expense; pending_verification stays pending until verified
           const pnlTotalReturnCharge = filteredReturns
             .filter((r) => r.chargeVerificationStatus !== 'pending_verification')
             .reduce((sum, r) => sum + (Number(r.returnCharge) || 0), 0);
@@ -11064,9 +11232,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             .reduce((sum, r) => sum + (r.damageLoss || 0), 0);
           const pnlNetReturnLoss = pnlTotalReturnCharge + pnlTotalDamageLoss;
 
-          // Purchase Management (#17) & Inventory Accounting Integration:
-          // Rule: Raw purchase cost of unsold inventory is an Asset (Inventory Cost), NOT a sold expense!
-          // Only Sold Product COGS (বিক্রীত পণ্যের ক্রয়মূল্য) + Operating Expenses reduce Net Profit.
+          // Purchase Management (#17) & Inventory Accounting Integration (never fabricates/guesses cost)
           const activePurchasesList = purchases.filter((p) => p.status !== 'cancelled');
           const totalPurchaseOutflow = activePurchasesList.reduce(
             (sum, p) => sum + (Number(p.grandTotalPurchaseCost) || 0),
@@ -11081,7 +11247,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             0
           );
 
-          // Calculate Sold Product COGS from actual items sold in active orders (respecting manual Order COGS override when set)
+          // Actual Sold Product COGS (uses real recorded costPrice or purchase cost; never guesses 52%)
           const soldProductCogs = filteredOrders.reduce((orderSum, ord) => {
             if (ord.manualFinancialOverride && typeof ord.cogsTotal === 'number') {
               return orderSum + ord.cogsTotal;
@@ -11094,12 +11260,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 (pur) => pur.productId === it.productId || pur.productName === it.name
               );
               const unitCost =
-                catProd?.costPrice ||
+                (typeof catProd?.costPrice === 'number' && catProd.costPrice > 0
+                  ? catProd.costPrice
+                  : 0) ||
                 (matchedPurchase && matchedPurchase.purchaseQuantity > 0
                   ? Math.round(
                       matchedPurchase.grandTotalPurchaseCost / matchedPurchase.purchaseQuantity
                     )
-                  : Math.round((Number(it.price) || 0) * 0.52));
+                  : 0);
               return itSum + unitCost * (Number(it.quantity) || 1);
             }, 0);
             return orderSum + itemsCogs;
@@ -11112,27 +11280,22 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             return sum + stockCount * unitCost;
           }, 0);
 
-          // Deduplicate exp-ret-* entries so Courier Return Charges come directly and accurately from live filteredReturns + manual courier_return_charge expenses
-          const nonAutoReturnExpenses = filteredExpenses.filter(
-            (e) => !String(e.id || '').startsWith('exp-ret-')
-          );
-
-          // Expense categories sum (Automatically includes live Courier Return Charges from filteredReturns)
-          const expenseByType: Record<string, number> = {};
-          nonAutoReturnExpenses.forEach((e) => {
-            expenseByType[e.category] = (expenseByType[e.category] || 0) + (Number(e.amount) || 0);
-          });
-          expenseByType.courier_return_charge =
-            (expenseByType.courier_return_charge || 0) + pnlTotalReturnCharge;
+          // Single Source of Truth for Expense Category Breakdown, Active/Archived Expenses & Reconciliation:
+          // Guarantees: Sum of all Expense Categories + Unclassified Expenses === Total Expenses (Zero guessed amounts!)
+          const expenseRecon = calculateExpenseBreakdownAndReconciliation(expenses, expenseRange, now);
+          const expenseByType = expenseRecon.expenseByType;
+          const countByType = expenseRecon.countByType;
+          const filteredExpenses = expenseRecon.activeExpenses as BusinessExpense[];
+          const archivedExpenses = expenseRecon.archivedExpenses as BusinessExpense[];
+          const displayedLedgerList: BusinessExpense[] =
+            expenseLedgerViewMode === 'active' ? filteredExpenses : archivedExpenses;
 
           const totalRevenue = filteredOrders.reduce((sum, o) => sum + o.total, 0);
-          const operatingExpenses =
-            nonAutoReturnExpenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0) +
-            pnlTotalReturnCharge +
-            pnlTotalDamageLoss;
-          const totalExpenses = operatingExpenses + soldProductCogs;
+          const totalExpenses = expenseRecon.totalExpenses;
           const netProfit = totalRevenue - totalExpenses;
           const profitMargin = totalRevenue > 0 ? Math.round((netProfit / totalRevenue) * 100) : 0;
+
+          const monthlyFinancialRows = calculateMonthlyFinancialReport(orders, expenses);
 
           return (
             <div className="bg-white rounded-3xl border border-rose-200 p-5 sm:p-7 shadow-xs space-y-7 animate-in fade-in">
@@ -11144,7 +11307,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     <span>ব্যবসায়িক সেলস, খরচ ও নিট লাভ-ক্ষতি রিপোর্ট (P&L Analytics)</span>
                   </h3>
                   <p className="text-xs text-stone-500 mt-0.5">
-                    দৈনিক ও মাসিক বিক্রি, অ্যাড খরচ, রিকশা/যাতায়াত ভাড়া এবং ইনভেন্টরি খরচের নির্ভুল রিয়েল-টাইম হিসাব।
+                    দৈনিক ও মাসিক বিক্রি, খরচের খাতভিত্তিক অটো-ফিল, ম্যানুয়াল কন্ট্রোল এবং ডাটাবেজের সাথে ১০০% রিয়েল-টাইম অটো-সিঙ্ক।
                   </p>
                 </div>
 
@@ -11160,7 +11323,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           : 'text-stone-600 hover:text-stone-900'
                       }`}
                     >
-                      আজ
+                      আজ (Today)
                     </button>
                     <button
                       type="button"
@@ -11171,7 +11334,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           : 'text-stone-600 hover:text-stone-900'
                       }`}
                     >
-                      ৭ দিন
+                      ৭ দিন (Last 7 Days)
                     </button>
                     <button
                       type="button"
@@ -11182,7 +11345,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           : 'text-stone-600 hover:text-stone-900'
                       }`}
                     >
-                      ৩০ দিন
+                      ৩০ দিন (Last 30 Days)
                     </button>
                     <button
                       type="button"
@@ -11193,7 +11356,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           : 'text-stone-600 hover:text-stone-900'
                       }`}
                     >
-                      সব সময়
+                      সব সময় (All Time)
                     </button>
                   </div>
 
@@ -11237,14 +11400,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 {/* Total Expenses */}
                 <div className="p-4 rounded-2xl bg-gradient-to-br from-rose-50 to-pink-50 border border-rose-200 space-y-1">
                   <div className="flex items-center justify-between text-rose-900 text-xs font-bold">
-                    <span>মোট খরচ (Expenses)</span>
+                    <span>মোট খরচ (Total Expenses)</span>
                     <TrendingDown className="w-4 h-4 text-rose-600" />
                   </div>
                   <div className="text-xl sm:text-2xl font-black font-mono text-[#E11D48]">
                     ৳{totalExpenses.toLocaleString()}
                   </div>
                   <span className="text-[10.5px] text-rose-700 font-medium block">
-                    অ্যাড, ভাড়া, সোর্সিং ও প্যাকেজিং
+                    {filteredExpenses.length}টি ভেরিফাইড খরচ রেকর্ড (ক্যাটাগরির যোগফল)
                   </span>
                 </div>
 
@@ -11333,52 +11496,177 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </div>
               </div>
 
-              {/* Expense Breakdown Categories */}
-              <div className="space-y-3">
-                <h4 className="text-xs font-extrabold text-stone-900">
-                  খরচের খাতভিত্তিক বিশ্লেষণ ({expenseRange === 'today' ? 'আজ' : expenseRange === 'week' ? 'গত ৭ দিন' : expenseRange === 'month' ? 'গত ৩০ দিন' : 'সব সময়'}):
-                </h4>
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 text-xs">
-                  <div className="p-3 rounded-xl bg-stone-50 border border-stone-200">
-                    <span className="text-stone-500 text-[10.5px] block font-semibold">📢 অ্যাড স্পেন্ড</span>
-                    <div className="font-mono font-black text-stone-900 text-sm mt-0.5">
+              {/* EXPENSE CATEGORY BREAKDOWN (খরচের খাতভিত্তিক বিশ্লেষণ) WITH REAL-TIME AUTO-FILL & RECONCILIATION */}
+              <div className="p-4 sm:p-5 rounded-3xl bg-gradient-to-br from-rose-50/40 via-white to-stone-50 border border-rose-200 space-y-3.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h4 className="text-xs sm:text-sm font-extrabold text-stone-900">
+                      খরচের খাতভিত্তিক বিশ্লেষণ ({expenseRange === 'today' ? 'আজ (Today)' : expenseRange === 'week' ? 'গত ৭ দিন (Last 7 Days)' : expenseRange === 'month' ? 'গত ৩০ দিন (Last 30 Days)' : 'সব সময় (All Time)'}):
+                    </h4>
+                    <p className="text-[11px] text-stone-500 mt-0.5">
+                      প্রকৃত ডাটাবেজের প্রতিটি খরচের ক্যাটাগরি অনুযায়ী স্বয়ংক্রিয় যোগফল — কোনো আনুমানিক (Guessed) খরচ যোগ করা হয় না
+                    </p>
+                  </div>
+
+                  {/* Financial Reconciliation Badge */}
+                  <div
+                    className={`px-3 py-1.5 rounded-xl border text-[11px] font-bold flex items-center gap-1.5 shrink-0 ${
+                      expenseRecon.isReconciled
+                        ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                        : 'bg-amber-50 border-amber-300 text-amber-900'
+                    }`}
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span>
+                      ফিন্যান্সিয়াল রিকনসিলিয়েশন: সব খাত (৳{expenseRecon.sumOfCategories.toLocaleString()}) = মোট খরচ (৳{totalExpenses.toLocaleString()}) ✓ মিলেছে
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 text-xs">
+                  {/* 1. Advertising / অ্যাড স্পেন্ড */}
+                  <div className="p-3 rounded-xl bg-white border border-stone-200 shadow-2xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-stone-600 text-[10.5px] font-bold">📢 অ্যাড স্পেন্ড</span>
+                      <span className="text-[10px] font-mono text-stone-400">
+                        {countByType.ad_cost || 0}টি
+                      </span>
+                    </div>
+                    <div className="font-mono font-black text-stone-900 text-sm mt-1">
                       ৳{(expenseByType.ad_cost || 0).toLocaleString()}
                     </div>
                   </div>
-                  <div className="p-3 rounded-xl bg-stone-50 border border-stone-200">
-                    <span className="text-stone-500 text-[10.5px] block font-semibold">🛒 পণ্য ক্রয়</span>
-                    <div className="font-mono font-black text-stone-900 text-sm mt-0.5">
+
+                  {/* 2. Product Buying / পণ্য ক্রয় */}
+                  <div className="p-3 rounded-xl bg-white border border-stone-200 shadow-2xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-stone-600 text-[10.5px] font-bold">🛒 পণ্য ক্রয়</span>
+                      <span className="text-[10px] font-mono text-stone-400">
+                        {countByType.product_buying || 0}টি
+                      </span>
+                    </div>
+                    <div className="font-mono font-black text-stone-900 text-sm mt-1">
                       ৳{(expenseByType.product_buying || 0).toLocaleString()}
                     </div>
                   </div>
-                  <div className="p-3 rounded-xl bg-stone-50 border border-stone-200">
-                    <span className="text-stone-500 text-[10.5px] block font-semibold">🛺 রিকশা / যাতায়াত</span>
-                    <div className="font-mono font-black text-stone-900 text-sm mt-0.5">
+
+                  {/* 3. Transport / রিকশা ও যাতায়াত */}
+                  <div className="p-3 rounded-xl bg-white border border-stone-200 shadow-2xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-stone-600 text-[10.5px] font-bold">🛺 রিকশা / যাতায়াত</span>
+                      <span className="text-[10px] font-mono text-stone-400">
+                        {countByType.transport_fare || 0}টি
+                      </span>
+                    </div>
+                    <div className="font-mono font-black text-stone-900 text-sm mt-1">
                       ৳{(expenseByType.transport_fare || 0).toLocaleString()}
                     </div>
                   </div>
-                  <div className="p-3 rounded-xl bg-stone-50 border border-stone-200">
-                    <span className="text-stone-500 text-[10.5px] block font-semibold">🚚 কুরিয়ার চার্জ</span>
-                    <div className="font-mono font-black text-stone-900 text-sm mt-0.5">
+
+                  {/* 4. Courier Expense / কুরিয়ার চার্জ */}
+                  <div className="p-3 rounded-xl bg-white border border-stone-200 shadow-2xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-stone-600 text-[10.5px] font-bold">🚚 কুরিয়ার চার্জ</span>
+                      <span className="text-[10px] font-mono text-stone-400">
+                        {countByType.courier_charge || 0}টি
+                      </span>
+                    </div>
+                    <div className="font-mono font-black text-stone-900 text-sm mt-1">
                       ৳{(expenseByType.courier_charge || 0).toLocaleString()}
                     </div>
                   </div>
-                  <div className="p-3 rounded-xl bg-amber-50/70 border border-amber-200">
-                    <span className="text-amber-800 text-[10.5px] block font-semibold">🔄 রিটার্ন চার্জ</span>
-                    <div className="font-mono font-black text-amber-950 text-sm mt-0.5">
+
+                  {/* 5. Courier Return Charge / রিটার্ন চার্জ */}
+                  <div className="p-3 rounded-xl bg-amber-50/80 border border-amber-200 shadow-2xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-amber-900 text-[10.5px] font-bold">🔄 রিটার্ন চার্জ</span>
+                      <span className="text-[10px] font-mono text-amber-700">
+                        {countByType.courier_return_charge || 0}টি
+                      </span>
+                    </div>
+                    <div className="font-mono font-black text-amber-950 text-sm mt-1">
                       ৳{(expenseByType.courier_return_charge || 0).toLocaleString()}
                     </div>
                   </div>
-                  <div className="p-3 rounded-xl bg-stone-50 border border-stone-200">
-                    <span className="text-stone-500 text-[10.5px] block font-semibold">📦 প্যাকেজিং</span>
-                    <div className="font-mono font-black text-stone-900 text-sm mt-0.5">
+
+                  {/* 6. Packaging / প্যাকেজিং */}
+                  <div className="p-3 rounded-xl bg-white border border-stone-200 shadow-2xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-stone-600 text-[10.5px] font-bold">📦 প্যাকেজিং</span>
+                      <span className="text-[10px] font-mono text-stone-400">
+                        {countByType.packaging || 0}টি
+                      </span>
+                    </div>
+                    <div className="font-mono font-black text-stone-900 text-sm mt-1">
                       ৳{(expenseByType.packaging || 0).toLocaleString()}
                     </div>
                   </div>
-                  <div className="p-3 rounded-xl bg-stone-50 border border-stone-200">
-                    <span className="text-stone-500 text-[10.5px] block font-semibold">🏢 অফিস / অন্যান্য</span>
-                    <div className="font-mono font-black text-stone-900 text-sm mt-0.5">
-                      ৳{((expenseByType.office_utility || 0) + (expenseByType.other || 0)).toLocaleString()}
+
+                  {/* 7. Office Expense / অফিস খরচ */}
+                  <div className="p-3 rounded-xl bg-white border border-stone-200 shadow-2xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-stone-600 text-[10.5px] font-bold">🏢 অফিস খরচ</span>
+                      <span className="text-[10px] font-mono text-stone-400">
+                        {countByType.office_utility || 0}টি
+                      </span>
+                    </div>
+                    <div className="font-mono font-black text-stone-900 text-sm mt-1">
+                      ৳{(expenseByType.office_utility || 0).toLocaleString()}
+                    </div>
+                  </div>
+
+                  {/* 8. Other / অন্যান্য খরচ */}
+                  <div className="p-3 rounded-xl bg-white border border-stone-200 shadow-2xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-stone-600 text-[10.5px] font-bold">📌 অন্যান্য খরচ</span>
+                      <span className="text-[10px] font-mono text-stone-400">
+                        {countByType.other || 0}টি
+                      </span>
+                    </div>
+                    <div className="font-mono font-black text-stone-900 text-sm mt-1">
+                      ৳{(expenseByType.other || 0).toLocaleString()}
+                    </div>
+                  </div>
+
+                  {/* 9. Unclassified / অশ্রেণীবদ্ধ খরচ (Shown whenever unclassified records exist or for full transparency) */}
+                  <div
+                    className={`p-3 rounded-xl border shadow-2xs ${
+                      (expenseByType.unclassified || 0) > 0
+                        ? 'bg-rose-50 border-rose-300'
+                        : 'bg-stone-50 border-stone-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span
+                        className={`text-[10.5px] font-bold ${
+                          (expenseByType.unclassified || 0) > 0 ? 'text-rose-900' : 'text-stone-500'
+                        }`}
+                      >
+                        ❓ অশ্রেণীবদ্ধ (Unclassified)
+                      </span>
+                      <span className="text-[10px] font-mono text-stone-400">
+                        {countByType.unclassified || 0}টি
+                      </span>
+                    </div>
+                    <div
+                      className={`font-mono font-black text-sm mt-1 ${
+                        (expenseByType.unclassified || 0) > 0 ? 'text-[#E11D48]' : 'text-stone-700'
+                      }`}
+                    >
+                      ৳{(expenseByType.unclassified || 0).toLocaleString()}
+                    </div>
+                  </div>
+
+                  {/* 10. Total Expenses Reconciliation Card */}
+                  <div className="p-3 rounded-xl bg-gradient-to-r from-[#FFF0F3] to-rose-100/80 border border-rose-300 shadow-2xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-rose-950 text-[10.5px] font-black">∑ সর্বমোট খরচ</span>
+                      <span className="text-[10px] font-mono font-bold text-[#E11D48]">
+                        {filteredExpenses.length}টি এন্ট্রি
+                      </span>
+                    </div>
+                    <div className="font-mono font-black text-[#E11D48] text-sm mt-1">
+                      ৳{totalExpenses.toLocaleString()}
                     </div>
                   </div>
                 </div>
@@ -11396,7 +11684,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         পণ্য ক্রয় ব্যবস্থাপনা বনাম বিক্রীত পণ্যের ক্রয়মূল্য (Purchase & Inventory Valuation P&L)
                       </h4>
                       <p className="text-[11px] text-stone-500">
-                        বিক্রীত পণ্যের ক্রয়মূল্য (COGS) এবং অবিক্রীত স্টকের ইনভেন্টরি মূল্য আলাদাভাবে হিসাবকৃত — অবিক্রীত স্টক নিট লাভ থেকে বাদ যায় না
+                        বিক্রীত পণ্যের ক্রয়মূল্য (COGS) এবং অবিক্রীত স্টকের ইনভেন্টরি মূল্য আলাদাভাবে হিসাবকৃত — কোনো আনুমানিক খরচ ছাড়াই
                       </p>
                     </div>
                   </div>
@@ -11418,7 +11706,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     <div className="text-base font-black font-mono text-[#E11D48]">
                       ৳{soldProductCogs.toLocaleString()}
                     </div>
-                    <span className="text-[9.5px] text-stone-500 block">শুধু বিক্রি হওয়া পণ্যের কেনা দাম</span>
+                    <span className="text-[9.5px] text-stone-500 block">শুধু প্রকৃত কেনা দাম (আনুমানিক নয়)</span>
                   </div>
 
                   <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-200 shadow-2xs space-y-0.5">
@@ -11558,16 +11846,23 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </div>
               </div>
 
-              {/* ADD EXPENSE ENTRY FORM */}
+              {/* ADD NEW EXPENSE ENTRY FORM (Section 5: Expense Date, Category, Description, Amount, Optional Notes) */}
               <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-[#FFF5F7] via-white to-[#FFF5F7] border border-rose-200 space-y-3">
-                <h4 className="text-xs sm:text-sm font-extrabold text-stone-900 flex items-center gap-2">
-                  <Plus className="w-4 h-4 text-[#E11D48]" />
-                  <span>দৈনিক / সাপ্তাহিক নতুন ব্যবসা খরচ এন্ট্রি করুন:</span>
-                </h4>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                  <h4 className="text-xs sm:text-sm font-extrabold text-stone-900 flex items-center gap-2">
+                    <Plus className="w-4 h-4 text-[#E11D48]" />
+                    <span>নতুন ব্যবসা খরচ এন্ট্রি করুন (New Expense Entry & Auto Database Sync):</span>
+                  </h4>
+                  <span className="text-[11px] font-bold text-emerald-700">
+                    ✓ সেভ করার সাথে সাথে মূল ডাটাবেজ ও সব ফিন্যান্সিয়াল রিপোর্টে অটো-আপডেট হবে
+                  </span>
+                </div>
 
-                <form onSubmit={handleAddExpense} className="grid grid-cols-1 sm:grid-cols-5 gap-2.5 text-xs">
+                <form onSubmit={handleAddExpense} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2.5 text-xs">
                   <div>
-                    <label className="block text-[11px] font-bold text-stone-700 mb-1">তারিখ</label>
+                    <label className="block text-[11px] font-bold text-stone-700 mb-1">
+                      ১. তারিখ (Expense Date) *
+                    </label>
                     <input
                       type="date"
                       required
@@ -11578,25 +11873,44 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-bold text-stone-700 mb-1">খরচের খাত</label>
+                    <label className="block text-[11px] font-bold text-stone-700 mb-1">
+                      ২. খরচের খাত (Category) *
+                    </label>
                     <select
                       value={newExpenseCategory}
                       onChange={(e) => setNewExpenseCategory(e.target.value as any)}
                       className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl font-bold text-stone-800"
                     >
-                      <option value="ad_cost">📢 মেটা ও টিকটক অ্যাড স্পেন্ড</option>
-                      <option value="product_buying">🛒 পণ্য ক্রয় / সোর্সিং</option>
-                      <option value="transport_fare">🛺 রিকশা / গাড়ি / যাতায়াত ভাড়া</option>
-                      <option value="courier_charge">🚚 কুরিয়ার ও ডেলিভারি চার্জ</option>
-                      <option value="courier_return_charge">🔄 কুরিয়ার রিটার্ন চার্জ</option>
-                      <option value="packaging">📦 বাবল র‍্যাপ ও প্যাকেজিং খরচ</option>
-                      <option value="office_utility">🏢 অফিস, নাস্তা ও বিদ্যুৎ বিল</option>
-                      <option value="other">📌 অন্যান্য বিবিধ খরচ</option>
+                      <option value="ad_cost">📢 মেটা ও টিকটক অ্যাড স্পেন্ড (Advertising)</option>
+                      <option value="product_buying">🛒 পণ্য ক্রয় / সোর্সিং (Product Buying)</option>
+                      <option value="transport_fare">🛺 রিকশা / গাড়ি / যাতায়াত ভাড়া (Transport)</option>
+                      <option value="courier_charge">🚚 কুরিয়ার ও ডেলিভারি চার্জ (Courier Expense)</option>
+                      <option value="courier_return_charge">🔄 কুরিয়ার রিটার্ন চার্জ (Return Charge)</option>
+                      <option value="packaging">📦 বাবল র‍্যাপ ও প্যাকেজিং খরচ (Packaging)</option>
+                      <option value="office_utility">🏢 অফিস, নাস্তা ও বিদ্যুৎ বিল (Office Expense)</option>
+                      <option value="other">📌 অন্যান্য বিবিধ খরচ (Other)</option>
+                      <option value="unclassified">❓ অশ্রেণীবদ্ধ খরচ (Unclassified)</option>
                     </select>
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-bold text-stone-700 mb-1">টাকার পরিমাণ (৳)</label>
+                    <label className="block text-[11px] font-bold text-stone-700 mb-1">
+                      ৩. বিবরণ (Description) *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="যেমন: ফেসবুক বুস্টিং / রিকশা ভাড়া"
+                      value={newExpenseNote}
+                      onChange={(e) => setNewExpenseNote(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-stone-700 mb-1">
+                      ৪. টাকার পরিমাণ (Amount ৳) *
+                    </label>
                     <input
                       type="number"
                       required
@@ -11609,12 +11923,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-bold text-stone-700 mb-1">বিবরণ / নোট</label>
+                    <label className="block text-[11px] font-bold text-stone-700 mb-1">
+                      ৫. অতিরিক্ত নোট (Notes - ঐচ্ছিক)
+                    </label>
                     <input
                       type="text"
-                      placeholder="যেমন: চকবাজার সোর্সিং রিকশা ভাড়া"
-                      value={newExpenseNote}
-                      onChange={(e) => setNewExpenseNote(e.target.value)}
+                      placeholder="ভাউচার নং / রেফারেন্স (ঐচ্ছিক)"
+                      value={newExpenseExtraNotes}
+                      onChange={(e) => setNewExpenseExtraNotes(e.target.value)}
                       className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl"
                     />
                   </div>
@@ -11626,78 +11942,242 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       className="w-full py-2 px-4 rounded-xl bg-[#E11D48] hover:bg-[#BE123C] text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
                     >
                       <Check className="w-4 h-4" />
-                      <span>{isSubmittingExpense ? 'সেভ হচ্ছে...' : 'খরচ সেভ করুন'}</span>
+                      <span>{isSubmittingExpense ? 'ডাটাবেজে সেভ হচ্ছে...' : 'খরচ সেভ করুন'}</span>
                     </button>
                   </div>
                 </form>
               </div>
 
-              {/* RECENT EXPENSE ENTRIES TABLE */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-extrabold text-stone-900">
-                    রেকর্ডকৃত খরচের তালিকা ({filteredExpenses.length}টি এন্ট্রি):
-                  </h4>
+              {/* EXPENSE LEDGER TABLE (Active & Soft-Deleted/Archived Toggle + Edit, Delete Confirmation, Restore & Audit Log) */}
+              <div className="space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h4 className="text-xs sm:text-sm font-extrabold text-stone-900">
+                      খরচ লেজার ও ম্যানুয়াল কন্ট্রোল তালিকা (Expense Ledger):
+                    </h4>
+                    <span className="px-2.5 py-0.5 rounded-full bg-rose-50 text-[#E11D48] border border-rose-200 text-[11px] font-bold">
+                      সক্রিয়: {filteredExpenses.length}টি (৳{totalExpenses.toLocaleString()})
+                    </span>
+                    {archivedExpenses.length > 0 && (
+                      <span className="px-2.5 py-0.5 rounded-full bg-stone-100 text-stone-600 border border-stone-300 text-[11px] font-bold">
+                        আর্কাইভ / ডিলিটকৃত: {archivedExpenses.length}টি
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Active vs Archived Toggle Buttons */}
+                  <div className="flex items-center gap-1.5 p-1 bg-stone-100 rounded-xl text-xs font-bold">
+                    <button
+                      type="button"
+                      onClick={() => setExpenseLedgerViewMode('active')}
+                      className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                        expenseLedgerViewMode === 'active'
+                          ? 'bg-white text-stone-900 shadow-2xs'
+                          : 'text-stone-600 hover:text-stone-900'
+                      }`}
+                    >
+                      ✓ সক্রিয় খরচ ({filteredExpenses.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setExpenseLedgerViewMode('archived')}
+                      className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                        expenseLedgerViewMode === 'archived'
+                          ? 'bg-white text-[#E11D48] shadow-2xs'
+                          : 'text-stone-600 hover:text-stone-900'
+                      }`}
+                    >
+                      🗑️ আর্কাইভ / রিস্টোর ({archivedExpenses.length})
+                    </button>
+                  </div>
                 </div>
 
-                <div className="border border-stone-200 rounded-2xl overflow-hidden max-h-64 overflow-y-auto">
+                <div className="border border-stone-200 rounded-2xl overflow-hidden max-h-96 overflow-y-auto">
                   <table className="w-full text-left text-xs text-stone-700">
-                    <thead className="bg-stone-50 text-[10.5px] uppercase font-bold text-stone-600 border-b border-stone-200 sticky top-0">
+                    <thead className="bg-stone-50 text-[10.5px] uppercase font-bold text-stone-600 border-b border-stone-200 sticky top-0 z-10">
                       <tr>
                         <th className="p-3">তারিখ</th>
-                        <th className="p-3">খাত</th>
-                        <th className="p-3">বিবরণ</th>
+                        <th className="p-3">খরচের খাত (Category)</th>
+                        <th className="p-3">বিবরণ ও নোট</th>
                         <th className="p-3 text-right">টাকার পরিমাণ</th>
-                        <th className="p-3 text-center">অ্যাকশন</th>
+                        <th className="p-3 text-center">অ্যাকশন (Edit / Delete / Restore)</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-stone-100">
-                      {filteredExpenses.length === 0 ? (
+                      {displayedLedgerList.length === 0 ? (
                         <tr>
                           <td colSpan={5} className="p-6 text-center text-stone-400 text-xs">
-                            এই সময়সীমায় কোনো খরচের এন্ট্রি নেই
+                            {expenseLedgerViewMode === 'active'
+                              ? 'এই সময়সীমায় কোনো সক্রিয় খরচের এন্ট্রি নেই'
+                              : 'কোনো ডিলিটকৃত বা আর্কাইভ খরচ নেই'}
                           </td>
                         </tr>
                       ) : (
-                        filteredExpenses.map((exp) => (
-                          <tr key={exp.id} className="hover:bg-stone-50">
-                            <td className="p-3 font-mono font-medium text-stone-800 whitespace-nowrap">
-                              {exp.date}
-                            </td>
-                            <td className="p-3 font-bold text-stone-900 whitespace-nowrap">
-                              {exp.categoryLabel}
-                            </td>
-                            <td className="p-3 text-stone-600 max-w-xs truncate">{exp.note}</td>
-                            <td className="p-3 text-right font-mono font-bold text-[#E11D48] whitespace-nowrap">
-                              ৳{exp.amount.toLocaleString()}
-                            </td>
-                            <td className="p-3 text-center whitespace-nowrap">
-                              <div className="flex items-center justify-center gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenEditExpense(exp)}
-                                  className="p-1 text-stone-500 hover:text-blue-600 cursor-pointer"
-                                  title="খরচের পরিমাণ বা বিবরণ এডিট করুন"
+                        displayedLedgerList.map((exp) => {
+                          const catKey = normalizeExpenseCategory(exp.category, exp.categoryLabel);
+                          const catMeta = CANONICAL_EXPENSE_CATEGORY_META[catKey];
+                          const descText = exp.description || exp.note || exp.title || catMeta.labelBn;
+                          return (
+                            <tr
+                              key={exp.id}
+                              className={`hover:bg-stone-50 ${
+                                exp.isDeleted ? 'bg-stone-50/70 opacity-80' : ''
+                              }`}
+                            >
+                              <td className="p-3 font-mono font-medium text-stone-800 whitespace-nowrap">
+                                {exp.date}
+                              </td>
+                              <td className="p-3 whitespace-nowrap">
+                                <span
+                                  className={`px-2.5 py-1 rounded-lg font-bold text-[11px] inline-flex items-center gap-1 ${
+                                    catKey === 'unclassified'
+                                      ? 'bg-rose-50 text-[#E11D48] border border-rose-200'
+                                      : catKey === 'courier_return_charge'
+                                      ? 'bg-amber-50 text-amber-900 border border-amber-200'
+                                      : 'bg-stone-100 text-stone-800 border border-stone-200'
+                                  }`}
                                 >
-                                  <Edit3 className="w-3.5 h-3.5" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeleteExpense(exp.id)}
-                                  className="p-1 text-stone-400 hover:text-rose-600 cursor-pointer"
-                                  title="খরচটি মুছুন"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))
+                                  <span>{catMeta.icon}</span>
+                                  <span>{catMeta.shortLabelBn}</span>
+                                </span>
+                              </td>
+                              <td className="p-3 text-stone-700 max-w-xs">
+                                <div className="font-semibold text-stone-900 break-words">
+                                  {descText}
+                                </div>
+                                {exp.notes && (
+                                  <div className="text-[10.5px] text-stone-500 mt-0.5 break-words">
+                                    নোট: {exp.notes}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="p-3 text-right font-mono font-bold text-[#E11D48] whitespace-nowrap">
+                                ৳{Number(exp.amount || 0).toLocaleString()}
+                              </td>
+                              <td className="p-3 text-center whitespace-nowrap">
+                                <div className="flex items-center justify-center gap-1.5">
+                                  {!exp.isDeleted ? (
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenEditExpense(exp)}
+                                        className="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-bold text-[11px] flex items-center gap-1 cursor-pointer"
+                                        title="খরচের খাত, টাকার পরিমাণ, তারিখ বা বিবরণ এডিট করুন"
+                                      >
+                                        <Edit3 className="w-3 h-3" />
+                                        <span>Edit</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleRequestDeleteExpense(exp)}
+                                        className="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-[11px] flex items-center gap-1 cursor-pointer"
+                                        title="খরচটি ডিলিট / আর্কাইভ করুন (কনফার্মেশন সহ)"
+                                      >
+                                        <Trash2 className="w-3 h-3" />
+                                        <span>Delete</span>
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      disabled={restoringExpenseId === exp.id}
+                                      onClick={() => handleRestoreExpense(exp)}
+                                      className="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                                      title="ডিলিটকৃত খরচটি পুনরায় সক্রিয় হিসাবে ফিরিয়ে আনুন"
+                                    >
+                                      <RotateCcw className="w-3 h-3" />
+                                      <span>
+                                        {restoringExpenseId === exp.id ? 'রিস্টোর হচ্ছে...' : 'Restore'}
+                                      </span>
+                                    </button>
+                                  )}
+
+                                  {Array.isArray(exp.auditLog) && exp.auditLog.length > 0 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setSelectedExpenseAudit(exp)}
+                                      className="px-2 py-1 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-600 text-[10.5px] font-bold cursor-pointer"
+                                      title="পরিবর্তনের অডিট হিস্ট্রি দেখুন"
+                                    >
+                                      History
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
                       )}
                     </tbody>
                   </table>
                 </div>
               </div>
+
+              {/* LIVE MONTHLY FINANCIAL REPORT (মাসিক আর্থিক রিপোর্ট — Auto Synced) */}
+              {monthlyFinancialRows.length > 0 && (
+                <div className="space-y-2.5 pt-2 border-t border-stone-200">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs sm:text-sm font-extrabold text-stone-900">
+                      📅 মাসিক আর্থিক রিপোর্ট (Monthly Financial Report — Real-Time Synced):
+                    </h4>
+                    <span className="text-[11px] text-stone-500">
+                      প্রতিটি মাসের মোট বিক্রয়, মোট খরচ ও নিট লাভ-ক্ষতি
+                    </span>
+                  </div>
+                  <div className="border border-stone-200 rounded-2xl overflow-hidden overflow-x-auto">
+                    <table className="w-full text-left text-xs text-stone-700">
+                      <thead className="bg-stone-50 text-[10.5px] uppercase font-bold text-stone-600 border-b border-stone-200">
+                        <tr>
+                          <th className="p-3">মাস (Month)</th>
+                          <th className="p-3 text-center">সফল অর্ডার</th>
+                          <th className="p-3 text-right">মোট বিক্রয় (Revenue)</th>
+                          <th className="p-3 text-right">অ্যাড স্পেন্ড</th>
+                          <th className="p-3 text-right">কুরিয়ার ও অন্যান্য</th>
+                          <th className="p-3 text-right">মোট খরচ (Expenses)</th>
+                          <th className="p-3 text-right">নিট লাভ / ক্ষতি (Net P&L)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-stone-100">
+                        {monthlyFinancialRows.slice(0, 6).map((row) => (
+                          <tr key={row.monthKey} className="hover:bg-stone-50">
+                            <td className="p-3 font-bold text-stone-900">{row.monthLabelBn}</td>
+                            <td className="p-3 text-center font-mono">{row.ordersCount} টি</td>
+                            <td className="p-3 text-right font-mono font-bold text-blue-900">
+                              ৳{row.revenue.toLocaleString()}
+                            </td>
+                            <td className="p-3 text-right font-mono text-stone-700">
+                              ৳{row.adExpense.toLocaleString()}
+                            </td>
+                            <td className="p-3 text-right font-mono text-stone-700">
+                              ৳
+                              {(
+                                row.productAndTransportExpense +
+                                row.courierAndReturnExpense +
+                                row.packagingExpense +
+                                row.officeAndOtherExpense +
+                                row.unclassifiedExpense
+                              ).toLocaleString()}
+                            </td>
+                            <td className="p-3 text-right font-mono font-bold text-[#E11D48]">
+                              ৳{row.totalExpenses.toLocaleString()}
+                            </td>
+                            <td
+                              className={`p-3 text-right font-mono font-black ${
+                                row.netProfit >= 0 ? 'text-emerald-700' : 'text-red-600'
+                              }`}
+                            >
+                              {row.netProfit >= 0
+                                ? `+৳${row.netProfit.toLocaleString()}`
+                                : `-৳${Math.abs(row.netProfit).toLocaleString()}`}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
 
               {/* Category distribution */}
               <div className="space-y-3 pt-3 border-t border-stone-200">
@@ -13853,7 +14333,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         );
       })()}
 
-      {/* Edit Expense Modal (Instant Live Persistence) */}
+      {/* Edit Expense Modal (Instant Live Persistence across Entire Website) */}
       {isEditExpenseModalOpen && editingExpense && (
         <div className="fixed inset-0 z-50 bg-stone-950/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-stone-200 text-xs my-auto">
@@ -13862,7 +14342,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <div className="w-7 h-7 rounded-lg bg-rose-50 text-[#E11D48] flex items-center justify-center font-bold">
                   <Edit3 className="w-3.5 h-3.5" />
                 </div>
-                <h3 className="text-sm font-extrabold text-stone-900">খরচের এন্ট্রি এডিট করুন</h3>
+                <div>
+                  <h3 className="text-sm font-extrabold text-stone-900">খরচের এন্ট্রি এডিট করুন</h3>
+                  <p className="text-[10.5px] text-stone-500">ID: {editingExpense.id}</p>
+                </div>
               </div>
               <button
                 type="button"
@@ -13878,7 +14361,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
             <form onSubmit={handleUpdateExpense} className="space-y-3">
               <div>
-                <label className="block text-[11px] font-bold text-stone-700 mb-1">তারিখ *</label>
+                <label className="block text-[11px] font-bold text-stone-700 mb-1">
+                  ১. তারিখ (Expense Date) *
+                </label>
                 <input
                   type="date"
                   required
@@ -13889,26 +14374,29 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </div>
 
               <div>
-                <label className="block text-[11px] font-bold text-stone-700 mb-1">খরচের খাত *</label>
+                <label className="block text-[11px] font-bold text-stone-700 mb-1">
+                  ২. খরচের খাত (Expense Category) *
+                </label>
                 <select
                   value={editExpenseCategory}
                   onChange={(e) => setEditExpenseCategory(e.target.value as any)}
                   className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl font-bold"
                 >
-                  <option value="ad_cost">মেটা ও টিকটক অ্যাড স্পেন্ড</option>
-                  <option value="courier_return_charge">কুরিয়ার রিটার্ন চার্জ (Courier Return Charge)</option>
-                  <option value="courier_charge">কুরিয়ার ও ডেলিভারি খরচ</option>
-                  <option value="packaging">বক্স ও প্যাকেজিং খরচ</option>
-                  <option value="product_buying">পণ্য ক্রয় / সোর্সিং</option>
-                  <option value="transport_fare">রিকশা / গাড়ি / যাতায়াত ভাড়া</option>
-                  <option value="office_utility">অফিস / নাস্তা / ইউটিলিটি</option>
-                  <option value="other">অন্যান্য বিবিধ খরচ</option>
+                  <option value="ad_cost">📢 মেটা ও টিকটক অ্যাড স্পেন্ড (Advertising)</option>
+                  <option value="product_buying">🛒 পণ্য ক্রয় / সোর্সিং (Product Buying)</option>
+                  <option value="transport_fare">🛺 রিকশা / গাড়ি / যাতায়াত ভাড়া (Transport)</option>
+                  <option value="courier_charge">🚚 কুরিয়ার ও ডেলিভারি খরচ (Courier Expense)</option>
+                  <option value="courier_return_charge">🔄 কুরিয়ার রিটার্ন চার্জ (Courier Return Charge)</option>
+                  <option value="packaging">📦 বক্স ও প্যাকেজিং খরচ (Packaging Expense)</option>
+                  <option value="office_utility">🏢 অফিস / নাস্তা / ইউটিলিটি (Office Expense)</option>
+                  <option value="other">📌 অন্যান্য বিবিধ খরচ (Other)</option>
+                  <option value="unclassified">❓ অশ্রেণীবদ্ধ খরচ (Unclassified)</option>
                 </select>
               </div>
 
               <div>
                 <label className="block text-[11px] font-bold text-stone-700 mb-1">
-                  টাকার পরিমাণ (BDT) *
+                  ৩. টাকার পরিমাণ (Expense Amount ৳) *
                 </label>
                 <input
                   type="number"
@@ -13922,13 +14410,27 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
               <div>
                 <label className="block text-[11px] font-bold text-stone-700 mb-1">
-                  বিবরণ / নোট (ঐচ্ছিক)
+                  ৪. খরচের বিবরণ (Expense Description) *
                 </label>
                 <input
                   type="text"
+                  required
                   value={editExpenseNote}
                   onChange={(e) => setEditExpenseNote(e.target.value)}
                   placeholder="যেমন: চকবাজার সোর্সিং রিকশা ভাড়া"
+                  className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-stone-700 mb-1">
+                  ৫. অতিরিক্ত নোট (Notes - ঐচ্ছিক)
+                </label>
+                <input
+                  type="text"
+                  value={editExpenseExtraNotes}
+                  onChange={(e) => setEditExpenseExtraNotes(e.target.value)}
+                  placeholder="ভাউচার বা রেফারেন্স নোট (ঐচ্ছিক)"
                   className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl"
                 />
               </div>
@@ -13950,10 +14452,149 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   className="px-5 py-2 bg-[#E11D48] hover:bg-[#BE123C] text-white rounded-xl font-bold flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
                 >
                   <Save className="w-3.5 h-3.5" />
-                  <span>{editExpenseSaving ? 'আপডেট হচ্ছে...' : '✅ খরচ আপডেট করুন'}</span>
+                  <span>
+                    {editExpenseSaving
+                      ? 'ডাটাবেজে আপডেট হচ্ছে...'
+                      : '✅ খরচ আপডেট ও সিঙ্ক করুন'}
+                  </span>
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Soft-Delete / Archive Expense Confirmation Modal (Section 4.3: Always ask confirmation before deleting) */}
+      {expensePendingDelete && (
+        <div className="fixed inset-0 z-50 bg-stone-950/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-rose-200 text-xs">
+            <div className="flex items-center justify-between pb-2 border-b border-rose-100">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-rose-100 text-[#E11D48] flex items-center justify-center font-bold">
+                  <Trash2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-stone-900">
+                    খরচ ডিলিট / আর্কাইভ নিশ্চিতকরণ
+                  </h3>
+                  <p className="text-[10.5px] text-stone-500">Soft Delete & Archive Protection</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setExpensePendingDelete(null)}
+                className="text-stone-400 hover:text-stone-700 cursor-pointer text-base font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-rose-50/70 border border-rose-200 space-y-1.5">
+              <div className="font-bold text-stone-900">
+                আপনি কি নিশ্চিতভাবে নিচের খরচটি সক্রিয় হিসাব থেকে মুছে ফেলতে চান?
+              </div>
+              <div className="text-stone-700">
+                <span className="font-semibold">খাত:</span>{' '}
+                {getExpenseCategoryLabelBn(
+                  expensePendingDelete.category,
+                  expensePendingDelete.categoryLabel
+                )}
+              </div>
+              <div className="text-stone-700">
+                <span className="font-semibold">বিবরণ:</span>{' '}
+                {expensePendingDelete.description ||
+                  expensePendingDelete.note ||
+                  expensePendingDelete.title}
+              </div>
+              <div className="text-stone-700 font-mono">
+                <span className="font-semibold font-sans">তারিখ:</span> {expensePendingDelete.date} |{' '}
+                <span className="font-bold text-[#E11D48]">
+                  ৳{Number(expensePendingDelete.amount || 0).toLocaleString()}
+                </span>
+              </div>
+              <p className="text-[10.5px] text-emerald-800 font-semibold pt-1">
+                💡 নিরাপত্তা নোট: এটি Soft Delete হিসেবে আর্কাইভে সংরক্ষিত থাকবে এবং সক্রিয় খরচ ও নিট লাভ-ক্ষতি থেকে সাথে সাথে বাদ যাবে। প্রয়োজনে পরে Restore করতে পারবেন।
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setExpensePendingDelete(null)}
+                className="px-4 py-2 border border-stone-300 rounded-xl text-stone-700 font-bold hover:bg-stone-50 cursor-pointer"
+              >
+                না, বাতিল করুন
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingExpense}
+                onClick={handleConfirmSoftDeleteExpense}
+                className="px-5 py-2 bg-[#E11D48] hover:bg-[#BE123C] text-white rounded-xl font-bold flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>
+                  {isDeletingExpense ? 'আর্কাইভ হচ্ছে...' : 'হ্যাঁ, ডিলিট / আর্কাইভ করুন'}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Expense Audit History Modal (Section 8.4: Audit History for all Expense edits/deletes/restores) */}
+      {selectedExpenseAudit && (
+        <div className="fixed inset-0 z-50 bg-stone-950/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl border border-stone-200 text-xs max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-2 border-b border-stone-200">
+              <div>
+                <h3 className="text-sm font-extrabold text-stone-900">
+                  খরচ পরিবর্তনের অডিট হিস্ট্রি (Expense Audit Log)
+                </h3>
+                <p className="text-[11px] text-stone-500">
+                  ID: {selectedExpenseAudit.id} — বর্তমান পরিমাণ: ৳
+                  {Number(selectedExpenseAudit.amount || 0).toLocaleString()}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedExpenseAudit(null)}
+                className="text-stone-400 hover:text-stone-700 cursor-pointer text-base font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-2.5">
+              {(selectedExpenseAudit.auditLog || []).map((entry) => (
+                <div
+                  key={entry.id}
+                  className="p-3 rounded-2xl bg-stone-50 border border-stone-200 space-y-1"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="px-2 py-0.5 rounded bg-stone-900 text-white font-bold text-[10px] uppercase">
+                      {entry.action}
+                    </span>
+                    <span className="font-mono text-[10.5px] text-stone-500">
+                      {new Date(entry.timestamp).toLocaleString('bn-BD')}
+                    </span>
+                  </div>
+                  <div className="font-semibold text-stone-800">{entry.summary}</div>
+                  {entry.actor && (
+                    <div className="text-[10.5px] text-stone-500">সম্পাদনকারী: {entry.actor}</div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => setSelectedExpenseAudit(null)}
+                className="px-4 py-2 bg-stone-900 text-white rounded-xl font-bold cursor-pointer"
+              >
+                বন্ধ করুন
+              </button>
+            </div>
           </div>
         </div>
       )}

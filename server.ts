@@ -8852,6 +8852,184 @@ Return strict JSON with 100% complete, rich Bengali product details:
     }
   });
 
+  // ============================================================================
+  // UNIFIED EXPENSE DATABASE MIRROR & REAL-TIME SYNC API (/api/expenses)
+  // ============================================================================
+  const EXPENSES_MIRROR_FILE = path.join(__dirname, 'data', 'expenses_mirror.json');
+
+  function readLocalExpensesMirror(): Record<string, any> {
+    try {
+      if (fs.existsSync(EXPENSES_MIRROR_FILE)) {
+        const raw = fs.readFileSync(EXPENSES_MIRROR_FILE, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed.expenses === 'object' && parsed.expenses !== null) {
+          return parsed.expenses;
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return {};
+  }
+
+  function writeLocalExpensesMirror(expensesMap: Record<string, any>) {
+    try {
+      const dir = path.dirname(EXPENSES_MIRROR_FILE);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(
+        EXPENSES_MIRROR_FILE,
+        JSON.stringify({ expenses: expensesMap, updatedAt: Date.now() }, null, 2),
+        'utf-8'
+      );
+    } catch {
+      // ignore
+    }
+  }
+
+  app.get('/api/expenses', async (_req, res) => {
+    try {
+      const localMap = readLocalExpensesMirror();
+      try {
+        const snap = await withTimeout(
+          getDocs(collection(serverDb, 'business_expenses')),
+          3500,
+          'Firestore business_expenses fetch'
+        );
+        let changed = false;
+        snap.forEach((docSnap) => {
+          const data = docSnap.data();
+          const id = String(data?.id || docSnap.id);
+          const existing = localMap[id];
+          if (!existing || Number(data?.updatedAt || data?.createdAt || 0) >= Number(existing?.updatedAt || existing?.createdAt || 0)) {
+            localMap[id] = { ...data, id };
+            changed = true;
+          }
+        });
+        if (changed) {
+          writeLocalExpensesMirror(localMap);
+        }
+      } catch {
+        // fallback to local mirror
+      }
+      const list = Object.values(localMap).sort(
+        (a: any, b: any) => Number(b?.createdAt || 0) - Number(a?.createdAt || 0)
+      );
+      return res.json({ ok: true, success: true, expenses: list });
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, error: err?.message || 'Failed to load expenses' });
+    }
+  });
+
+  app.post('/api/expenses/save', async (req, res) => {
+    try {
+      const expense = req.body?.expense || req.body;
+      if (!expense || !expense.id || typeof Number(expense.amount) !== 'number') {
+        return res.status(400).json({ ok: false, error: 'Invalid expense payload' });
+      }
+      const id = String(expense.id).trim();
+      const now = Date.now();
+      const record = {
+        ...expense,
+        id,
+        amount: Math.max(0, Number(expense.amount) || 0),
+        isDeleted: Boolean(expense.isDeleted ?? false),
+        updatedAt: Number(expense.updatedAt || now),
+      };
+
+      const localMap = readLocalExpensesMirror();
+      localMap[id] = record;
+      writeLocalExpensesMirror(localMap);
+
+      try {
+        await withTimeout(
+          setDoc(doc(serverDb, 'business_expenses', id), record, { merge: true }),
+          3500,
+          'Firestore business_expenses save'
+        );
+      } catch {
+        // local mirror already saved
+      }
+
+      return res.json({ ok: true, success: true, expense: record });
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, error: err?.message || 'Failed to save expense' });
+    }
+  });
+
+  app.post('/api/expenses/soft-delete', async (req, res) => {
+    try {
+      const id = String(req.body?.id || req.body?.expense?.id || '').trim();
+      if (!id) {
+        return res.status(400).json({ ok: false, error: 'Missing expense ID' });
+      }
+      const now = Date.now();
+      const localMap = readLocalExpensesMirror();
+      const existing = localMap[id] || req.body?.expense || { id };
+      const updated = {
+        ...existing,
+        ...(req.body?.expense || {}),
+        id,
+        isDeleted: true,
+        deletedAt: now,
+        updatedAt: now,
+      };
+      localMap[id] = updated;
+      writeLocalExpensesMirror(localMap);
+
+      try {
+        await withTimeout(
+          setDoc(doc(serverDb, 'business_expenses', id), updated, { merge: true }),
+          3500,
+          'Firestore business_expenses soft-delete'
+        );
+      } catch {
+        // local mirror saved
+      }
+
+      return res.json({ ok: true, success: true, expense: updated });
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, error: err?.message || 'Failed to soft-delete expense' });
+    }
+  });
+
+  app.post('/api/expenses/restore', async (req, res) => {
+    try {
+      const id = String(req.body?.id || req.body?.expense?.id || '').trim();
+      if (!id) {
+        return res.status(400).json({ ok: false, error: 'Missing expense ID' });
+      }
+      const now = Date.now();
+      const localMap = readLocalExpensesMirror();
+      const existing = localMap[id] || req.body?.expense || { id };
+      const updated = {
+        ...existing,
+        ...(req.body?.expense || {}),
+        id,
+        isDeleted: false,
+        deletedAt: null,
+        updatedAt: now,
+      };
+      localMap[id] = updated;
+      writeLocalExpensesMirror(localMap);
+
+      try {
+        await withTimeout(
+          setDoc(doc(serverDb, 'business_expenses', id), updated, { merge: true }),
+          3500,
+          'Firestore business_expenses restore'
+        );
+      } catch {
+        // local mirror saved
+      }
+
+      return res.json({ ok: true, success: true, expense: updated });
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, error: err?.message || 'Failed to restore expense' });
+    }
+  });
+
   app.get('/images/:productId/:index', async (req, res) => {
     try {
       const productId = decodeURIComponent(req.params.productId || '').trim();

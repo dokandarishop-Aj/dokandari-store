@@ -57,6 +57,9 @@ import {
   getPersistedOperatingExpenses,
   saveOperatingExpensePersisted,
   deleteOperatingExpensePersisted,
+  normalizeExpenseCategory,
+  getExpenseCategoryLabelBn,
+  parseExpenseDateToTimestamp,
   getPersistedStockMovements,
   recordStockMovementPersisted,
   saveProductPersisted,
@@ -98,16 +101,25 @@ interface EnterpriseDashboardHubProps {
   showToast?: (msg: string) => void;
 }
 
-const EXPENSE_CATEGORY_LABELS: Record<ExpenseCategoryType, string> = {
+const EXPENSE_CATEGORY_LABELS: Record<string, string> = {
+  ad_cost: 'মেটা ও টিকটক অ্যাড স্পেন্ড (Advertising Expense)',
   facebook_ads: 'Facebook / Meta Ads খরচ',
   tiktok_ads: 'TikTok Ads খরচ',
   google_ads: 'Google / YouTube Ads খরচ',
+  product_buying: 'পণ্য ক্রয় / সোর্সিং',
+  transport_fare: 'রিকশা / গাড়ি / যাতায়াত ভাড়া',
+  courier_charge: 'কুরিয়ার ও ডেলিভারি খরচ',
   courier_expense: 'কুরিয়ার ও ডেলিভারি খরচ',
+  courier_return_charge: 'কুরিয়ার রিটার্ন চার্জ',
+  packaging: 'প্যাকেজিং ও বক্স খরচ',
   packaging_expense: 'প্যাকেজিং ও বক্স খরচ',
+  office_utility: 'অফিস / স্টাফ / ইউটিলিটি খরচ',
   staff_salary: 'স্টাফ স্যালারি ও বেতন',
   office_rent: 'অফিস ও গোডাউন ভাড়া',
   utilities: 'ইন্টারনেট, বিদ্যুৎ ও ইউটিলিটি',
+  other: 'অন্যান্য বিবিধ খরচ',
   miscellaneous: 'অন্যান্য ব্যবসায়িক খরচ',
+  unclassified: 'অশ্রেণীবদ্ধ খরচ (Unclassified)',
 };
 
 export const EnterpriseDashboardHub: React.FC<EnterpriseDashboardHubProps> = ({
@@ -186,6 +198,14 @@ export const EnterpriseDashboardHub: React.FC<EnterpriseDashboardHubProps> = ({
       // ignore
     }
   }, [darkMode]);
+
+  useEffect(() => {
+    const onExpensesSync = () => {
+      setExpenses(getPersistedOperatingExpenses());
+    };
+    window.addEventListener('dokandari:expenses-updated', onExpensesSync);
+    return () => window.removeEventListener('dokandari:expenses-updated', onExpensesSync);
+  }, []);
 
   const notify = (msg: string) => {
     if (showToast) showToast(msg);
@@ -271,7 +291,8 @@ export const EnterpriseDashboardHub: React.FC<EnterpriseDashboardHubProps> = ({
 
   const filteredExpenses = useMemo(() => {
     return expenses.filter((e) => {
-      const ts = e.date ? new Date(`${e.date}T12:00:00`).getTime() : Number(e.createdAt || 0);
+      if (e.isDeleted) return false;
+      const ts = parseExpenseDateToTimestamp(e.date, e.createdAt);
       return ts >= dateBounds.start && ts <= dateBounds.end;
     });
   }, [expenses, dateBounds]);
@@ -362,31 +383,27 @@ export const EnterpriseDashboardHub: React.FC<EnterpriseDashboardHubProps> = ({
 
     // Operating & Ad Expenses from `business_expenses` (excluding auto-generated exp-ret-* which are already in returnLosses)
     const nonAutoReturnExpenses = filteredExpenses.filter(
-      (e) => !String(e.id || '').startsWith('exp-ret-')
+      (e) => !e.isDeleted && !String(e.id || '').startsWith('exp-ret-')
     );
 
     const adExpenses = nonAutoReturnExpenses
-      .filter((e) => ['facebook_ads', 'tiktok_ads', 'google_ads'].includes(e.category))
+      .filter((e) => normalizeExpenseCategory(e.category, e.categoryLabel) === 'ad_cost')
       .reduce((s, e) => s + Number(e.amount || 0), 0);
 
     const extraCourierExp = nonAutoReturnExpenses
-      .filter((e) => e.category === 'courier_expense')
+      .filter((e) => normalizeExpenseCategory(e.category, e.categoryLabel) === 'courier_charge')
       .reduce((s, e) => s + Number(e.amount || 0), 0);
 
     const extraPackagingExp = nonAutoReturnExpenses
-      .filter((e) => e.category === 'packaging_expense')
+      .filter((e) => normalizeExpenseCategory(e.category, e.categoryLabel) === 'packaging')
       .reduce((s, e) => s + Number(e.amount || 0), 0);
 
     const otherOperatingExp = nonAutoReturnExpenses
       .filter(
         (e) =>
-          ![
-            'facebook_ads',
-            'tiktok_ads',
-            'google_ads',
-            'courier_expense',
-            'packaging_expense',
-          ].includes(e.category)
+          !['ad_cost', 'courier_charge', 'packaging'].includes(
+            normalizeExpenseCategory(e.category, e.categoryLabel)
+          )
       )
       .reduce((s, e) => s + Number(e.amount || 0), 0);
 
@@ -1926,9 +1943,10 @@ export const EnterpriseDashboardHub: React.FC<EnterpriseDashboardHubProps> = ({
                       >
                         <td className="py-2.5 px-3 font-mono">{ex.date}</td>
                         <td className="py-2.5 px-3 font-bold text-amber-600">
-                          {EXPENSE_CATEGORY_LABELS[ex.category] || ex.category}
+                          {EXPENSE_CATEGORY_LABELS[ex.category] ||
+                            getExpenseCategoryLabelBn(ex.category, ex.categoryLabel)}
                         </td>
-                        <td className="py-2.5 px-3">{ex.title}</td>
+                        <td className="py-2.5 px-3">{ex.description || ex.note || ex.title}</td>
                         <td className="py-2.5 px-3 font-extrabold text-rose-600">
                           ৳{Number(ex.amount).toLocaleString()}
                         </td>

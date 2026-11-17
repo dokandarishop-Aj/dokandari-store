@@ -29,6 +29,9 @@ import {
   ReturnStatus,
   InventoryMovement,
   OperatingExpense,
+  CanonicalExpenseCategory,
+  ExpenseCategoryType,
+  ExpenseAuditEntry,
   OFFICIAL_CATEGORIES,
 } from '../types';
 
@@ -4528,6 +4531,468 @@ export async function recordStockMovementPersisted(
   return clean;
 }
 
+export const CANONICAL_EXPENSE_CATEGORY_META: Record<
+  CanonicalExpenseCategory,
+  {
+    id: CanonicalExpenseCategory;
+    labelBn: string;
+    shortLabelBn: string;
+    labelEn: string;
+    icon: string;
+  }
+> = {
+  ad_cost: {
+    id: 'ad_cost',
+    labelBn: 'মেটা ও টিকটক অ্যাড স্পেন্ড (Advertising Expense)',
+    shortLabelBn: '📢 অ্যাড স্পেন্ড',
+    labelEn: 'Advertising Expense',
+    icon: '📢',
+  },
+  product_buying: {
+    id: 'product_buying',
+    labelBn: 'পণ্য ক্রয় / সোর্সিং (Product Buying)',
+    shortLabelBn: '🛒 পণ্য ক্রয়',
+    labelEn: 'Product Buying Expense',
+    icon: '🛒',
+  },
+  transport_fare: {
+    id: 'transport_fare',
+    labelBn: 'রিকশা / গাড়ি / যাতায়াত ভাড়া (Transport Expense)',
+    shortLabelBn: '🛺 রিকশা / যাতায়াত',
+    labelEn: 'Transport Expense',
+    icon: '🛺',
+  },
+  courier_charge: {
+    id: 'courier_charge',
+    labelBn: 'কুরিয়ার ও ডেলিভারি খরচ (Courier Expense)',
+    shortLabelBn: '🚚 কুরিয়ার চার্জ',
+    labelEn: 'Courier Expense',
+    icon: '🚚',
+  },
+  courier_return_charge: {
+    id: 'courier_return_charge',
+    labelBn: 'কুরিয়ার রিটার্ন চার্জ (Courier Return Charge)',
+    shortLabelBn: '🔄 রিটার্ন চার্জ',
+    labelEn: 'Courier Return Expense',
+    icon: '🔄',
+  },
+  packaging: {
+    id: 'packaging',
+    labelBn: 'বক্স ও প্যাকেজিং খরচ (Packaging Expense)',
+    shortLabelBn: '📦 প্যাকেজিং',
+    labelEn: 'Packaging Expense',
+    icon: '📦',
+  },
+  office_utility: {
+    id: 'office_utility',
+    labelBn: 'অফিস / স্টাফ / ইউটিলিটি (Office Expense)',
+    shortLabelBn: '🏢 অফিস খরচ',
+    labelEn: 'Office Expense',
+    icon: '🏢',
+  },
+  other: {
+    id: 'other',
+    labelBn: 'অন্যান্য বিবিধ খরচ (Other Expense)',
+    shortLabelBn: '📌 অন্যান্য খরচ',
+    labelEn: 'Other Expense',
+    icon: '📌',
+  },
+  unclassified: {
+    id: 'unclassified',
+    labelBn: 'অশ্রেণীবদ্ধ খরচ (Unclassified Expense)',
+    shortLabelBn: '❓ আনক্লাসিফায়েড',
+    labelEn: 'Unclassified Expense',
+    icon: '❓',
+  },
+};
+
+export const ORDERED_CANONICAL_EXPENSE_CATEGORIES: CanonicalExpenseCategory[] = [
+  'ad_cost',
+  'product_buying',
+  'transport_fare',
+  'courier_charge',
+  'courier_return_charge',
+  'packaging',
+  'office_utility',
+  'other',
+  'unclassified',
+];
+
+export function normalizeExpenseCategory(
+  rawCategory?: string | null,
+  rawCategoryLabel?: string | null
+): CanonicalExpenseCategory {
+  const key = String(rawCategory || '')
+    .trim()
+    .toLowerCase();
+  if (!key) {
+    const lbl = String(rawCategoryLabel || '')
+      .trim()
+      .toLowerCase();
+    if (!lbl) return 'unclassified';
+    if (lbl.includes('অ্যাড') || lbl.includes('ad') || lbl.includes('বিজ্ঞাপন')) return 'ad_cost';
+    if (lbl.includes('পণ্য ক্রয়') || lbl.includes('সোর্সিং') || lbl.includes('buying'))
+      return 'product_buying';
+    if (lbl.includes('রিকশা') || lbl.includes('যাতায়াত') || lbl.includes('ভাড়া') || lbl.includes('transport'))
+      return 'transport_fare';
+    if (lbl.includes('রিটার্ন') || lbl.includes('return')) return 'courier_return_charge';
+    if (lbl.includes('কুরিয়ার') || lbl.includes('ডেলিভারি') || lbl.includes('courier'))
+      return 'courier_charge';
+    if (lbl.includes('প্যাকেজিং') || lbl.includes('বক্স') || lbl.includes('packaging'))
+      return 'packaging';
+    if (
+      lbl.includes('অফিস') ||
+      lbl.includes('ইউটিলিটি') ||
+      lbl.includes('স্যালারি') ||
+      lbl.includes('বেতন') ||
+      lbl.includes('বিদ্যুৎ') ||
+      lbl.includes('office')
+    )
+      return 'office_utility';
+    if (lbl.includes('অন্যান্য') || lbl.includes('বিবিধ') || lbl.includes('other')) return 'other';
+    return 'unclassified';
+  }
+
+  switch (key) {
+    case 'ad_cost':
+    case 'facebook_ads':
+    case 'tiktok_ads':
+    case 'google_ads':
+    case 'advertising_expense':
+    case 'advertising':
+    case 'marketing_ads':
+    case 'ads':
+    case 'meta_ads':
+      return 'ad_cost';
+    case 'product_buying':
+    case 'product_purchase':
+    case 'stock_restock':
+    case 'sourcing':
+    case 'inventory_purchase':
+      return 'product_buying';
+    case 'transport_fare':
+    case 'transport':
+    case 'transport_expense':
+    case 'rickshaw_fare':
+    case 'conveyance':
+      return 'transport_fare';
+    case 'courier_charge':
+    case 'courier_expense':
+    case 'delivery_charge':
+    case 'courier':
+      return 'courier_charge';
+    case 'courier_return_charge':
+    case 'return_charge':
+    case 'courier_return':
+    case 'return_loss':
+      return 'courier_return_charge';
+    case 'packaging':
+    case 'packaging_expense':
+    case 'packaging_cost':
+    case 'box_packaging':
+      return 'packaging';
+    case 'office_utility':
+    case 'office_expense':
+    case 'office_rent':
+    case 'staff_salary':
+    case 'utilities':
+    case 'salary':
+      return 'office_utility';
+    case 'other':
+    case 'miscellaneous':
+    case 'misc':
+    case 'other_expense':
+      return 'other';
+    case 'unclassified':
+    case 'unknown':
+    case 'none':
+      return 'unclassified';
+    default:
+      return normalizeExpenseCategory('', key);
+  }
+}
+
+export function getExpenseCategoryLabelBn(category?: string | null, rawLabel?: string | null): string {
+  const canonical = normalizeExpenseCategory(category, rawLabel);
+  return CANONICAL_EXPENSE_CATEGORY_META[canonical]?.labelBn || 'অশ্রেণীবদ্ধ খরচ (Unclassified Expense)';
+}
+
+export function normalizeExpenseRecord(raw: any): OperatingExpense {
+  const now = Date.now();
+  const createdAt = Number(raw?.createdAt) > 0 ? Number(raw.createdAt) : now;
+  const updatedAt = Number(raw?.updatedAt) > 0 ? Number(raw.updatedAt) : createdAt;
+  const rawDateStr = String(raw?.date || '').trim();
+  const validDateStr = /^\d{4}-\d{2}-\d{2}$/.test(rawDateStr)
+    ? rawDateStr
+    : new Date(createdAt).toISOString().slice(0, 10);
+
+  const canonicalCategory = normalizeExpenseCategory(raw?.category, raw?.categoryLabel);
+  const categoryLabel =
+    CANONICAL_EXPENSE_CATEGORY_META[canonicalCategory]?.labelBn ||
+    String(raw?.categoryLabel || 'অশ্রেণীবদ্ধ খরচ');
+  const primaryDescription = String(
+    raw?.description ?? raw?.note ?? raw?.title ?? categoryLabel
+  ).trim() || categoryLabel;
+  const extraNotes = String(raw?.notes ?? '').trim();
+  const amount = Math.max(0, Number(raw?.amount) || 0);
+  const isDeleted = Boolean(raw?.isDeleted);
+  const deletedAt = isDeleted ? Number(raw?.deletedAt || updatedAt) : null;
+  const auditLog: ExpenseAuditEntry[] = Array.isArray(raw?.auditLog) ? raw.auditLog : [];
+
+  return {
+    id: String(raw?.id || `exp-${createdAt}`),
+    date: validDateStr,
+    category: canonicalCategory,
+    rawCategory: String(raw?.rawCategory || raw?.category || canonicalCategory),
+    categoryLabel,
+    title: primaryDescription,
+    description: primaryDescription,
+    note: primaryDescription,
+    notes: extraNotes,
+    amount,
+    paymentMethod: String(raw?.paymentMethod || 'Cash'),
+    referenceId: String(raw?.referenceId || ''),
+    isDeleted,
+    deletedAt,
+    idempotencyKey: String(raw?.idempotencyKey || ''),
+    source: raw?.source || (String(raw?.id || '').startsWith('exp-ret-') ? 'courier_return_auto' : 'manual'),
+    auditLog,
+    createdAt,
+    updatedAt,
+  };
+}
+
+export function parseExpenseDateToTimestamp(dateStr?: string, fallbackCreatedAt?: number): number {
+  const clean = String(dateStr || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
+    const [y, m, d] = clean.split('-').map(Number);
+    if (y > 1970 && m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      return new Date(y, m - 1, d, 12, 0, 0, 0).getTime();
+    }
+  }
+  return Number(fallbackCreatedAt || 0);
+}
+
+export function isDateWithinExpenseRange(
+  dateStr?: string,
+  createdAt?: number,
+  range: 'today' | 'week' | 'month' | 'all' = 'all',
+  nowMs: number = Date.now()
+): boolean {
+  if (range === 'all') return true;
+  const nowDate = new Date(nowMs);
+  const todayIso = `${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, '0')}-${String(
+    nowDate.getDate()
+  ).padStart(2, '0')}`;
+  const startOfTodayMs = new Date(
+    nowDate.getFullYear(),
+    nowDate.getMonth(),
+    nowDate.getDate(),
+    0,
+    0,
+    0,
+    0
+  ).getTime();
+  const endOfTodayMs = new Date(
+    nowDate.getFullYear(),
+    nowDate.getMonth(),
+    nowDate.getDate(),
+    23,
+    59,
+    59,
+    999
+  ).getTime();
+
+  const cleanDateStr = String(dateStr || '').trim();
+  if (range === 'today' && /^\d{4}-\d{2}-\d{2}$/.test(cleanDateStr)) {
+    return cleanDateStr === todayIso;
+  }
+
+  const ts = parseExpenseDateToTimestamp(cleanDateStr, createdAt);
+  if (!ts || ts <= 0) return false;
+
+  if (range === 'today') {
+    return ts >= startOfTodayMs && ts <= endOfTodayMs;
+  }
+  if (range === 'week') {
+    const sevenDaysStart = startOfTodayMs - 6 * 86400000;
+    return ts >= sevenDaysStart && ts <= endOfTodayMs + 86400000;
+  }
+  if (range === 'month') {
+    const thirtyDaysStart = startOfTodayMs - 29 * 86400000;
+    return ts >= thirtyDaysStart && ts <= endOfTodayMs + 86400000;
+  }
+  return true;
+}
+
+export function calculateExpenseBreakdownAndReconciliation(
+  expenses: OperatingExpense[],
+  range: 'today' | 'week' | 'month' | 'all' = 'all',
+  nowMs: number = Date.now()
+): {
+  filteredAll: OperatingExpense[];
+  activeExpenses: OperatingExpense[];
+  archivedExpenses: OperatingExpense[];
+  expenseByType: Record<CanonicalExpenseCategory, number>;
+  countByType: Record<CanonicalExpenseCategory, number>;
+  totalExpenses: number;
+  sumOfCategories: number;
+  unclassifiedAmount: number;
+  isReconciled: boolean;
+} {
+  const normalizedList = (Array.isArray(expenses) ? expenses : []).map(normalizeExpenseRecord);
+  const filteredAll = normalizedList.filter((e) =>
+    isDateWithinExpenseRange(e.date, e.createdAt, range, nowMs)
+  );
+  const activeExpenses = filteredAll.filter((e) => !e.isDeleted);
+  const archivedExpenses = filteredAll.filter((e) => Boolean(e.isDeleted));
+
+  const expenseByType: Record<CanonicalExpenseCategory, number> = {
+    ad_cost: 0,
+    product_buying: 0,
+    transport_fare: 0,
+    courier_charge: 0,
+    courier_return_charge: 0,
+    packaging: 0,
+    office_utility: 0,
+    other: 0,
+    unclassified: 0,
+  };
+  const countByType: Record<CanonicalExpenseCategory, number> = {
+    ad_cost: 0,
+    product_buying: 0,
+    transport_fare: 0,
+    courier_charge: 0,
+    courier_return_charge: 0,
+    packaging: 0,
+    office_utility: 0,
+    other: 0,
+    unclassified: 0,
+  };
+
+  let totalExpenses = 0;
+  for (const exp of activeExpenses) {
+    const amt = Math.max(0, Number(exp.amount) || 0);
+    const cat = normalizeExpenseCategory(exp.category, exp.categoryLabel);
+    expenseByType[cat] = (expenseByType[cat] || 0) + amt;
+    countByType[cat] = (countByType[cat] || 0) + 1;
+    totalExpenses += amt;
+  }
+
+  const sumOfCategories = ORDERED_CANONICAL_EXPENSE_CATEGORIES.reduce(
+    (sum, cat) => sum + (expenseByType[cat] || 0),
+    0
+  );
+
+  return {
+    filteredAll,
+    activeExpenses,
+    archivedExpenses,
+    expenseByType,
+    countByType,
+    totalExpenses,
+    sumOfCategories,
+    unclassifiedAmount: expenseByType.unclassified || 0,
+    isReconciled: Math.abs(totalExpenses - sumOfCategories) < 0.01,
+  };
+}
+
+export interface MonthlyFinancialReportRow {
+  monthKey: string; // YYYY-MM
+  monthLabelBn: string;
+  ordersCount: number;
+  revenue: number;
+  adExpense: number;
+  productAndTransportExpense: number;
+  courierAndReturnExpense: number;
+  packagingExpense: number;
+  officeAndOtherExpense: number;
+  unclassifiedExpense: number;
+  totalExpenses: number;
+  netProfit: number;
+}
+
+export function calculateMonthlyFinancialReport(
+  orders: Order[],
+  expenses: OperatingExpense[]
+): MonthlyFinancialReportRow[] {
+  const monthMap = new Map<string, MonthlyFinancialReportRow>();
+
+  const getOrCreateRow = (monthKey: string): MonthlyFinancialReportRow => {
+    const existing = monthMap.get(monthKey);
+    if (existing) return existing;
+    let monthLabelBn = monthKey;
+    try {
+      const [y, m] = monthKey.split('-').map(Number);
+      if (y && m) {
+        monthLabelBn = new Date(y, m - 1, 1).toLocaleDateString('bn-BD', {
+          year: 'numeric',
+          month: 'long',
+        });
+      }
+    } catch {
+      // fallback to YYYY-MM
+    }
+    const created: MonthlyFinancialReportRow = {
+      monthKey,
+      monthLabelBn,
+      ordersCount: 0,
+      revenue: 0,
+      adExpense: 0,
+      productAndTransportExpense: 0,
+      courierAndReturnExpense: 0,
+      packagingExpense: 0,
+      officeAndOtherExpense: 0,
+      unclassifiedExpense: 0,
+      totalExpenses: 0,
+      netProfit: 0,
+    };
+    monthMap.set(monthKey, created);
+    return created;
+  };
+
+  for (const ord of Array.isArray(orders) ? orders : []) {
+    if (!ord || ord.status === 'cancelled' || ord.status === 'returned') continue;
+    const d = new Date(Number(ord.createdAt || Date.now()));
+    const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const row = getOrCreateRow(monthKey);
+    row.ordersCount += 1;
+    row.revenue += Math.max(0, Number(ord.total) || 0);
+  }
+
+  for (const rawExp of Array.isArray(expenses) ? expenses : []) {
+    const exp = normalizeExpenseRecord(rawExp);
+    if (exp.isDeleted) continue;
+    const monthKey = /^\d{4}-\d{2}/.test(exp.date)
+      ? exp.date.slice(0, 7)
+      : new Date(exp.createdAt).toISOString().slice(0, 7);
+    const row = getOrCreateRow(monthKey);
+    const amt = Math.max(0, Number(exp.amount) || 0);
+    const cat = normalizeExpenseCategory(exp.category, exp.categoryLabel);
+    if (cat === 'ad_cost') {
+      row.adExpense += amt;
+    } else if (cat === 'product_buying' || cat === 'transport_fare') {
+      row.productAndTransportExpense += amt;
+    } else if (cat === 'courier_charge' || cat === 'courier_return_charge') {
+      row.courierAndReturnExpense += amt;
+    } else if (cat === 'packaging') {
+      row.packagingExpense += amt;
+    } else if (cat === 'office_utility' || cat === 'other') {
+      row.officeAndOtherExpense += amt;
+    } else {
+      row.unclassifiedExpense += amt;
+    }
+    row.totalExpenses += amt;
+  }
+
+  const rows = Array.from(monthMap.values());
+  for (const r of rows) {
+    r.netProfit = r.revenue - r.totalExpenses;
+  }
+  rows.sort((a, b) => b.monthKey.localeCompare(a.monthKey));
+  return rows;
+}
+
 export function getPersistedOperatingExpenses(): OperatingExpense[] {
   try {
     const raw = localStorage.getItem(LS_OPERATING_EXPENSES_KEY);
@@ -4535,60 +5000,327 @@ export function getPersistedOperatingExpenses(): OperatingExpense[] {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed
-      .filter((e: any) => e && e.id && typeof e.amount === 'number')
-      .map((e: any) => ({
-        id: String(e.id),
-        date: String(e.date || new Date(e.createdAt || Date.now()).toISOString().slice(0, 10)),
-        category: e.category || 'miscellaneous',
-        title: String(e.title || e.description || e.notes || 'ব্যবসায়িক খরচ'),
-        amount: Number(e.amount || 0),
-        paymentMethod: e.paymentMethod || 'Cash',
-        referenceId: e.referenceId || '',
-        notes: e.notes || '',
-        createdAt: Number(e.createdAt || Date.now()),
-        updatedAt: Number(e.updatedAt || Date.now()),
-      }));
+      .filter((e: any) => e && e.id && typeof Number(e.amount) === 'number')
+      .map((e: any) => normalizeExpenseRecord(e))
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   } catch {
     return [];
   }
 }
 
+export function syncOperatingExpensesToLocalCache(expenses: OperatingExpense[]): OperatingExpense[] {
+  const normalized = (Array.isArray(expenses) ? expenses : [])
+    .filter((e) => e && e.id)
+    .map(normalizeExpenseRecord)
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  try {
+    localStorage.setItem(LS_OPERATING_EXPENSES_KEY, JSON.stringify(normalized));
+  } catch {
+    // ignore storage quota warning
+  }
+  if (typeof window !== 'undefined') {
+    try {
+      window.dispatchEvent(new CustomEvent('dokandari:expenses-updated', { detail: normalized }));
+    } catch {
+      // ignore
+    }
+  }
+  return normalized;
+}
+
+export async function fetchServerExpensesMirror(): Promise<OperatingExpense[]> {
+  try {
+    const resp = await fetch('/api/expenses');
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    if (Array.isArray(data?.expenses)) {
+      return data.expenses.map(normalizeExpenseRecord);
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+export function mergeExpenseLists(
+  primary: OperatingExpense[],
+  secondary: OperatingExpense[]
+): OperatingExpense[] {
+  const map = new Map<string, OperatingExpense>();
+  for (const item of [...(secondary || []), ...(primary || [])]) {
+    if (!item || !item.id) continue;
+    const norm = normalizeExpenseRecord(item);
+    const existing = map.get(norm.id);
+    if (!existing || (norm.updatedAt || 0) >= (existing.updatedAt || 0)) {
+      map.set(norm.id, norm);
+    }
+  }
+  return Array.from(map.values()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+}
+
 export async function saveOperatingExpensePersisted(
-  expense: OperatingExpense
+  expense: Partial<OperatingExpense> & { amount: number; category?: string; date?: string },
+  options?: { isEdit?: boolean; previousRecord?: OperatingExpense | null; actor?: string }
 ): Promise<OperatingExpense> {
-  const clean = sanitizeForFirestore({
+  const existingList = getPersistedOperatingExpenses();
+  const now = Date.now();
+  const isEdit = Boolean(options?.isEdit && expense.id);
+  const prev =
+    options?.previousRecord ||
+    (expense.id ? existingList.find((x) => x.id === expense.id) || null : null);
+
+  // Duplicate Entry Prevention for new manual entries (within 15 seconds)
+  const canonicalCategory = normalizeExpenseCategory(expense.category, expense.categoryLabel);
+  const descText = String(
+    expense.description ?? expense.note ?? expense.title ?? CANONICAL_EXPENSE_CATEGORY_META[canonicalCategory].labelBn
+  ).trim();
+  const dateStr =
+    expense.date && /^\d{4}-\d{2}-\d{2}$/.test(expense.date)
+      ? expense.date
+      : new Date(now).toISOString().slice(0, 10);
+  const amt = Math.max(0, Number(expense.amount) || 0);
+
+  if (!isEdit) {
+    const duplicate = existingList.find(
+      (item) =>
+        !item.isDeleted &&
+        item.id !== expense.id &&
+        item.date === dateStr &&
+        normalizeExpenseCategory(item.category, item.categoryLabel) === canonicalCategory &&
+        Math.abs(Number(item.amount) - amt) < 0.01 &&
+        String(item.description || item.note || item.title || '')
+          .trim()
+          .toLowerCase() === descText.toLowerCase() &&
+        now - Number(item.createdAt || 0) < 15000
+    );
+    if (duplicate) {
+      throw new Error('একই খরচের এন্ট্রি ইতোমধ্যে সেভ করা হয়েছে (Duplicate Entry Blocked)।');
+    }
+  }
+
+  const prevAudit = Array.isArray(prev?.auditLog) ? prev!.auditLog! : [];
+  let auditAction: ExpenseAuditEntry['action'] = isEdit ? 'edited' : 'created';
+  let summary = isEdit
+    ? `খরচ এডিট করা হয়েছে: ${CANONICAL_EXPENSE_CATEGORY_META[canonicalCategory].shortLabelBn} — ৳${amt.toLocaleString()}`
+    : `নতুন খরচ এন্ট্রি: ${CANONICAL_EXPENSE_CATEGORY_META[canonicalCategory].shortLabelBn} — ৳${amt.toLocaleString()}`;
+
+  if (isEdit && prev) {
+    const prevCat = normalizeExpenseCategory(prev.category, prev.categoryLabel);
+    if (prevCat !== canonicalCategory) {
+      auditAction = 'category_changed';
+      summary = `ক্যাটাগরি পরিবর্তন: ${CANONICAL_EXPENSE_CATEGORY_META[prevCat].shortLabelBn} → ${CANONICAL_EXPENSE_CATEGORY_META[canonicalCategory].shortLabelBn} (৳${amt.toLocaleString()})`;
+    } else if (Number(prev.amount) !== amt) {
+      auditAction = 'amount_changed';
+      summary = `টাকার পরিমাণ পরিবর্তন: ৳${Number(prev.amount).toLocaleString()} → ৳${amt.toLocaleString()}`;
+    } else if (prev.date !== dateStr) {
+      auditAction = 'date_changed';
+      summary = `তারিখ পরিবর্তন: ${prev.date} → ${dateStr}`;
+    }
+  }
+
+  const auditEntry: ExpenseAuditEntry = {
+    id: `aud-exp-${now}-${Math.floor(100 + Math.random() * 899)}`,
+    timestamp: now,
+    action: auditAction,
+    actor: options?.actor || 'Admin',
+    summary,
+    previousValues: prev
+      ? {
+          date: prev.date,
+          category: prev.category,
+          amount: prev.amount,
+          description: prev.description || prev.note || prev.title,
+          notes: prev.notes,
+          isDeleted: Boolean(prev.isDeleted),
+        }
+      : undefined,
+    newValues: {
+      date: dateStr,
+      category: canonicalCategory,
+      amount: amt,
+      description: descText,
+      notes: String(expense.notes ?? prev?.notes ?? '').trim(),
+      isDeleted: Boolean(expense.isDeleted ?? false),
+    },
+  };
+
+  const normalized = normalizeExpenseRecord({
+    ...prev,
     ...expense,
-    updatedAt: Date.now(),
+    id: expense.id || `exp-${now}-${Math.floor(100 + Math.random() * 899)}`,
+    date: dateStr,
+    category: canonicalCategory,
+    rawCategory: expense.rawCategory || expense.category || canonicalCategory,
+    categoryLabel: CANONICAL_EXPENSE_CATEGORY_META[canonicalCategory].labelBn,
+    title: descText,
+    description: descText,
+    note: descText,
+    notes: String(expense.notes ?? prev?.notes ?? '').trim(),
+    amount: amt,
+    isDeleted: Boolean(expense.isDeleted ?? false),
+    deletedAt: expense.isDeleted ? Number(expense.deletedAt || now) : null,
+    createdAt: prev?.createdAt || expense.createdAt || now,
+    updatedAt: now,
+    auditLog: [auditEntry, ...prevAudit].slice(0, 50),
   });
-  try {
-    const existing = getPersistedOperatingExpenses();
-    const next = [clean, ...existing.filter((e) => e.id !== clean.id)];
-    localStorage.setItem(LS_OPERATING_EXPENSES_KEY, JSON.stringify(next));
-  } catch {
-    // ignore
+
+  const clean = sanitizeForFirestore(normalized);
+
+  // Safe Database Save: verify at least Firestore or Server Mirror succeeds before confirming
+  const [fsResult, apiResult] = await Promise.allSettled([
+    setDoc(doc(db, 'business_expenses', clean.id), clean, { merge: true }),
+    fetch('/api/expenses/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expense: clean }),
+    }).then((r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    }),
+  ]);
+
+  if (fsResult.status === 'rejected' && apiResult.status === 'rejected') {
+    throw new Error('ডাটাবেজে খরচ সংরক্ষণ ব্যর্থ হয়েছে। অনুগ্রহ করে আবার চেষ্টা করুন।');
   }
-  try {
-    await setDoc(doc(db, 'business_expenses', clean.id), clean, { merge: true });
-  } catch {
-    // ignore
+
+  const next = [clean, ...existingList.filter((e) => e.id !== clean.id)];
+  syncOperatingExpensesToLocalCache(next);
+  return clean;
+}
+
+export async function softDeleteOperatingExpensePersisted(
+  expenseId: string,
+  actor = 'Admin'
+): Promise<OperatingExpense> {
+  if (!expenseId) throw new Error('Invalid expense ID');
+  const existingList = getPersistedOperatingExpenses();
+  const target = existingList.find((e) => e.id === expenseId);
+  if (!target) {
+    throw new Error('খরচের এন্ট্রিটি পাওয়া যায়নি।');
   }
+
+  const now = Date.now();
+  const prevAudit = Array.isArray(target.auditLog) ? target.auditLog : [];
+  const auditEntry: ExpenseAuditEntry = {
+    id: `aud-exp-${now}-${Math.floor(100 + Math.random() * 899)}`,
+    timestamp: now,
+    action: 'soft_deleted',
+    actor,
+    summary: `খরচটি আর্কাইভ (Soft Delete) করা হয়েছে: ${target.categoryLabel || target.category} — ৳${Number(
+      target.amount
+    ).toLocaleString()}`,
+    previousValues: {
+      date: target.date,
+      category: target.category,
+      amount: target.amount,
+      isDeleted: false,
+    },
+    newValues: {
+      date: target.date,
+      category: target.category,
+      amount: target.amount,
+      isDeleted: true,
+    },
+  };
+
+  const archived = normalizeExpenseRecord({
+    ...target,
+    isDeleted: true,
+    deletedAt: now,
+    updatedAt: now,
+    auditLog: [auditEntry, ...prevAudit].slice(0, 50),
+  });
+  const clean = sanitizeForFirestore(archived);
+
+  const [fsResult, apiResult] = await Promise.allSettled([
+    setDoc(doc(db, 'business_expenses', clean.id), clean, { merge: true }),
+    fetch('/api/expenses/soft-delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: clean.id, expense: clean }),
+    }).then((r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    }),
+  ]);
+
+  if (fsResult.status === 'rejected' && apiResult.status === 'rejected') {
+    throw new Error('ডাটাবেজে খরচ ডিলিট/আর্কাইভ ব্যর্থ হয়েছে।');
+  }
+
+  const next = existingList.map((e) => (e.id === clean.id ? clean : e));
+  syncOperatingExpensesToLocalCache(next);
+  return clean;
+}
+
+export async function restoreOperatingExpensePersisted(
+  expenseId: string,
+  actor = 'Admin'
+): Promise<OperatingExpense> {
+  if (!expenseId) throw new Error('Invalid expense ID');
+  const existingList = getPersistedOperatingExpenses();
+  const target = existingList.find((e) => e.id === expenseId);
+  if (!target) {
+    throw new Error('রিস্টোর করার জন্য খরচের এন্ট্রিটি পাওয়া যায়নি।');
+  }
+
+  const now = Date.now();
+  const prevAudit = Array.isArray(target.auditLog) ? target.auditLog : [];
+  const auditEntry: ExpenseAuditEntry = {
+    id: `aud-exp-${now}-${Math.floor(100 + Math.random() * 899)}`,
+    timestamp: now,
+    action: 'restored',
+    actor,
+    summary: `ডিলিটকৃত খরচ পুনরুদ্ধার (Restore) করা হয়েছে: ${target.categoryLabel || target.category} — ৳${Number(
+      target.amount
+    ).toLocaleString()}`,
+    previousValues: {
+      date: target.date,
+      category: target.category,
+      amount: target.amount,
+      isDeleted: true,
+    },
+    newValues: {
+      date: target.date,
+      category: target.category,
+      amount: target.amount,
+      isDeleted: false,
+    },
+  };
+
+  const restored = normalizeExpenseRecord({
+    ...target,
+    isDeleted: false,
+    deletedAt: null,
+    updatedAt: now,
+    auditLog: [auditEntry, ...prevAudit].slice(0, 50),
+  });
+  const clean = sanitizeForFirestore(restored);
+
+  const [fsResult, apiResult] = await Promise.allSettled([
+    setDoc(doc(db, 'business_expenses', clean.id), clean, { merge: true }),
+    fetch('/api/expenses/restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: clean.id, expense: clean }),
+    }).then((r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    }),
+  ]);
+
+  if (fsResult.status === 'rejected' && apiResult.status === 'rejected') {
+    throw new Error('ডাটাবেজে খরচ রিস্টোর ব্যর্থ হয়েছে।');
+  }
+
+  const next = existingList.map((e) => (e.id === clean.id ? clean : e));
+  syncOperatingExpensesToLocalCache(next);
   return clean;
 }
 
 export async function deleteOperatingExpensePersisted(expenseId: string): Promise<void> {
   if (!expenseId) return;
-  try {
-    const existing = getPersistedOperatingExpenses();
-    const next = existing.filter((e) => e.id !== expenseId);
-    localStorage.setItem(LS_OPERATING_EXPENSES_KEY, JSON.stringify(next));
-  } catch {
-    // ignore
-  }
-  try {
-    await deleteDoc(doc(db, 'business_expenses', expenseId));
-  } catch {
-    // ignore
-  }
+  await softDeleteOperatingExpensePersisted(expenseId);
 }
 
 /**
