@@ -92,6 +92,8 @@ import {
   CanonicalExpenseCategory,
   OperatingExpense,
   ExpenseAuditEntry,
+  PackagingType,
+  PACKAGING_TYPES_LIST,
 } from '../types';
 import {
   updateLeadStatus,
@@ -197,6 +199,9 @@ import {
   saveOperatingExpensePersisted,
   softDeleteOperatingExpensePersisted,
   restoreOperatingExpensePersisted,
+  buildOrderPackagingSnapshot,
+  appendOrderPackagingCostHistory,
+  resolveOrderPackagingCost,
 } from '../lib/storeSync';
 import {
   OfficialWhatsAppIcon,
@@ -753,6 +758,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [newVideoUrl, setNewVideoUrl] = useState('');
   const [newUploadingImg, setNewUploadingImg] = useState(false);
   const [newAiAnalyzing, setNewAiAnalyzing] = useState(false);
+  const [newDefaultPackagingCost, setNewDefaultPackagingCost] = useState<string>('');
+  const [newDefaultPackagingType, setNewDefaultPackagingType] = useState<PackagingType>('Bubble Wrap');
   const serverOrdersRef = useRef<Order[]>([]);
 
   // Manual Order Entry & WhatsApp Screenshot Auto-Order Extractor state
@@ -790,6 +797,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [editOrderCogs, setEditOrderCogs] = useState<number>(0);
   const [editOrderCourierExpense, setEditOrderCourierExpense] = useState<number>(70);
   const [editOrderPackagingCost, setEditOrderPackagingCost] = useState<number>(15);
+  const [editOrderPackagingType, setEditOrderPackagingType] = useState<PackagingType>('Bubble Wrap');
+  const [editOrderExtraPackagingCost, setEditOrderExtraPackagingCost] = useState<number>(0);
+  const [editOrderManualPackagingOverride, setEditOrderManualPackagingOverride] = useState<boolean>(false);
+  const [confirmDeleteOrderPackaging, setConfirmDeleteOrderPackaging] = useState<boolean>(false);
   const [editOrderOtherExpense, setEditOrderOtherExpense] = useState<number>(0);
   const [editOrderManualCostOverride, setEditOrderManualCostOverride] = useState<boolean>(false);
   const [editOrderStatus, setEditOrderStatus] = useState<OrderStatus>('confirmed');
@@ -3267,6 +3278,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setEditOrderCogs(fin.cogsTotal);
     setEditOrderCourierExpense(fin.courierExpense);
     setEditOrderPackagingCost(fin.packagingCost);
+    setEditOrderPackagingType(
+      order.packagingType || order.packagingSnapshot?.packagingType || 'Bubble Wrap'
+    );
+    setEditOrderExtraPackagingCost(
+      order.extraPackagingCost ?? order.packagingSnapshot?.extraPackagingCost ?? 0
+    );
+    setEditOrderManualPackagingOverride(false);
+    setConfirmDeleteOrderPackaging(false);
     setEditOrderOtherExpense(fin.otherOrderExpense);
     setEditOrderManualCostOverride(Boolean(order.manualFinancialOverride));
     setEditOrderStatus(order.status || 'confirmed');
@@ -3289,6 +3308,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       );
       if (!editOrderManualCostOverride) {
         setEditOrderCogs(computeItemsCogs(next));
+      }
+      if (!editOrderManualPackagingOverride) {
+        const autoSnap = buildOrderPackagingSnapshot({
+          items: next,
+          products,
+          extraPackagingCost: editOrderExtraPackagingCost,
+          packagingType: editOrderPackagingType,
+          useLiveProductDefaults: true,
+        });
+        setEditOrderPackagingCost(autoSnap.totalPackagingCost);
       }
       return next;
     });
@@ -3353,6 +3382,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       if (!editOrderManualCostOverride) {
         setEditOrderCogs(computeItemsCogs(next));
       }
+      if (!editOrderManualPackagingOverride) {
+        const autoSnap = buildOrderPackagingSnapshot({
+          items: next,
+          products,
+          extraPackagingCost: editOrderExtraPackagingCost,
+          packagingType: editOrderPackagingType,
+          useLiveProductDefaults: true,
+        });
+        setEditOrderPackagingCost(autoSnap.totalPackagingCost);
+      }
       return next;
     });
   };
@@ -3371,11 +3410,25 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       selectedColor: target.variants?.colors?.[0] || 'Standard',
       selectedSize: target.variants?.sizes?.[0] || 'Standard',
       image: target.images?.[0] || '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg',
+      ...(typeof target.defaultPackagingCost === 'number'
+        ? { unitPackagingCost: target.defaultPackagingCost }
+        : {}),
+      ...(target.defaultPackagingType ? { packagingType: target.defaultPackagingType } : {}),
     };
     setEditOrderItems((prev) => {
       const next = [...prev, newItem];
       if (!editOrderManualCostOverride) {
         setEditOrderCogs(computeItemsCogs(next));
+      }
+      if (!editOrderManualPackagingOverride) {
+        const autoSnap = buildOrderPackagingSnapshot({
+          items: next,
+          products,
+          extraPackagingCost: editOrderExtraPackagingCost,
+          packagingType: editOrderPackagingType,
+          useLiveProductDefaults: true,
+        });
+        setEditOrderPackagingCost(autoSnap.totalPackagingCost);
       }
       return next;
     });
@@ -3422,6 +3475,51 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           : editOrderDistrict || 'ঢাকার বাইরে (Outside Dhaka)';
 
       const now = Date.now();
+      const finalPackagingCost = Math.max(0, Number(editOrderPackagingCost) || 0);
+      const finalExtraPackaging = Math.max(0, Number(editOrderExtraPackagingCost) || 0);
+      const previousPackagingCost = resolveOrderPackagingCost(editingOrder);
+      const previousExtraCost =
+        editingOrder.extraPackagingCost ?? editingOrder.packagingSnapshot?.extraPackagingCost ?? 0;
+      const previousPackagingType =
+        editingOrder.packagingType || editingOrder.packagingSnapshot?.packagingType || 'Bubble Wrap';
+
+      const baseSnap = buildOrderPackagingSnapshot({
+        items: sanitizedItems,
+        products,
+        extraPackagingCost: finalExtraPackaging,
+        packagingType: editOrderPackagingType,
+        useLiveProductDefaults: true,
+      });
+      const updatedPackagingSnapshot = {
+        ...baseSnap,
+        packagingType: editOrderPackagingType,
+        extraPackagingCost: finalExtraPackaging,
+        totalPackagingCost: finalPackagingCost,
+        snapshotAt: now,
+        isSnapshotRecorded: true,
+      };
+      const updatedPackagingHistory =
+        previousPackagingCost !== finalPackagingCost ||
+        previousExtraCost !== finalExtraPackaging ||
+        previousPackagingType !== editOrderPackagingType
+          ? appendOrderPackagingCostHistory(editingOrder.packagingCostHistory, {
+              action:
+                finalPackagingCost === 0 && previousPackagingCost > 0
+                  ? 'deleted_reset'
+                  : finalExtraPackaging !== previousExtraCost
+                  ? 'extra_cost_added'
+                  : 'edited',
+              actor: 'Admin (Order Edit)',
+              previousPackagingCost,
+              newPackagingCost: finalPackagingCost,
+              previousExtraCost,
+              newExtraCost: finalExtraPackaging,
+              previousPackagingType,
+              newPackagingType: editOrderPackagingType,
+              note: editOrderNotes.trim() || 'অর্ডার এডিট মডাল থেকে প্যাকেজিং খরচ আপডেট',
+            })
+          : editingOrder.packagingCostHistory;
+
       const baseUpdatedOrder: Order = {
         ...editingOrder,
         customer: {
@@ -3438,6 +3536,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         discount: disc,
         total: calcTotal,
         status: editOrderStatus,
+        packagingCost: finalPackagingCost,
+        packagingType: editOrderPackagingType,
+        extraPackagingCost: finalExtraPackaging,
+        packagingSnapshot: updatedPackagingSnapshot,
+        packagingCostHistory: updatedPackagingHistory,
         adminNotes: editOrderNotes.trim() || editingOrder.adminNotes,
         manualFinancialOverride: editOrderManualCostOverride,
         updatedAt: now,
@@ -3452,7 +3555,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             ? Math.max(0, Number(editOrderCogs) || 0)
             : computeItemsCogs(sanitizedItems),
           courierExpense: Math.max(0, Number(editOrderCourierExpense) || 0),
-          packagingCost: Math.max(0, Number(editOrderPackagingCost) || 0),
+          packagingCost: finalPackagingCost,
+          packagingType: editOrderPackagingType,
+          extraPackagingCost: finalExtraPackaging,
+          packagingSnapshot: updatedPackagingSnapshot,
+          packagingCostHistory: updatedPackagingHistory,
           otherOrderExpense: Math.max(0, Number(editOrderOtherExpense) || 0),
           manualFinancialOverride: editOrderManualCostOverride,
           adminNotes: editOrderNotes.trim() || editingOrder.adminNotes,
@@ -4488,6 +4595,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           // keep data URLs if upload route fails
         }
 
+        const parsedNewPkgCost =
+          newDefaultPackagingCost.trim() !== '' && !Number.isNaN(Number(newDefaultPackagingCost))
+            ? Math.max(0, Number(newDefaultPackagingCost))
+            : undefined;
         const prod: Product = {
           id: prodId,
           name: analysis.titleBn,
@@ -4500,6 +4611,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           sku: `DKD-${Math.floor(1000 + Math.random() * 9000)}`,
           stock: 25,
           costPrice: Math.round(analysis.price * 0.65),
+          ...(typeof parsedNewPkgCost === 'number'
+            ? {
+                defaultPackagingCost: parsedNewPkgCost,
+                defaultPackagingType: newDefaultPackagingType,
+              }
+            : {}),
           inStock: true,
           status: 'published',
           rating: 5.0,
@@ -4540,6 +4657,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         setNewImage('');
         setNewImages([]);
         setNewVideoUrl('');
+        setNewDefaultPackagingCost('');
         setFeedback(
           `🎉 "${prod.name}" (${finalImages.length}টি আসল ছবি সহ) এআই বিশ্লেষণের মাধ্যমে সাথে সাথে লাইভ ওয়েবসাইটে পাবলিশ হয়েছে!`
         );
@@ -4599,6 +4717,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
       const priceNum = Math.max(1, Number(newPrice) || 1450);
       const origNum = Math.max(priceNum, Number(newOriginalPrice) || priceNum + 550);
+      const parsedNewPkgCost =
+        newDefaultPackagingCost.trim() !== '' && !Number.isNaN(Number(newDefaultPackagingCost))
+          ? Math.max(0, Number(newDefaultPackagingCost))
+          : undefined;
       const prod: Product = {
         id: prodId,
         name: newTitle.trim(),
@@ -4613,6 +4735,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         sku: `DKD-${Math.floor(1000 + Math.random() * 9000)}`,
         stock: 25,
         costPrice: Math.round(priceNum * 0.65),
+        ...(typeof parsedNewPkgCost === 'number'
+          ? {
+              defaultPackagingCost: parsedNewPkgCost,
+              defaultPackagingType: newDefaultPackagingType,
+            }
+          : {}),
         inStock: true,
         status: 'published',
         rating: 5.0,
@@ -4653,6 +4781,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       setNewImage('');
       setNewImages([]);
       setNewVideoUrl('');
+      setNewDefaultPackagingCost('');
       setFeedback(
         `✅ "${prod.name}" (${finalImages.length}টি ছবি সহ, +৳${priceNum.toLocaleString()}) সাথে সাথে ডাটাবেজে সেভ ও লাইভ ওয়েবসাইটে প্রকাশিত হয়েছে!`
       );
@@ -13844,6 +13973,39 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </div>
               </div>
 
+              {/* Optional Default Packaging Cost & Type for New Product */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-2.5 rounded-xl bg-stone-50 border border-stone-200">
+                <div>
+                  <label className="block text-stone-700 font-bold mb-1">
+                    📦 ডিফল্ট প্যাকেজিং খরচ (৳ — ঐচ্ছিক)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={newDefaultPackagingCost}
+                    onChange={(e) => setNewDefaultPackagingCost(e.target.value)}
+                    placeholder="যেমন: 15 বা 20 (না দিলে 0)"
+                    className="w-full px-3 py-1.5 bg-white border border-stone-300 rounded-xl font-mono font-bold text-stone-900 focus:border-[#E11D48] focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-stone-700 font-bold mb-1">
+                    প্যাকেজিং ধরন (Packaging Type)
+                  </label>
+                  <select
+                    value={newDefaultPackagingType}
+                    onChange={(e) => setNewDefaultPackagingType(e.target.value as PackagingType)}
+                    className="w-full px-3 py-1.5 bg-white border border-stone-300 rounded-xl font-bold text-stone-800"
+                  >
+                    {PACKAGING_TYPES_LIST.map((pt) => (
+                      <option key={pt.value} value={pt.value}>
+                        {pt.labelBn}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
               <div>
                 <label className="block text-stone-700 font-bold mb-1">
                   প্রোডাক্টের বিস্তারিত বিবরণ (ফাঁকা রাখলে AI ছবি দেখে অটো বিবরণ লিখবে)
@@ -14275,9 +14437,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           type="number"
                           min={0}
                           value={editOrderPackagingCost}
-                          onChange={(e) =>
-                            setEditOrderPackagingCost(Math.max(0, Number(e.target.value)))
-                          }
+                          onChange={(e) => {
+                            setEditOrderManualPackagingOverride(true);
+                            setEditOrderPackagingCost(Math.max(0, Number(e.target.value)));
+                          }}
                           className="w-full px-2 py-1 border border-stone-200 rounded font-mono font-bold text-stone-800 text-xs"
                         />
                       </div>
@@ -14299,6 +14462,180 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         </span>
                       </div>
                     </div>
+
+                    {/* Order-wise Packaging Cost Management (Product Default Snapshot + Manual Override + Extra Cost + Delete Confirmation + History) */}
+                    {(() => {
+                      const autoSnapPreview = buildOrderPackagingSnapshot({
+                        items: editOrderItems,
+                        products,
+                        extraPackagingCost: editOrderExtraPackagingCost,
+                        packagingType: editOrderPackagingType,
+                        useLiveProductDefaults: true,
+                      });
+                      return (
+                        <div className="mt-2 p-3 rounded-xl bg-white border border-stone-200 space-y-2.5 text-xs">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="font-extrabold text-stone-800">
+                              📦 অর্ডার-ভিত্তিক প্যাকেজিং খরচ নিয়ন্ত্রণ (Order-wise Packaging Cost & Override):
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditOrderManualPackagingOverride(false);
+                                setEditOrderPackagingCost(autoSnapPreview.totalPackagingCost);
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-[10.5px] cursor-pointer"
+                            >
+                              ↻ প্রোডাক্ট ডিফল্ট অনুযায়ী হিসাব ({autoSnapPreview.totalPackagingCost}৳)
+                            </button>
+                          </div>
+
+                          {/* Item-wise Default Packaging Breakdown */}
+                          <div className="p-2 rounded-lg bg-stone-50 border border-stone-200 text-[11px] space-y-1">
+                            {autoSnapPreview.items.map((sp, spIdx) => (
+                              <div key={spIdx} className="flex items-center justify-between text-stone-600">
+                                <span className="truncate max-w-[65%]">
+                                  • {sp.productName} ({sp.quantity} পিস × ৳{sp.unitPackagingCost})
+                                </span>
+                                <span className="font-mono font-bold text-stone-800">
+                                  ৳{sp.linePackagingCost}
+                                </span>
+                              </div>
+                            ))}
+                            <div className="flex items-center justify-between pt-1 border-t border-stone-200 font-bold text-stone-800">
+                              <span>আইটেম প্যাকেজিং সাবটোটাল + অতিরিক্ত খরচ:</span>
+                              <span className="font-mono">
+                                ৳{autoSnapPreview.itemsPackagingTotal} + ৳{editOrderExtraPackagingCost} = ৳{autoSnapPreview.totalPackagingCost}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                            <div>
+                              <label className="block text-[10.5px] font-bold text-stone-600 mb-0.5">
+                                প্যাকেজিং ধরন (Type)
+                              </label>
+                              <select
+                                value={editOrderPackagingType}
+                                onChange={(e) =>
+                                  setEditOrderPackagingType(e.target.value as PackagingType)
+                                }
+                                className="w-full px-2.5 py-1.5 bg-white border border-stone-300 rounded-lg font-bold text-xs"
+                              >
+                                {PACKAGING_TYPES_LIST.map((pt) => (
+                                  <option key={pt.value} value={pt.value}>
+                                    {pt.labelBn}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="block text-[10.5px] font-bold text-stone-600 mb-0.5">
+                                অতিরিক্ত প্যাকেজিং খরচ (৳)
+                              </label>
+                              <input
+                                type="number"
+                                min={0}
+                                value={editOrderExtraPackagingCost}
+                                onChange={(e) => {
+                                  const nextExtra = Math.max(0, Number(e.target.value) || 0);
+                                  setEditOrderExtraPackagingCost(nextExtra);
+                                  const nextSnap = buildOrderPackagingSnapshot({
+                                    items: editOrderItems,
+                                    products,
+                                    extraPackagingCost: nextExtra,
+                                    packagingType: editOrderPackagingType,
+                                    useLiveProductDefaults: true,
+                                  });
+                                  setEditOrderPackagingCost(nextSnap.totalPackagingCost);
+                                }}
+                                className="w-full px-2.5 py-1.5 bg-white border border-stone-300 rounded-lg font-mono font-bold text-xs"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-[10.5px] font-bold text-stone-600 mb-0.5">
+                                অর্ডার ম্যানুয়াল ওভাররাইড (৳)
+                              </label>
+                              <input
+                                type="number"
+                                min={0}
+                                value={editOrderPackagingCost}
+                                onChange={(e) => {
+                                  setEditOrderManualPackagingOverride(true);
+                                  setEditOrderPackagingCost(Math.max(0, Number(e.target.value) || 0));
+                                }}
+                                className="w-full px-2.5 py-1.5 bg-white border border-rose-300 rounded-lg font-mono font-extrabold text-[#E11D48] text-xs"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Delete / Reset Packaging Cost with Confirmation */}
+                          <div className="flex items-center justify-between pt-1">
+                            <span className="text-[10.5px] text-stone-500">
+                              * অর্ডারের প্যাকেজিং খরচ পরিবর্তন করলে মূল প্রোডাক্টের ডিফল্ট খরচ পরিবর্তন হবে না।
+                            </span>
+                            {!confirmDeleteOrderPackaging ? (
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteOrderPackaging(true)}
+                                className="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-[10.5px] cursor-pointer shrink-0"
+                              >
+                                🗑️ প্যাকেজিং খরচ মুছুন (0৳)
+                              </button>
+                            ) : (
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditOrderManualPackagingOverride(true);
+                                    setEditOrderPackagingCost(0);
+                                    setEditOrderExtraPackagingCost(0);
+                                    setConfirmDeleteOrderPackaging(false);
+                                  }}
+                                  className="px-2.5 py-1 rounded-lg bg-rose-600 text-white font-extrabold text-[10.5px] cursor-pointer"
+                                >
+                                  হ্যাঁ, 0৳ নিশ্চিত করুন
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteOrderPackaging(false)}
+                                  className="px-2 py-1 rounded-lg border border-stone-300 text-stone-700 font-bold text-[10.5px] cursor-pointer"
+                                >
+                                  বাতিল
+                                </button>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Packaging Cost History Log (only shown if recorded history exists) */}
+                          {Array.isArray(editingOrder.packagingCostHistory) &&
+                            editingOrder.packagingCostHistory.length > 0 && (
+                              <div className="p-2 rounded-lg bg-stone-50 border border-stone-200 text-[10.5px] space-y-1 max-h-24 overflow-y-auto">
+                                <div className="font-extrabold text-stone-700">
+                                  📜 প্যাকেজিং খরচ পরিবর্তনের ইতিহাস (Before & After):
+                                </div>
+                                {editingOrder.packagingCostHistory.map((h) => (
+                                  <div
+                                    key={h.id}
+                                    className="flex items-center justify-between text-stone-600"
+                                  >
+                                    <span>
+                                      ৳{h.previousPackagingCost} →{' '}
+                                      <strong className="text-emerald-700">
+                                        ৳{h.newPackagingCost}
+                                      </strong>{' '}
+                                      ({h.newPackagingType || 'Bubble Wrap'})
+                                    </span>
+                                    <span>{new Date(h.timestamp).toLocaleString('bn-BD')}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
 

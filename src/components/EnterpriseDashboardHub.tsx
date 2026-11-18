@@ -683,34 +683,44 @@ export const EnterpriseDashboardHub: React.FC<EnterpriseDashboardHubProps> = ({
       const otherOrderExpense = Math.max(0, Number(overrideOtherExp) || 0);
 
       const previousPackagingCost = resolveOrderPackagingCost(overrideOrder);
+      const previousExtraCost =
+        overrideOrder.extraPackagingCost ?? overrideOrder.packagingSnapshot?.extraPackagingCost ?? 0;
       const previousPackagingType =
-        overrideOrder.packagingType || overrideOrder.packagingSnapshot?.packagingType || 'Poly Bag';
+        overrideOrder.packagingType || overrideOrder.packagingSnapshot?.packagingType || 'Bubble Wrap';
 
       const baseSnap = buildOrderPackagingSnapshot({
         items: overrideOrder.items || [],
         products,
-        orderPackagingType: overridePackagingType,
         extraPackagingCost,
-        existingSnapshot: overrideOrder.packagingSnapshot,
+        packagingType: overridePackagingType,
+        useLiveProductDefaults: true,
       });
       const updatedSnapshot = {
         ...baseSnap,
         packagingType: overridePackagingType,
         extraPackagingCost,
         totalPackagingCost: packagingCost,
-        capturedAt: new Date().toISOString(),
+        snapshotAt: Date.now(),
         isSnapshotRecorded: true,
       };
       const updatedHistory =
-        previousPackagingCost !== packagingCost || previousPackagingType !== overridePackagingType
-          ? appendOrderPackagingCostHistory({
-              existingHistory: overrideOrder.packagingCostHistory,
-              previousCost: previousPackagingCost,
-              newCost: packagingCost,
-              previousType: previousPackagingType,
-              newType: overridePackagingType,
-              extraPackagingCost,
-              action: packagingCost === 0 && previousPackagingCost > 0 ? 'delete_reset' : 'manual_edit',
+        previousPackagingCost !== packagingCost ||
+        previousPackagingType !== overridePackagingType ||
+        previousExtraCost !== extraPackagingCost
+          ? appendOrderPackagingCostHistory(overrideOrder.packagingCostHistory, {
+              action:
+                packagingCost === 0 && previousPackagingCost > 0
+                  ? 'deleted_reset'
+                  : extraPackagingCost !== previousExtraCost
+                  ? 'extra_cost_added'
+                  : 'edited',
+              actor: 'Admin (Business Command Center)',
+              previousPackagingCost,
+              newPackagingCost: packagingCost,
+              previousExtraCost,
+              newExtraCost: extraPackagingCost,
+              previousPackagingType,
+              newPackagingType: overridePackagingType,
               note: overrideNotes || 'বিজনেস কমান্ড সেন্টার থেকে অর্ডার প্যাকেজিং খরচ আপডেট',
             })
           : overrideOrder.packagingCostHistory;
@@ -732,21 +742,17 @@ export const EnterpriseDashboardHub: React.FC<EnterpriseDashboardHubProps> = ({
           cogsTotal,
           courierExpense,
           packagingCost,
+          packagingType: overridePackagingType,
+          extraPackagingCost,
+          packagingSnapshot: updatedSnapshot,
+          packagingCostHistory: updatedHistory,
           otherOrderExpense,
           manualFinancialOverride: true,
           adminNotes: overrideNotes,
         },
         products,
       });
-      const finalOrder: Order = {
-        ...result.updatedOrder,
-        packagingCost,
-        packagingType: overridePackagingType,
-        extraPackagingCost,
-        packagingSnapshot: updatedSnapshot,
-        packagingCostHistory: updatedHistory,
-      };
-      await onUpdateOrder(finalOrder);
+      await onUpdateOrder(result.updatedOrder);
       if (onUpdateProductsList) {
         onUpdateProductsList(result.updatedProducts);
       }
@@ -1835,8 +1841,8 @@ export const EnterpriseDashboardHub: React.FC<EnterpriseDashboardHubProps> = ({
                       className="w-full px-3 py-2 rounded-xl border border-stone-300 dark:border-slate-700 bg-transparent font-bold"
                     >
                       {PACKAGING_TYPES_LIST.map((pt) => (
-                        <option key={pt} value={pt} className="text-slate-900">
-                          {pt}
+                        <option key={pt.value} value={pt.value} className="text-slate-900">
+                          {pt.labelBn}
                         </option>
                       ))}
                     </select>
@@ -1853,11 +1859,11 @@ export const EnterpriseDashboardHub: React.FC<EnterpriseDashboardHubProps> = ({
                         const snap = buildOrderPackagingSnapshot({
                           items: overrideOrder.items || [],
                           products,
-                          orderPackagingType: overridePackagingType,
                           extraPackagingCost: Math.max(0, Number(extraVal) || 0),
-                          existingSnapshot: overrideOrder.packagingSnapshot,
+                          packagingType: overridePackagingType,
+                          useLiveProductDefaults: true,
                         });
-                        setOverridePackaging(String(snap.itemsPackagingTotal + (Math.max(0, Number(extraVal) || 0))));
+                        setOverridePackaging(String(snap.totalPackagingCost));
                       }}
                       className="w-full px-3 py-2 rounded-xl border border-stone-300 dark:border-slate-700 bg-transparent font-bold"
                     />
@@ -1871,8 +1877,9 @@ export const EnterpriseDashboardHub: React.FC<EnterpriseDashboardHubProps> = ({
                           const freshSnap = buildOrderPackagingSnapshot({
                             items: overrideOrder.items || [],
                             products,
-                            orderPackagingType: overridePackagingType,
                             extraPackagingCost: Math.max(0, Number(overrideExtraPackaging) || 0),
+                            packagingType: overridePackagingType,
+                            useLiveProductDefaults: true,
                           });
                           setOverridePackaging(String(freshSnap.totalPackagingCost));
                         }}
@@ -1883,6 +1890,7 @@ export const EnterpriseDashboardHub: React.FC<EnterpriseDashboardHubProps> = ({
                             items: overrideOrder.items || [],
                             products,
                             extraPackagingCost: Math.max(0, Number(overrideExtraPackaging) || 0),
+                            useLiveProductDefaults: true,
                           }).totalPackagingCost
                         }৳)
                       </button>
@@ -1953,9 +1961,10 @@ export const EnterpriseDashboardHub: React.FC<EnterpriseDashboardHubProps> = ({
                       {overrideOrder.packagingCostHistory.map((h) => (
                         <div key={h.id} className="flex items-center justify-between text-stone-500 dark:text-slate-400">
                           <span>
-                            ৳{h.previousCost} → <strong className="text-emerald-600">৳{h.newCost}</strong> ({h.newType || 'Poly Bag'})
+                            ৳{h.previousPackagingCost} →{' '}
+                            <strong className="text-emerald-600">৳{h.newPackagingCost}</strong> ({h.newPackagingType || 'Bubble Wrap'})
                           </span>
-                          <span>{new Date(h.changedAt).toLocaleString('bn-BD')}</span>
+                          <span>{new Date(h.timestamp).toLocaleString('bn-BD')}</span>
                         </div>
                       ))}
                     </div>

@@ -24,7 +24,7 @@ import {
   Eye,
   Check,
 } from 'lucide-react';
-import { Product, ProductCategory } from '../types';
+import { Product, ProductCategory, PackagingType, PACKAGING_TYPES_LIST } from '../types';
 import {
   smartImportOrAnalyzeProduct,
   analyzeUploadedProductImagesWithAI,
@@ -117,6 +117,14 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
   const [enableCustomScreenshot, setEnableCustomScreenshot] = useState<boolean>(
     isProductScreenshotEnabled(product)
   );
+  const [defaultPackagingCost, setDefaultPackagingCost] = useState<string>(
+    typeof product.defaultPackagingCost === 'number' && !Number.isNaN(product.defaultPackagingCost)
+      ? String(product.defaultPackagingCost)
+      : ''
+  );
+  const [defaultPackagingType, setDefaultPackagingType] = useState<PackagingType>(
+    product.defaultPackagingType || 'Bubble Wrap'
+  );
 
   const buildCurrentProductPayload = (
     overrides?: Partial<{
@@ -141,6 +149,8 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
       comboDoublePrice: number;
       comboTriplePrice: number;
       enableCustomScreenshot: boolean;
+      defaultPackagingCost: string;
+      defaultPackagingType: PackagingType;
     }>
   ): Product => {
     const effNameBn = overrides?.nameBn !== undefined ? overrides.nameBn : nameBn;
@@ -173,8 +183,20 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
       overrides?.enableCustomScreenshot !== undefined
         ? overrides.enableCustomScreenshot
         : enableCustomScreenshot;
+    const effDefaultPkgCostRaw =
+      overrides?.defaultPackagingCost !== undefined
+        ? overrides.defaultPackagingCost
+        : defaultPackagingCost;
+    const effDefaultPkgType =
+      overrides?.defaultPackagingType !== undefined
+        ? overrides.defaultPackagingType
+        : defaultPackagingType;
+    const parsedPkgCost =
+      effDefaultPkgCostRaw.trim() !== '' && !Number.isNaN(Number(effDefaultPkgCostRaw))
+        ? Math.max(0, Number(effDefaultPkgCostRaw))
+        : undefined;
 
-    return {
+    const nextProd: Product = {
       ...product,
       name: cleanProductTitle(effNameBn),
       titleEn: effNameEn,
@@ -193,6 +215,12 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
         sizes: effSizes,
       },
       enableCustomScreenshot: effScreenshot,
+      ...(typeof parsedPkgCost === 'number'
+        ? {
+            defaultPackagingCost: parsedPkgCost,
+            defaultPackagingType: effDefaultPkgType,
+          }
+        : {}),
       offerMode: effOfferMode,
       comboConfig: {
         offerMode: effOfferMode,
@@ -213,6 +241,10 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
       },
       updatedAt: Date.now(),
     };
+    if (parsedPkgCost === undefined) {
+      delete nextProd.defaultPackagingCost;
+    }
+    return nextProd;
   };
 
   const autoSaveLiveChange = async (
@@ -1385,6 +1417,70 @@ export const ProductCustomizationPage: React.FC<ProductCustomizationPageProps> =
                       className="w-full px-3 py-1.5 bg-white border border-stone-300 rounded-lg font-mono font-bold text-emerald-700"
                     />
                   </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Default Packaging Cost & Packaging Type per Product */}
+            <div className="bg-white rounded-2xl border border-rose-100 p-5 shadow-xs space-y-3 text-xs">
+              <div className="flex items-center justify-between pb-2 border-b border-rose-100">
+                <h3 className="text-sm font-bold text-stone-900">
+                  📦 প্রোডাক্ট ডিফল্ট প্যাকেজিং খরচ (Default Packaging Cost)
+                </h3>
+                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                  নতুন অর্ডারে অটো-ব্যবহৃত হবে
+                </span>
+              </div>
+              <p className="text-[11px] text-stone-500">
+                এই প্রোডাক্টের জন্য ডিফল্ট প্যাকেজিং খরচ সেট করলে নতুন অর্ডার তৈরির সময় পরিমাণ অনুযায়ী (Cost × Quantity) স্বয়ংক্রিয়ভাবে হিসাব হবে। পুরোনো অর্ডারের খরচ পরিবর্তন হবে না।
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-stone-700 font-bold mb-1">
+                    ডিফল্ট প্যাকেজিং খরচ (৳ BDT)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={defaultPackagingCost}
+                    onChange={(e) => setDefaultPackagingCost(e.target.value)}
+                    onBlur={(e) => {
+                      const val = e.target.value;
+                      autoSaveLiveChange(
+                        { defaultPackagingCost: val, defaultPackagingType },
+                        val.trim() !== ''
+                          ? `✅ ডিফল্ট প্যাকেজিং খরচ ৳${Math.max(0, Number(val) || 0)} ডাটাবেজে সেভ হয়েছে!`
+                          : '✅ ডিফল্ট প্যাকেজিং খরচ রিসেট হয়েছে!'
+                      );
+                    }}
+                    placeholder="যেমন: 15 বা 20 (ঐচ্ছিক)"
+                    className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-lg font-mono font-bold text-stone-900 text-xs focus:border-[#E11D48] focus:bg-white focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-stone-700 font-bold mb-1">
+                    প্যাকেজিং ধরন (Packaging Type)
+                  </label>
+                  <select
+                    value={defaultPackagingType}
+                    onChange={(e) => {
+                      const nextType = e.target.value as PackagingType;
+                      setDefaultPackagingType(nextType);
+                      if (defaultPackagingCost.trim() !== '') {
+                        autoSaveLiveChange(
+                          { defaultPackagingCost, defaultPackagingType: nextType },
+                          `✅ প্যাকেজিং ধরন "${nextType}" ডাটাবেজে সেভ হয়েছে!`
+                        );
+                      }
+                    }}
+                    className="w-full px-3 py-2 bg-white border border-stone-300 rounded-lg font-semibold text-xs focus:border-[#E11D48] focus:outline-none"
+                  >
+                    {PACKAGING_TYPES_LIST.map((pt) => (
+                      <option key={pt.value} value={pt.value}>
+                        {pt.labelBn}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
             </div>

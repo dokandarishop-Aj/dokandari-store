@@ -3631,7 +3631,7 @@ export async function saveOrderPersisted(order: Order): Promise<Order> {
     Date.now() - Number(order.createdAt || Date.now()) < 300000;
 
   if (isBrandNewOrder) {
-    const catalogProducts = getMergedLocalProducts();
+    const catalogProducts = mergeCatalogProducts();
     const autoSnapshot = buildOrderPackagingSnapshot({
       items: order.items || [],
       products: catalogProducts,
