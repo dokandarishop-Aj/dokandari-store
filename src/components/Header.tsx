@@ -142,17 +142,6 @@ export const Header: React.FC<HeaderProps> = ({
               <Sparkles className="w-3.5 h-3.5 text-[#E11D48]" />
               <span>AI সহকারী</span>
             </button>
-
-            {/* Admin Dashboard Button ONLY shown when Admin is logged in */}
-            {isAdmin && (
-              <button
-                onClick={onOpenAdmin}
-                className="px-3.5 py-1.5 rounded-full bg-rose-50 hover:bg-[#E11D48] text-[#E11D48] hover:text-white border border-rose-200 flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer font-bold"
-              >
-                <LayoutDashboard className="w-3.5 h-3.5" />
-                <span>এডমিন ড্যাশবোর্ড</span>
-              </button>
-            )}
           </nav>
 
           {/* Right Action Affordances: Search + Cart + Prominent Menu Button */}
@@ -198,9 +187,7 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 <UserIcon className="w-3.5 h-3.5 text-[#E11D48]" />
                 <span className="max-w-20 truncate">
-                  {userProfile.displayName?.toLowerCase().includes('dokandari')
-                    ? 'অ্যাডমিন'
-                    : userProfile.displayName.split(' ')[0]}
+                  {userProfile.displayName?.split(' ')[0] || 'অ্যাকাউন্ট'}
                 </span>
               </button>
             )}

@@ -22,6 +22,15 @@ import { CheckoutModal } from './components/CheckoutModal';
 import { OrderTrackingView } from './components/OrderTrackingView';
 import { AdminPanel, AdminTool } from './components/AdminPanel';
 import { AdminLoginGate, isAdminSessionValid } from './components/AdminLoginGate';
+import {
+  installAdminAuthFetchInterceptor,
+  verifyAdminSessionWithServer,
+  logoutAdminSession,
+  clearAdminSessionToken,
+} from './lib/adminAuthClient';
+import { matchProtectedAdminRoute } from './config/navigationConfig';
+
+installAdminAuthFetchInterceptor();
 import { CategoryDetailPage } from './components/CategoryDetailPage';
 import { AboutPage } from './components/AboutPage';
 import { VideoGalleryPage } from './components/VideoGalleryPage';
@@ -173,21 +182,39 @@ function StoreMain() {
     () => initialUrlTrackRoute.targetQuery || undefined
   );
   const { isAdmin: authIsAdmin } = useAuth();
-  const [isAdminOpen, setIsAdminOpen] = useState(false);
-  const [selectedAdminTool, setSelectedAdminTool] = useState<AdminTool | undefined>(undefined);
-  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(() => {
-    return isAdminSessionValid();
+  const [isAdminOpen, setIsAdminOpen] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return matchProtectedAdminRoute(
+      window.location.pathname,
+      window.location.hash,
+      window.location.search
+    ).isAdminRoute;
   });
+  const [selectedAdminTool, setSelectedAdminTool] = useState<AdminTool | undefined>(() => {
+    if (typeof window === 'undefined') return undefined;
+    return matchProtectedAdminRoute(
+      window.location.pathname,
+      window.location.hash,
+      window.location.search
+    ).targetTool;
+  });
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(false);
 
+  // Always verify any stored Admin token against the backend server on mount
   useEffect(() => {
-    if (authIsAdmin) {
-      setIsAdminAuthenticated(true);
-      try {
-        localStorage.setItem('dokandari_admin_session', 'active');
-      } catch {
-        // ignore
-      }
+    let active = true;
+    if (isAdminSessionValid()) {
+      verifyAdminSessionWithServer().then((verified) => {
+        if (!active) return;
+        setIsAdminAuthenticated(verified);
+      });
+    } else {
+      clearAdminSessionToken();
+      setIsAdminAuthenticated(false);
     }
+    return () => {
+      active = false;
+    };
   }, [authIsAdmin]);
   const [activeCategoryPage, setActiveCategoryPage] = useState<string | null>(() =>
     !initialUrlProdRoute.rawProdId && initialUrlCatRoute && initialUrlCatRoute !== 'all'
@@ -375,27 +402,32 @@ function StoreMain() {
       })
       .catch(() => null);
 
-    // Unified single collection listener for `settings` (fetches deleted_products, store_content, api_credentials, founder_profile in 1 stream)
-    const unsubAllSettings = onSnapshot(
-      collection(db, 'settings'),
+    // Public Storefront Settings Listeners — Strictly scoped to public documents (`deleted_products`, `founder_profile`, `store_content`)
+    // NEVER exposes `api_credentials` or `security_config` to anonymous visitors or normal customers!
+    const unsubDeletedProducts = onSnapshot(
+      doc(db, 'settings', 'deleted_products'),
       (snap) => {
-        const docsMap: Record<string, any> = {};
-        snap.forEach((d) => {
-          docsMap[d.id] = d.data();
-        });
-
-        // 1. Deleted products
-        if (docsMap.deleted_products && Array.isArray(docsMap.deleted_products.ids)) {
-          setRemoteDeletedProductIds(docsMap.deleted_products.ids);
-          const delSet = new Set(docsMap.deleted_products.ids);
-          const merged = mergeCatalogProducts(latestRemoteList.length > 0 ? latestRemoteList : undefined);
-          setProducts(merged);
-          setDetailedProduct((curr) => (curr && delSet.has(curr.id) ? null : curr));
+        if (snap.exists()) {
+          const data = snap.data();
+          if (Array.isArray(data?.ids)) {
+            setRemoteDeletedProductIds(data.ids);
+            const delSet = new Set(data.ids);
+            const merged = mergeCatalogProducts(
+              latestRemoteList.length > 0 ? latestRemoteList : undefined
+            );
+            setProducts(merged);
+            setDetailedProduct((curr) => (curr && delSet.has(curr.id) ? null : curr));
+          }
         }
+      },
+      () => {}
+    );
 
-        // 2. Founder profile (process before store_content so hasFounderProfileDocRef is set)
-        if (docsMap.founder_profile) {
-          const data = docsMap.founder_profile;
+    const unsubFounderProfile = onSnapshot(
+      doc(db, 'settings', 'founder_profile'),
+      (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
           hasFounderProfileDocRef.current = true;
           if (data?.founder) {
             const rawPhoto = String(data.founder.photo || '').trim();
@@ -432,10 +464,15 @@ function StoreMain() {
             });
           }
         }
+      },
+      () => {}
+    );
 
-        // 3. Store content
-        if (docsMap.store_content) {
-          const mergedContent = mergeStoreContent(docsMap.store_content);
+    const unsubStoreContent = onSnapshot(
+      doc(db, 'settings', 'store_content'),
+      (snap) => {
+        if (snap.exists()) {
+          const mergedContent = mergeStoreContent(snap.data());
           if (!hasFounderProfileDocRef.current) {
             setFounderData(mergedContent.founder);
             setPageContent(mergedContent.pageContent!);
@@ -481,33 +518,43 @@ function StoreMain() {
             );
           }
         }
+      },
+      () => {}
+    );
 
-        // 4. API & Pixel credentials
-        if (docsMap.api_credentials) {
-          const creds = docsMap.api_credentials;
+    return () => {
+      unsubProducts();
+      unsubDeletedProducts();
+      unsubFounderProfile();
+      unsubStoreContent();
+    };
+  }, []);
+
+  // Admin-Only API Credentials Listener — Only active when server-verified Admin is authenticated
+  useEffect(() => {
+    if (!isAdminAuthenticated) return;
+    const unsubAdminCreds = onSnapshot(
+      doc(db, 'settings', 'api_credentials'),
+      (snap) => {
+        if (snap.exists()) {
+          const creds = snap.data();
           localStorage.setItem('dokandari_api_credentials', JSON.stringify(creds));
-          const metaIds = creds?.facebookPixelId || '';
-          const tiktokIds = creds?.tiktokPixelId || '';
-          const youtubeIds = creds?.youtubeTagId || '';
-          initializeMultiPixels(metaIds, tiktokIds, youtubeIds);
+          initializeMultiPixels(
+            creds?.facebookPixelId || '',
+            creds?.tiktokPixelId || '',
+            creds?.youtubeTagId || ''
+          );
           initializeGoogleSeoAndTags({
             gtmContainerId: creds?.gtmContainerId,
             ga4MeasurementId: creds?.ga4MeasurementId || creds?.youtubeTagId,
             googleSearchConsoleCode: creds?.googleSearchConsoleCode,
           });
-          trackPixelPageView();
         }
       },
-      (err) => {
-        console.warn('Realtime settings collection listener note', err);
-      }
+      () => {}
     );
-
-    return () => {
-      unsubProducts();
-      unsubAllSettings();
-    };
-  }, []);
+    return () => unsubAdminCreds();
+  }, [isAdminAuthenticated]);
 
   // Support clean domain-relative pathname routing (/products/:id, /product/:id, /thank-you/:orderId, /catalog/:catId) + query (?product=id) + hash
   useEffect(() => {
@@ -715,16 +762,16 @@ function StoreMain() {
           return;
         }
       }
-      if (
-        normalizedPath === '/admin' ||
-        normalizedPath.startsWith('/admin/') ||
-        hash === '#/admin' ||
-        hash.startsWith('#/admin/')
-      ) {
-        const toolQuery = sp.get('tool') as AdminTool | null;
-        if (toolQuery) {
-          setSelectedAdminTool(toolQuery);
+      const adminRouteMatch = matchProtectedAdminRoute(
+        normalizedPath,
+        hash,
+        window.location.search || ''
+      );
+      if (adminRouteMatch.isAdminRoute) {
+        if (adminRouteMatch.targetTool) {
+          setSelectedAdminTool(adminRouteMatch.targetTool);
         }
+        setIsAdminAuthenticated(isAdminSessionValid());
         setIsAdminOpen(true);
         setDetailedProduct(null);
         setActiveCategoryPage(null);
@@ -746,6 +793,7 @@ function StoreMain() {
         setIsAboutOpen(false);
         setIsVideoGalleryOpen(false);
         setIsPolicyOpen(false);
+        setIsAdminOpen(false);
       }
     };
     syncFromUrl();
@@ -1109,7 +1157,7 @@ function StoreMain() {
               initialTool={selectedAdminTool}
               onBackToStore={() => {
                 setIsAdminOpen(false);
-                setIsAdminAuthenticated(isAdminSessionValid() || authIsAdmin);
+                setIsAdminAuthenticated(isAdminSessionValid());
                 navigateToStoreRoute('/');
               }}
               products={products}
@@ -1857,7 +1905,7 @@ function StoreMain() {
         )}
       </main>
 
-      {/* Floating Bottom-Right Admin Control Button — ONLY visible when Admin is logged in */}
+      {/* Floating Bottom-Right Admin Control Button — ONLY visible when server-verified Admin is logged in */}
       {isAdminAuthenticated && (
         <FloatingAdminButton
           onClick={() => {
@@ -1871,7 +1919,7 @@ function StoreMain() {
             navigateToStoreRoute('/admin');
           }}
           onExitAdminMode={() => {
-            localStorage.removeItem('dokandari_admin_session');
+            logoutAdminSession();
             setIsAdminAuthenticated(false);
             setIsAdminOpen(false);
           }}
@@ -1890,17 +1938,6 @@ function StoreMain() {
         isAdmin={isAdminAuthenticated}
         onUpdateStoreContent={handleApplyStoreContentUpdate}
         onOpenLogin={() => setIsCustomerAuthOpen(true)}
-        onOpenAdmin={() => {
-          setIsAdminAuthenticated(isAdminSessionValid());
-          setIsAdminOpen(true);
-          setActiveCategoryPage(null);
-          setDetailedProduct(null);
-          setIsAboutOpen(false);
-          setIsVideoGalleryOpen(false);
-          setIsPolicyOpen(false);
-          setIsTrackingOpen(false);
-          navigateToStoreRoute('/admin');
-        }}
         onSelectCategory={(cat) => {
           setActiveCategory(cat);
           setDetailedProduct(null);
@@ -2025,12 +2062,11 @@ function StoreMain() {
         }}
       />
 
-      {/* Slide-out Menu Drawer */}
+      {/* Slide-out Customer Menu Drawer — Strictly Public Customer Navigation */}
       <MenuDrawer
         isOpen={isMenuOpen}
         onClose={() => setIsMenuOpen(false)}
         products={publishedProducts}
-        isAdmin={isAdminAuthenticated}
         onOpenLogin={() => {
           setIsMenuOpen(false);
           setIsCustomerAuthOpen(true);
@@ -2066,6 +2102,10 @@ function StoreMain() {
         onOpenCart={() => {
           setIsMenuOpen(false);
           setIsCartOpen(true);
+        }}
+        onOpenCheckout={() => {
+          setIsMenuOpen(false);
+          setIsCheckoutOpen(true);
         }}
         onOpenTracking={() => {
           setIsMenuOpen(false);
@@ -2113,32 +2153,6 @@ function StoreMain() {
           setIsMenuOpen(false);
           setIsAiOpen(true);
         }}
-        onOpenAdmin={() => {
-          setIsMenuOpen(false);
-          setIsAdminAuthenticated(isAdminSessionValid() || authIsAdmin);
-          setIsAdminOpen(true);
-          setActiveCategoryPage(null);
-          setIsAboutOpen(false);
-          setIsVideoGalleryOpen(false);
-          setIsPolicyOpen(false);
-          setDetailedProduct(null);
-          setIsTrackingOpen(false);
-          navigateToStoreRoute('/admin');
-        }}
-        activeAdminTool={selectedAdminTool}
-        onSelectAdminTool={(toolId) => {
-          setSelectedAdminTool(toolId);
-          setIsMenuOpen(false);
-          setIsAdminAuthenticated(isAdminSessionValid() || authIsAdmin);
-          setIsAdminOpen(true);
-          setActiveCategoryPage(null);
-          setIsAboutOpen(false);
-          setIsVideoGalleryOpen(false);
-          setIsPolicyOpen(false);
-          setDetailedProduct(null);
-          setIsTrackingOpen(false);
-          navigateToStoreRoute(`/admin?tool=${toolId}`);
-        }}
         onSelectCategory={(cat) => {
           setActiveCategory(cat);
           setIsMenuOpen(false);
@@ -2167,13 +2181,14 @@ function StoreMain() {
         }}
       />
 
-      {/* Responsive Mobile & Web-App Quick Navigation Dock */}
+      {/* Responsive Mobile Customer Navigation Dock — Strictly Public Customer Items Only */}
       {!isAdminOpen && !editingProduct && (
         <nav
-          aria-label="Mobile Web App Navigation"
-          className="fixed bottom-0 inset-x-0 z-40 sm:hidden bg-white/95 backdrop-blur-md border-t border-rose-100 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] px-1.5 py-1.5 grid grid-cols-6 gap-1 items-center"
+          aria-label="Mobile Customer Navigation"
+          className="fixed bottom-0 inset-x-0 z-40 sm:hidden bg-white/95 backdrop-blur-md border-t border-rose-100 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] px-1.5 py-1.5 grid grid-cols-5 gap-1 items-center"
         >
           <button
+            type="button"
             onClick={() => {
               setActiveCategory('all');
               setActiveCategoryPage(null);
@@ -2184,7 +2199,7 @@ function StoreMain() {
               setIsTrackingOpen(false);
               navigateToStoreRoute('/');
             }}
-            className={`flex flex-col items-center justify-center gap-0.5 px-1 py-1 rounded-xl text-[9.5px] font-bold transition-colors cursor-pointer ${
+            className={`min-h-[44px] flex flex-col items-center justify-center gap-0.5 px-1 py-1 rounded-xl text-[10px] font-bold transition-colors cursor-pointer ${
               !detailedProduct && !activeCategoryPage && !isAboutOpen && !isTrackingOpen && !isVideoGalleryOpen
                 ? 'text-[#E11D48] bg-rose-50'
                 : 'text-stone-600 hover:text-[#E11D48]'
@@ -2195,6 +2210,7 @@ function StoreMain() {
           </button>
 
           <button
+            type="button"
             onClick={() => {
               setActiveCategory('all');
               setActiveCategoryPage(null);
@@ -2209,31 +2225,23 @@ function StoreMain() {
                 if (elem) elem.scrollIntoView({ behavior: 'smooth' });
               }, 80);
             }}
-            className="flex flex-col items-center justify-center gap-0.5 px-1 py-1 rounded-xl text-[9.5px] font-bold text-stone-600 hover:text-[#E11D48] transition-colors cursor-pointer"
+            className="min-h-[44px] flex flex-col items-center justify-center gap-0.5 px-1 py-1 rounded-xl text-[10px] font-bold text-stone-600 hover:text-[#E11D48] transition-colors cursor-pointer"
           >
             <span className="text-sm leading-none">🛍️</span>
             <span className="truncate">সব পণ্য</span>
           </button>
 
           <button
-            onClick={() => {
-              setIsAboutOpen(true);
-              setActiveCategoryPage(null);
-              setDetailedProduct(null);
-              setIsVideoGalleryOpen(false);
-              setIsPolicyOpen(false);
-              setIsTrackingOpen(false);
-              navigateToStoreRoute('/about');
-            }}
-            className={`flex flex-col items-center justify-center gap-0.5 px-1 py-1 rounded-xl text-[9.5px] font-bold transition-colors cursor-pointer ${
-              isAboutOpen ? 'text-[#E11D48] bg-rose-50' : 'text-stone-600 hover:text-[#E11D48]'
-            }`}
+            type="button"
+            onClick={() => setIsCartOpen(true)}
+            className="min-h-[44px] flex flex-col items-center justify-center gap-0.5 px-1 py-1 rounded-xl text-[10px] font-bold text-stone-600 hover:text-[#E11D48] transition-colors cursor-pointer"
           >
-            <span className="text-sm leading-none">🏢</span>
-            <span className="truncate">ব্র্যান্ড</span>
+            <span className="text-sm leading-none">🛒</span>
+            <span className="truncate">শপিং ব্যাগ</span>
           </button>
 
           <button
+            type="button"
             onClick={() => {
               setIsTrackingOpen(true);
               setActiveCategoryPage(null);
@@ -2243,7 +2251,7 @@ function StoreMain() {
               setIsPolicyOpen(false);
               navigateToStoreRoute('/track');
             }}
-            className={`flex flex-col items-center justify-center gap-0.5 px-1 py-1 rounded-xl text-[9.5px] font-bold transition-colors cursor-pointer ${
+            className={`min-h-[44px] flex flex-col items-center justify-center gap-0.5 px-1 py-1 rounded-xl text-[10px] font-bold transition-colors cursor-pointer ${
               isTrackingOpen ? 'text-[#E11D48] bg-rose-50' : 'text-stone-600 hover:text-[#E11D48]'
             }`}
           >
@@ -2252,29 +2260,9 @@ function StoreMain() {
           </button>
 
           <button
-            onClick={() => {
-              setSelectedAdminTool('business_command_center');
-              setIsMenuOpen(false);
-              setIsAdminAuthenticated(isAdminSessionValid() || authIsAdmin);
-              setIsAdminOpen(true);
-              setActiveCategoryPage(null);
-              setIsAboutOpen(false);
-              setIsVideoGalleryOpen(false);
-              setIsPolicyOpen(false);
-              setDetailedProduct(null);
-              setIsTrackingOpen(false);
-              navigateToStoreRoute('/admin?tool=business_command_center');
-            }}
-            className="flex flex-col items-center justify-center gap-0.5 px-1 py-1 rounded-xl text-[9.5px] font-extrabold text-amber-700 bg-amber-50/80 hover:bg-amber-100 hover:text-amber-800 transition-colors cursor-pointer border border-amber-200"
-            title="১৮ • বিজনেস কমান্ড সেন্টার — অটোমেশন ও ফাইনান্সিয়াল ম্যানেজমেন্ট ড্যাশবোর্ড"
-          >
-            <span className="text-sm leading-none">📊</span>
-            <span className="truncate">কমান্ড সেন্টার</span>
-          </button>
-
-          <button
+            type="button"
             onClick={() => setIsMenuOpen(true)}
-            className="flex flex-col items-center justify-center gap-0.5 px-1 py-1 rounded-xl text-[9.5px] font-bold text-stone-600 hover:text-[#E11D48] transition-colors cursor-pointer"
+            className="min-h-[44px] flex flex-col items-center justify-center gap-0.5 px-1 py-1 rounded-xl text-[10px] font-bold text-stone-600 hover:text-[#E11D48] transition-colors cursor-pointer"
           >
             <span className="text-sm leading-none">☰</span>
             <span className="truncate">মেনু</span>

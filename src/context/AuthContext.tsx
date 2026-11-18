@@ -13,6 +13,7 @@ import {
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db, googleProvider, handleFirestoreError, OperationType } from '../lib/firebase';
 import { UserProfile } from '../types';
+import { hasValidAdminTokenFormat, clearAdminSessionToken } from '../lib/adminAuthClient';
 
 interface AuthContextType {
   firebaseUser: FirebaseUser | null;
@@ -38,17 +39,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const saved = window.localStorage.getItem(LOCAL_PROFILE_STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed && parsed.email) return parsed as UserProfile;
-      }
-      // If admin session is already active, auto-hydrate admin Gmail profile
-      const adminSession = window.localStorage.getItem('dokandari_admin_session');
-      if (adminSession === 'active') {
-        return {
-          uid: 'admin-dokandari',
-          email: ADMIN_EMAIL,
-          displayName: 'Dokandari Official Admin',
-          role: 'admin',
-        };
+        if (parsed && parsed.email) {
+          // Never allow a stored profile to claim 'admin' role without a valid signed admin token
+          const verifiedAdmin =
+            parsed.email.toLowerCase() === ADMIN_EMAIL.toLowerCase() &&
+            hasValidAdminTokenFormat();
+          return {
+            ...(parsed as UserProfile),
+            role: verifiedAdmin ? 'admin' : 'customer',
+          };
+        }
       }
     } catch {
       // ignore storage read errors
@@ -58,8 +58,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   const activeEmail = firebaseUser?.email || userProfile?.email || '';
+  // Strict RBAC: Admin permission requires BOTH the authorized admin email AND a cryptographically signed server token
   const isAdmin = Boolean(
-    activeEmail && activeEmail.toLowerCase() === ADMIN_EMAIL.toLowerCase()
+    activeEmail &&
+      activeEmail.toLowerCase() === ADMIN_EMAIL.toLowerCase() &&
+      hasValidAdminTokenFormat()
   );
 
   const persistLocalProfile = (profile: UserProfile | null) => {
@@ -79,23 +82,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setFirebaseUser(currentUser);
       if (currentUser) {
+        const verifiedAdmin =
+          currentUser.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase() &&
+          hasValidAdminTokenFormat();
         try {
           const userDocRef = doc(db, 'users', currentUser.uid);
           const snap = await getDoc(userDocRef);
           if (snap.exists()) {
             const existing = snap.data() as UserProfile;
-            setUserProfile(existing);
-            persistLocalProfile(existing);
+            const safeProfile: UserProfile = {
+              ...existing,
+              role: verifiedAdmin ? 'admin' : 'customer',
+            };
+            setUserProfile(safeProfile);
+            persistLocalProfile(safeProfile);
           } else {
             const initialProfile: UserProfile = {
               uid: currentUser.uid,
-              email: currentUser.email || ADMIN_EMAIL,
+              email: currentUser.email || 'customer@dokandari.com',
               displayName: currentUser.displayName || 'Dokandari Shopper',
               photoURL: currentUser.photoURL || undefined,
-              role:
-                currentUser.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()
-                  ? 'admin'
-                  : 'customer',
+              role: verifiedAdmin ? 'admin' : 'customer',
             };
             await setDoc(userDocRef, initialProfile);
             setUserProfile(initialProfile);
@@ -104,13 +111,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         } catch {
           const fallbackProfile: UserProfile = {
             uid: currentUser.uid,
-            email: currentUser.email || ADMIN_EMAIL,
+            email: currentUser.email || 'customer@dokandari.com',
             displayName: currentUser.displayName || 'Dokandari Shopper',
             photoURL: currentUser.photoURL || undefined,
-            role:
-              currentUser.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()
-                ? 'admin'
-                : 'customer',
+            role: verifiedAdmin ? 'admin' : 'customer',
           };
           setUserProfile(fallbackProfile);
           persistLocalProfile(fallbackProfile);
@@ -122,14 +126,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => unsubscribe();
   }, []);
 
-  // Direct Gmail session activation (works inside restricted preview iframes without popup errors)
+  // Customer profile session activation — strictly creates/loads a customer role unless server-verified admin token is active
   const signInWithGmailDirect = async (
     emailInput: string,
     displayNameInput?: string
   ): Promise<UserProfile> => {
-    const cleanEmail = (emailInput || ADMIN_EMAIL).trim().toLowerCase();
-    const isOwner = cleanEmail === ADMIN_EMAIL.toLowerCase();
-    const uid = isOwner
+    const rawClean = (emailInput || '').trim().toLowerCase();
+    const cleanEmail = rawClean || 'customer@dokandari.com';
+    const isVerifiedOwner =
+      cleanEmail === ADMIN_EMAIL.toLowerCase() && hasValidAdminTokenFormat();
+    const uid = isVerifiedOwner
       ? 'admin-dokandari'
       : `user-${cleanEmail.replace(/[^a-z0-9]/g, '-')}`;
     const profile: UserProfile = {
@@ -137,8 +143,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       email: cleanEmail,
       displayName:
         displayNameInput?.trim() ||
-        (isOwner ? 'Dokandari Official (Omni Subscribed)' : cleanEmail.split('@')[0]),
-      role: isOwner ? 'admin' : 'customer',
+        (isVerifiedOwner ? 'Dokandari Official Admin' : cleanEmail.split('@')[0] || 'Customer'),
+      role: isVerifiedOwner ? 'admin' : 'customer',
     };
 
     setUserProfile(profile);
@@ -157,13 +163,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const result = await signInWithPopup(auth, googleProvider);
       const user = result.user;
+      const verifiedAdmin =
+        user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase() &&
+        hasValidAdminTokenFormat();
       const profile: UserProfile = {
         uid: user.uid,
-        email: user.email || fallbackEmail || ADMIN_EMAIL,
-        displayName: user.displayName || 'Dokandari User',
+        email: user.email || fallbackEmail || 'customer@dokandari.com',
+        displayName: user.displayName || 'Dokandari Shopper',
         photoURL: user.photoURL || undefined,
-        role:
-          user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase() ? 'admin' : 'customer',
+        role: verifiedAdmin ? 'admin' : 'customer',
       };
       setUserProfile(profile);
       persistLocalProfile(profile);
@@ -175,8 +183,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return profile;
     } catch (error: any) {
       const errCode = String(error?.code || error?.message || '');
-      // In cloud preview iframes, popups may be closed by the user or blocked by browser policies.
-      // Gracefully activate the verified Gmail profile instead of throwing an uncaught console error.
+      // In preview iframes where popups are blocked, NEVER fall back to ADMIN_EMAIL!
       if (
         errCode.includes('auth/popup-closed-by-user') ||
         errCode.includes('auth/cancelled-popup-request') ||
@@ -184,10 +191,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         errCode.includes('auth/unauthorized-domain') ||
         errCode.includes('auth/operation-not-supported-in-this-environment')
       ) {
-        const targetEmail = (fallbackEmail || userProfile?.email || ADMIN_EMAIL).trim();
-        return await signInWithGmailDirect(targetEmail);
+        const safeCustomerEmail = (fallbackEmail || userProfile?.email || 'customer@dokandari.com')
+          .trim()
+          .toLowerCase();
+        const nonAdminEmail =
+          safeCustomerEmail === ADMIN_EMAIL.toLowerCase()
+            ? 'customer@dokandari.com'
+            : safeCustomerEmail;
+        return await signInWithGmailDirect(nonAdminEmail, 'Dokandari Customer');
       }
-      return await signInWithGmailDirect(fallbackEmail || ADMIN_EMAIL);
+      throw error;
     }
   };
 
@@ -197,6 +210,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch {
       // ignore signOut errors
     }
+    clearAdminSessionToken();
     setFirebaseUser(null);
     setUserProfile(null);
     persistLocalProfile(null);

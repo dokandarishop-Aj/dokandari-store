@@ -31,7 +31,7 @@ export const CustomerAuthModal: React.FC<CustomerAuthModalProps> = ({
   onClose,
   onGoToCollection,
 }) => {
-  const { userProfile, signInWithGoogle, signOutUser, loading } = useAuth();
+  const { userProfile, signInWithGoogle, signInWithGmailDirect, signOutUser, loading } = useAuth();
   const [activeTab, setActiveTab] = useState<'login' | 'register'>('login');
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
@@ -61,11 +61,18 @@ export const CustomerAuthModal: React.FC<CustomerAuthModalProps> = ({
 
     setIsSubmitting(true);
     try {
-      // Fast customer profile simulation or Firebase Google / OTP login
-      setAuthSuccess('সফলভাবে লগইন হয়েছে!');
+      const cleanId = identifier.trim().toLowerCase();
+      // Prevent admin email from being used as a backdoor in customer login modal
+      const safeCustomerId =
+        cleanId === 'dokandari.shop@gmail.com' ? `customer-${Date.now()}@dokandari.com` : cleanId;
+      await signInWithGmailDirect(
+        safeCustomerId,
+        regName.trim() || safeCustomerId.split('@')[0] || 'Dokandari Customer'
+      );
+      setAuthSuccess('সফলভাবে কাস্টমার অ্যাকাউন্টে লগইন হয়েছে!');
       setTimeout(() => {
         onClose();
-      }, 1000);
+      }, 800);
     } catch (err: any) {
       setAuthError(err?.message || 'লগইন ব্যর্থ হয়েছে।');
     } finally {

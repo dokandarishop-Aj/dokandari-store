@@ -74,6 +74,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
+import { logoutAdminSession } from '../lib/adminAuthClient';
 import {
   Order,
   OrderStatus,
@@ -4512,7 +4513,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   };
 
   const handleLockAdminSession = () => {
-    localStorage.removeItem('dokandari_admin_session');
+    logoutAdminSession();
     localStorage.removeItem('dokandari_admin_auth_meta');
     onBackToStore();
   };

@@ -652,7 +652,7 @@ export const Footer: React.FC<FooterProps> = ({
               সারা দেশে হোম ডেলিভারি
             </span>
 
-            {/* Bottom Corner Login & Admin Access Buttons (নিচের কোণায় লগইন বাটন) */}
+            {/* Customer Login Button */}
             {onOpenLogin && (
               <button
                 type="button"
@@ -660,27 +660,7 @@ export const Footer: React.FC<FooterProps> = ({
                 className="px-3 py-1 rounded-full border border-stone-200 hover:border-rose-300 bg-stone-50 hover:bg-rose-50 text-stone-700 hover:text-[#E11D48] font-bold text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
               >
                 <User className="w-3 h-3 text-[#E11D48]" />
-                <span>লগইন</span>
-              </button>
-            )}
-
-            {onOpenAdmin && (
-              <button
-                type="button"
-                onClick={onOpenAdmin}
-                className="px-3 py-1 rounded-full border border-rose-200 bg-rose-50/70 hover:bg-[#E11D48] text-[#E11D48] hover:text-white font-bold text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
-              >
-                {isAdmin ? (
-                  <>
-                    <LayoutDashboard className="w-3 h-3" />
-                    <span>অ্যাডমিন প্যানেল</span>
-                  </>
-                ) : (
-                  <>
-                    <Lock className="w-3 h-3" />
-                    <span>স্টোর লগইন</span>
-                  </>
-                )}
+                <span>কাস্টমার অ্যাকাউন্ট</span>
               </button>
             )}
           </div>

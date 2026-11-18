@@ -2110,10 +2110,177 @@ async function startServer() {
   app.disable('x-powered-by');
   app.use(express.json({ limit: '50mb' }));
 
+  // ============================================================================
+  // SERVER-SIDE ADMIN RBAC & CRYPTOGRAPHIC SESSION TOKEN VERIFICATION
+  // Default Access: DENIED. Never trusts frontend state or plain localStorage flags.
+  // ============================================================================
+  const ADMIN_HMAC_SECRET =
+    process.env.ADMIN_TOKEN_SECRET?.trim() ||
+    process.env.ADMIN_PASSWORD?.trim() ||
+    firebaseConfig.apiKey ||
+    'dokandari-server-rbac-secret-2026-v1';
+
+  const revokedAdminTokenJtis = new Set<string>();
+
+  function issueAdminSessionToken(adminUser: string): string {
+    const now = Date.now();
+    const payload = {
+      sub: adminUser.trim().toLowerCase(),
+      role: 'admin',
+      iat: now,
+      exp: now + 7 * 24 * 3600 * 1000,
+      jti: crypto.randomBytes(12).toString('hex'),
+    };
+    const payloadB64 = Buffer.from(JSON.stringify(payload), 'utf-8')
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+    const sigHex = crypto
+      .createHmac('sha256', ADMIN_HMAC_SECRET)
+      .update(`dkd_adm_v1.${payloadB64}`)
+      .digest('hex');
+    return `dkd_adm_v1.${payloadB64}.${sigHex}`;
+  }
+
+  function extractAdminTokenFromRequest(req: express.Request): string {
+    const headerToken = String(req.headers['x-admin-token'] || '').trim();
+    if (headerToken) return headerToken;
+    const authHeader = String(req.headers['authorization'] || '').trim();
+    if (authHeader.toLowerCase().startsWith('bearer ')) {
+      return authHeader.slice(7).trim();
+    }
+    const rawCookie = String(req.headers.cookie || '');
+    const cookieMatch = rawCookie.match(/(?:^|;\s*)dokandari_admin_token=([^;]+)/);
+    if (cookieMatch?.[1]) {
+      try {
+        return decodeURIComponent(cookieMatch[1].trim());
+      } catch {
+        return cookieMatch[1].trim();
+      }
+    }
+    return '';
+  }
+
+  function verifyAdminRequest(
+    req: express.Request
+  ): { valid: boolean; sub?: string; jti?: string } {
+    const rawToken = extractAdminTokenFromRequest(req);
+    if (!rawToken) return { valid: false };
+    const parts = rawToken.split('.');
+    if (parts.length !== 3 || parts[0] !== 'dkd_adm_v1') return { valid: false };
+    const [, payloadB64, providedSigHex] = parts;
+    if (!payloadB64 || !providedSigHex || providedSigHex.length !== 64) {
+      return { valid: false };
+    }
+    const expectedSigHex = crypto
+      .createHmac('sha256', ADMIN_HMAC_SECRET)
+      .update(`dkd_adm_v1.${payloadB64}`)
+      .digest('hex');
+    try {
+      const a = Buffer.from(providedSigHex, 'hex');
+      const b = Buffer.from(expectedSigHex, 'hex');
+      if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+        return { valid: false };
+      }
+      const jsonStr = Buffer.from(
+        payloadB64.replace(/-/g, '+').replace(/_/g, '/'),
+        'base64'
+      ).toString('utf-8');
+      const payload = JSON.parse(jsonStr);
+      if (!payload || payload.role !== 'admin' || !payload.exp) {
+        return { valid: false };
+      }
+      if (Date.now() > Number(payload.exp)) {
+        return { valid: false };
+      }
+      if (payload.jti && revokedAdminTokenJtis.has(String(payload.jti))) {
+        return { valid: false };
+      }
+      return { valid: true, sub: String(payload.sub || 'admin'), jti: String(payload.jti || '') };
+    } catch {
+      return { valid: false };
+    }
+  }
+
   // Standard Security Headers Middleware (Prevents MIME sniffing and referrer leakage)
   app.use((_req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    next();
+  });
+
+  // Centralized RBAC Enforcement for Protected Admin APIs & Admin Route JSON Probes
+  app.use((req, res, next) => {
+    const cleanPath = (req.path || '').replace(/\/+$/, '') || '/';
+    const method = req.method.toUpperCase();
+
+    // 1. Public Customer & Storefront API Whitelist (Accessible to Customers)
+    const isPublicApi =
+      (cleanPath === '/api/admin/login' && method === 'POST') ||
+      (cleanPath === '/api/admin/logout' && method === 'POST') ||
+      (cleanPath === '/api/catalog/products' && method === 'GET') ||
+      (cleanPath.startsWith('/api/catalog/product/') && method === 'GET') ||
+      (cleanPath === '/api/catalog/feed.json' && method === 'GET') ||
+      (cleanPath === '/api/catalog/feed.xml' && method === 'GET') ||
+      (cleanPath === '/api/catalog/feed.csv' && method === 'GET') ||
+      (cleanPath === '/api/store/content' && method === 'GET') ||
+      (cleanPath === '/api/orders' && method === 'POST') ||
+      (cleanPath === '/api/courier/track' && method === 'GET') ||
+      (cleanPath === '/api/courier/track/sync' && method === 'POST') ||
+      (cleanPath === '/api/courier/track/register' && method === 'POST') ||
+      (cleanPath === '/api/courier/webhook/steadfast' && method === 'POST') ||
+      (cleanPath === '/api/courier/webhook/pathao' && method === 'POST') ||
+      (cleanPath === '/api/pixel/event' && method === 'POST') ||
+      (cleanPath === '/api/gemini/assistant' && method === 'POST') ||
+      (cleanPath === '/api/gemini/status' && method === 'GET');
+
+    // 2. All other `/api/*` endpoints are strictly Private Admin APIs
+    if (cleanPath === '/api/admin' || cleanPath.startsWith('/api/')) {
+      if (!isPublicApi) {
+        const authCheck = verifyAdminRequest(req);
+        if (!authCheck.valid) {
+          res.status(401).json({
+            ok: false,
+            success: false,
+            authenticated: false,
+            error: '401 Unauthorized: Valid Admin authentication is required to access this endpoint.',
+          });
+          return;
+        }
+      }
+    }
+
+    // 3. Direct non-browser / JSON API probes to protected Admin frontend routes
+    const protectedFrontendPaths = [
+      '/admin',
+      '/dashboard',
+      '/command-center',
+      '/orders',
+      '/products/manage',
+      '/stock',
+      '/finance',
+      '/expenses',
+      '/courier',
+      '/settings',
+    ];
+    const isProtectedFrontendPath = protectedFrontendPaths.some(
+      (p) => cleanPath === p || cleanPath.startsWith(`${p}/`)
+    );
+    if (isProtectedFrontendPath) {
+      const accept = String(req.headers.accept || '').toLowerCase();
+      const wantsJsonOnly =
+        accept.includes('application/json') && !accept.includes('text/html');
+      if (wantsJsonOnly && !verifyAdminRequest(req).valid) {
+        res.status(403).json({
+          ok: false,
+          authenticated: false,
+          error: '403 Forbidden: Admin authorization required.',
+        });
+        return;
+      }
+    }
+
     next();
   });
 
@@ -3048,16 +3215,11 @@ ${summaryLines}`,
     }
   });
 
-  // 4. Server-Side Admin Secret Authentication Endpoint (Validates against AI Studio Secrets ADMIN_EMAIL & ADMIN_PASSWORD)
-  app.post('/api/admin/login', (req, res) => {
-    const { emailOrUsername, password, customConfig } = req.body as {
+  // 4. Server-Side Admin Secret Authentication & Session Verification Endpoints
+  app.post('/api/admin/login', async (req, res) => {
+    const { emailOrUsername, password } = req.body as {
       emailOrUsername?: string;
       password?: string;
-      customConfig?: {
-        adminUsername?: string;
-        adminPassword?: string;
-        authorizedEmails?: string[];
-      };
     };
 
     const inputUser = (emailOrUsername || '').trim().toLowerCase();
@@ -3068,6 +3230,22 @@ ${summaryLines}`,
       return;
     }
 
+    // Load server-authoritative security_config from Firestore if available
+    let serverSecurityConfig: any = null;
+    try {
+      const secSnap = await withTimeout(
+        getDoc(doc(serverDb, 'settings', 'security_config')),
+        2500,
+        'Firestore security_config check'
+      );
+      if (secSnap.exists()) {
+        serverSecurityConfig = secSnap.data();
+      }
+    } catch {
+      // fallback to server env secrets
+    }
+
+    const effectiveConfig = serverSecurityConfig;
     const envAdminEmail = (process.env.ADMIN_EMAIL || 'dokandari.shop@gmail.com').trim().toLowerCase();
     const envAdminPassword = (process.env.ADMIN_PASSWORD || '').trim();
 
@@ -3075,21 +3253,21 @@ ${summaryLines}`,
       envAdminEmail,
       'dokandari.shop@gmail.com',
       'admin',
-      ...(customConfig?.authorizedEmails || []).map((e) => e.trim().toLowerCase()),
+      ...(effectiveConfig?.authorizedEmails || []).map((e: string) => String(e).trim().toLowerCase()),
     ]);
-    if (customConfig?.adminUsername) {
-      allowedUsers.add(customConfig.adminUsername.trim().toLowerCase());
+    if (effectiveConfig?.adminUsername) {
+      allowedUsers.add(String(effectiveConfig.adminUsername).trim().toLowerCase());
     }
 
     const isUserAllowed = allowedUsers.has(inputUser);
 
-    // Check password against server secret ADMIN_PASSWORD first, or custom Firestore password
+    // Check password against server secret ADMIN_PASSWORD first, or Firestore security_config password
     const validPasswords = new Set<string>();
     if (envAdminPassword && envAdminPassword !== 'SET_YOUR_ADMIN_PASSWORD_IN_SECRETS') {
       validPasswords.add(envAdminPassword);
     }
-    if (customConfig?.adminPassword) {
-      validPasswords.add(customConfig.adminPassword.trim());
+    if (effectiveConfig?.adminPassword) {
+      validPasswords.add(String(effectiveConfig.adminPassword).trim());
     }
     // Fallback initial secret if ADMIN_PASSWORD env secret hasn't been set yet
     if (validPasswords.size === 0) {
@@ -3097,10 +3275,16 @@ ${summaryLines}`,
     }
 
     if (isUserAllowed && validPasswords.has(inputPass)) {
+      const adminToken = issueAdminSessionToken(inputUser);
+      res.setHeader(
+        'Set-Cookie',
+        `dokandari_admin_token=${encodeURIComponent(adminToken)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`
+      );
       res.json({
         authenticated: true,
         role: 'admin',
         user: inputUser,
+        adminToken,
         verifiedBy: envAdminPassword ? 'server_secret' : 'firestore_security_config',
         timestamp: Date.now(),
       });
@@ -3111,6 +3295,35 @@ ${summaryLines}`,
       authenticated: false,
       error: 'অননুমোদিত অ্যাক্সেস! শুধুমাত্র নির্ধারিত অ্যাডমিন ইমেইল ও সিক্রেট পাসওয়ার্ড দিয়ে লগইন করা যাবে।',
     });
+  });
+
+  app.get('/api/admin/session', (req, res) => {
+    const check = verifyAdminRequest(req);
+    if (!check.valid) {
+      res.status(401).json({
+        authenticated: false,
+        error: '401 Unauthorized: Invalid or expired Admin session.',
+      });
+      return;
+    }
+    res.json({
+      authenticated: true,
+      role: 'admin',
+      user: check.sub,
+      timestamp: Date.now(),
+    });
+  });
+
+  app.post('/api/admin/logout', (req, res) => {
+    const check = verifyAdminRequest(req);
+    if (check.jti) {
+      revokedAdminTokenJtis.add(check.jti);
+    }
+    res.setHeader(
+      'Set-Cookie',
+      'dokandari_admin_token=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0'
+    );
+    res.json({ ok: true, authenticated: false });
   });
 
   // 5. Real Live Courier Consignment Booking Endpoint (Steadfast & Pathao API + Smart Auto-Fix)
