@@ -3824,10 +3824,50 @@ Return strict JSON.
     return {};
   }
 
+  function deleteServerTrackingMirrorRecords(orderIds: string[]) {
+    try {
+      if (!Array.isArray(orderIds) || orderIds.length === 0) return;
+      const targetUpper = new Set(orderIds.map((id) => String(id || '').trim().toUpperCase()).filter(Boolean));
+      if (targetUpper.size === 0) return;
+      const all = readServerTrackingMirror();
+      let changed = false;
+      for (const [key, rec] of Object.entries(all)) {
+        const keyUpper = String(key || '').toUpperCase();
+        const recOrdUpper = String(rec?.orderId || rec?.id || '').toUpperCase();
+        if (targetUpper.has(keyUpper) || targetUpper.has(recOrdUpper)) {
+          delete all[key];
+          changed = true;
+        }
+      }
+      if (changed) {
+        const dir = path.dirname(COURIER_TRACKING_MIRROR_FILE);
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+        fs.writeFileSync(COURIER_TRACKING_MIRROR_FILE, JSON.stringify(all, null, 2), 'utf-8');
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   function saveServerTrackingMirrorRecord(record: Record<string, any>) {
     try {
       const orderId = String(record.orderId || record.id || '').trim();
       if (!orderId) return null;
+      // Never save tracking mirror records for permanently deleted orders
+      try {
+        if (fs.existsSync( path.join(__dirname, 'data', 'orders_mirror.json'))) {
+          const ordMirror = JSON.parse(
+            fs.readFileSync(path.join(__dirname, 'data', 'orders_mirror.json'), 'utf-8')
+          );
+          if (Array.isArray(ordMirror?.deletedIds) && ordMirror.deletedIds.includes(orderId)) {
+            return null;
+          }
+        }
+      } catch {
+        // ignore
+      }
       const dir = path.dirname(COURIER_TRACKING_MIRROR_FILE);
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
@@ -3856,15 +3896,30 @@ Return strict JSON.
     const upper = q.toUpperCase();
     const cleanedOrderId = upper.startsWith('DKD-') ? upper : `DKD-${upper}`;
     const cleanPhone = q.replace(/\D/g, '').replace(/^88/, '');
+    let deletedUpperSet = new Set<string>();
+    try {
+      if (fs.existsSync(path.join(__dirname, 'data', 'orders_mirror.json'))) {
+        const ordMirror = JSON.parse(
+          fs.readFileSync(path.join(__dirname, 'data', 'orders_mirror.json'), 'utf-8')
+        );
+        if (Array.isArray(ordMirror?.deletedIds)) {
+          deletedUpperSet = new Set(ordMirror.deletedIds.map((id: string) => String(id || '').toUpperCase()));
+        }
+      }
+    } catch {
+      // ignore
+    }
     const all = readServerTrackingMirror();
-    if (all[upper]) return all[upper];
-    if (all[cleanedOrderId]) return all[cleanedOrderId];
+    if (all[upper] && !deletedUpperSet.has(upper)) return all[upper];
+    if (all[cleanedOrderId] && !deletedUpperSet.has(cleanedOrderId)) return all[cleanedOrderId];
     const records = Object.values(all);
     for (const rec of records) {
       if (!rec || typeof rec !== 'object') continue;
+      const recOrdUpper = String(rec.orderId || rec.id || '').toUpperCase();
+      if (recOrdUpper && deletedUpperSet.has(recOrdUpper)) continue;
       if (
-        String(rec.orderId || '').toUpperCase() === upper ||
-        String(rec.orderId || '').toUpperCase() === cleanedOrderId ||
+        recOrdUpper === upper ||
+        recOrdUpper === cleanedOrderId ||
         String(rec.consignmentId || '').toUpperCase() === upper ||
         String(rec.trackingId || '').toUpperCase() === upper ||
         String(rec.trackingNumber || '').toUpperCase() === upper ||
@@ -7315,6 +7370,8 @@ Return strict JSON with 100% complete, rich Bengali product details:
         if (delSnap.exists()) {
           const remoteDelIds = delSnap.data()?.ids;
           if (Array.isArray(remoteDelIds)) {
+            let remoteMissingLocal = false;
+            const remoteSet = new Set(remoteDelIds);
             for (const dId of remoteDelIds) {
               if (dId && !deletedSet.has(dId)) {
                 deletedSet.add(dId);
@@ -7325,11 +7382,27 @@ Return strict JSON with 100% complete, rich Bengali product details:
                 updatedMirror = true;
               }
             }
+            for (const localDelId of deletedSet) {
+              if (localDelId && !remoteSet.has(localDelId)) {
+                remoteMissingLocal = true;
+              }
+            }
             mirror.deletedIds = Array.from(deletedSet);
+            if (remoteMissingLocal) {
+              setDoc(
+                doc(serverDb, 'settings', 'deleted_orders'),
+                { ids: mirror.deletedIds, updatedAt: Date.now() },
+                { merge: true }
+              ).catch(() => null);
+            }
           }
         }
       } catch {
         // ignore
+      }
+
+      if (deletedSet.size > 0) {
+        deleteServerTrackingMirrorRecords(Array.from(deletedSet));
       }
 
       const orderMap = new Map<string, any>();
@@ -7337,6 +7410,9 @@ Return strict JSON with 100% complete, rich Bengali product details:
       for (const [id, ord] of Object.entries(mirror.orders)) {
         if (ord && id && !deletedSet.has(id)) {
           orderMap.set(id, ord);
+        } else if (deletedSet.has(id)) {
+          delete mirror.orders[id];
+          updatedMirror = true;
         }
       }
 
@@ -7349,6 +7425,11 @@ Return strict JSON with 100% complete, rich Bengali product details:
         snap.forEach((d) => {
           const data = d.data();
           const id = data?.id || d.id;
+          if (id && deletedSet.has(id)) {
+            // Purge any lingering deleted order document from Firestore `orders` collection permanently
+            deleteDoc(doc(serverDb, 'orders', d.id)).catch(() => null);
+            return;
+          }
           if (data && id && !deletedSet.has(id)) {
             const fullOrd: any = { ...data, id };
             const existing = orderMap.get(id);
@@ -7372,9 +7453,9 @@ Return strict JSON with 100% complete, rich Bengali product details:
       const list = Array.from(orderMap.values()).sort(
         (a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)
       );
-      res.json({ success: true, orders: list });
+      res.json({ success: true, orders: list, deletedIds: Array.from(deletedSet) });
     } catch (err: any) {
-      res.json({ success: true, orders: [] });
+      res.json({ success: true, orders: [], deletedIds: [] });
     }
   });
 
@@ -7385,14 +7466,58 @@ Return strict JSON with 100% complete, rich Bengali product details:
         return res.status(400).json({ success: false, error: 'Missing order id' });
       }
       const orderId = String(incoming.id).trim();
+      const mirror = readLocalOrdersMirror();
+      const deletedSet = new Set(mirror.deletedIds);
+
+      // CRITICAL: Never allow a permanently deleted order to be resurrected by background syncs or stale tabs
+      if (deletedSet.has(orderId) && !req.body?.allowRestoreDeleted) {
+        return res.status(409).json({
+          success: false,
+          deleted: true,
+          error: `Order ${orderId} has been permanently deleted and cannot be re-saved.`,
+        });
+      }
+
+      // DUPLICATE ORDER PREVENTION & IDEMPOTENCY PROTECTION:
+      // If this is a new order ID (`!mirror.orders[orderId]`), check if an active order already exists with:
+      // 1) Same `externalOrderId` or `sourceOrderId`
+      // 2) Same `idempotencyKey` (API retry / double click protection)
+      // 3) Same `sourceMessageHash` (same WhatsApp / Messenger message or screenshot processed twice)
+      if (!mirror.orders[orderId]) {
+        const extId = String(incoming.externalOrderId || '').trim();
+        const srcId = String(incoming.sourceOrderId || '').trim();
+        const idemKey = String(incoming.idempotencyKey || '').trim();
+        const msgHash = String(incoming.sourceMessageHash || '').trim();
+
+        if (extId || srcId || idemKey || msgHash) {
+          const existingMatch = Object.values(mirror.orders).find((existing: any) => {
+            if (!existing || !existing.id || deletedSet.has(existing.id)) return false;
+            if (extId && String(existing.externalOrderId || '').trim() === extId) return true;
+            if (srcId && String(existing.sourceOrderId || '').trim() === srcId) return true;
+            if (idemKey && String(existing.idempotencyKey || '').trim() === idemKey) return true;
+            if (msgHash && String(existing.sourceMessageHash || '').trim() === msgHash) return true;
+            return false;
+          });
+
+          if (existingMatch) {
+            return res.json({
+              success: true,
+              duplicatePrevented: true,
+              order: existingMatch,
+            });
+          }
+        }
+      }
+
       const updatedOrder = {
         ...incoming,
         id: orderId,
         updatedAt: Number(incoming.updatedAt) || Date.now(),
       };
-      const mirror = readLocalOrdersMirror();
       mirror.orders[orderId] = updatedOrder;
-      mirror.deletedIds = mirror.deletedIds.filter((id) => id !== orderId);
+      if (req.body?.allowRestoreDeleted) {
+        mirror.deletedIds = mirror.deletedIds.filter((id) => id !== orderId);
+      }
       writeLocalOrdersMirror(mirror);
 
       try {
@@ -7405,47 +7530,119 @@ Return strict JSON with 100% complete, rich Bengali product details:
         console.warn('Server Firestore order write note:', e);
       }
 
-      return res.json({ success: true, order: updatedOrder });
+      return res.json({ success: true, duplicatePrevented: false, order: updatedOrder });
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err?.message || 'Order save error' });
     }
   });
 
-  app.post('/api/orders/delete', async (req, res) => {
+  const handlePermanentOrderDelete = async (req: express.Request, res: express.Response) => {
     try {
-      const singleId = String(req.body?.orderId || '').trim();
+      const paramId = String(req.params?.orderId || '').trim();
+      const singleId = String(req.body?.orderId || paramId || '').trim();
       const batchIds: string[] = Array.isArray(req.body?.orderIds)
         ? req.body.orderIds.map((x: any) => String(x || '').trim()).filter(Boolean)
         : [];
       const idsToDelete = Array.from(new Set([...(singleId ? [singleId] : []), ...batchIds]));
 
-      if (idsToDelete.length > 0) {
-        const mirror = readLocalOrdersMirror();
-        for (const id of idsToDelete) {
-          delete mirror.orders[id];
-          if (!mirror.deletedIds.includes(id)) {
-            mirror.deletedIds.push(id);
+      if (idsToDelete.length === 0) {
+        return res.status(400).json({ success: false, error: 'Missing orderId to delete' });
+      }
+
+      const mirror = readLocalOrdersMirror();
+      const deletedSet = new Set<string>(mirror.deletedIds || []);
+
+      // Union with existing Firestore `settings/deleted_orders` so no deleted ID is ever lost
+      try {
+        const delSnap = await withTimeout(
+          getDoc(doc(serverDb, 'settings', 'deleted_orders')),
+          2500,
+          'Firestore deleted_orders read before delete'
+        );
+        if (delSnap.exists() && Array.isArray(delSnap.data()?.ids)) {
+          for (const existingDelId of delSnap.data()!.ids) {
+            if (existingDelId) deletedSet.add(String(existingDelId).trim());
           }
         }
-        writeLocalOrdersMirror(mirror);
-        try {
-          await Promise.allSettled([
-            ...idsToDelete.map((id) => deleteDoc(doc(serverDb, 'orders', id))),
-            setDoc(
-              doc(serverDb, 'settings', 'deleted_orders'),
-              { ids: mirror.deletedIds, updatedAt: Date.now() },
-              { merge: true }
-            ),
-          ]);
-        } catch {
-          // ignore
-        }
+      } catch {
+        // ignore read timeout, still proceed with local mirror union
       }
-      return res.json({ success: true, deletedIds: idsToDelete });
+
+      for (const id of idsToDelete) {
+        delete mirror.orders[id];
+        deletedSet.add(id);
+      }
+      mirror.deletedIds = Array.from(deletedSet);
+      writeLocalOrdersMirror(mirror);
+
+      // Clean up order-specific child tracking records in `data/courier_tracking_mirror.json`
+      // (Never touches any other order, customer, product, stock, or global financial records)
+      deleteServerTrackingMirrorRecords(idsToDelete);
+
+      // Clean up ONLY order-specific auto-generated child expenses (`source === 'order_expense_auto'` and `referenceId === orderId`)
+      try {
+        const expMirrorPath = path.join(__dirname, 'data', 'expenses_mirror.json');
+        if (fs.existsSync(expMirrorPath)) {
+          const expRaw = JSON.parse(fs.readFileSync(expMirrorPath, 'utf-8'));
+          if (expRaw && typeof expRaw.expenses === 'object') {
+            const idSet = new Set(idsToDelete);
+            let expChanged = false;
+            for (const [expId, exp] of Object.entries<any>(expRaw.expenses)) {
+              if (
+                exp &&
+                exp.source === 'order_expense_auto' &&
+                exp.referenceId &&
+                idSet.has(String(exp.referenceId))
+              ) {
+                delete expRaw.expenses[expId];
+                expChanged = true;
+                deleteDoc(doc(serverDb, 'business_expenses', expId)).catch(() => null);
+              }
+            }
+            if (expChanged) {
+              fs.writeFileSync(expMirrorPath, JSON.stringify(expRaw, null, 2), 'utf-8');
+            }
+          }
+        }
+      } catch {
+        // ignore child expense cleanup warning
+      }
+
+      // Permanently delete order document(s) from Firestore `orders` collection & persist `settings/deleted_orders`
+      await Promise.all([
+        ...idsToDelete.map((id) =>
+          withTimeout(
+            deleteDoc(doc(serverDb, 'orders', id)),
+            4500,
+            `Firestore deleteDoc orders/${id}`
+          )
+        ),
+        withTimeout(
+          setDoc(
+            doc(serverDb, 'settings', 'deleted_orders'),
+            { ids: mirror.deletedIds, updatedAt: Date.now() },
+            { merge: true }
+          ),
+          4500,
+          'Firestore update settings/deleted_orders'
+        ),
+      ]);
+
+      return res.json({
+        success: true,
+        permanentlyDeleted: true,
+        deletedIds: idsToDelete,
+      });
     } catch (err: any) {
-      return res.status(500).json({ success: false, error: err?.message || 'Order delete error' });
+      return res.status(500).json({
+        success: false,
+        error: err?.message || 'ডাটাবেজ থেকে অর্ডারটি স্থায়ীভাবে মুছতে সমস্যা হয়েছে।',
+      });
     }
-  });
+  };
+
+  app.post('/api/orders/delete', handlePermanentOrderDelete);
+  app.delete('/api/orders/:orderId', handlePermanentOrderDelete);
 
   function readLocalStoreContentMirror(): Record<string, any> | null {
     try {
@@ -8435,8 +8632,21 @@ Return strict JSON with 100% complete, rich Bengali product details:
 
       // Also check Server Orders Mirror (`data/orders_mirror.json`) so existing orders are always found
       let serverOrdersMirrorMatch: any = null;
+      let deletedOrdersUpperSet = new Set<string>();
       try {
         const ordMirror = readLocalOrdersMirror();
+        if (Array.isArray(ordMirror.deletedIds)) {
+          deletedOrdersUpperSet = new Set(
+            ordMirror.deletedIds.map((id: string) => String(id || '').toUpperCase())
+          );
+        }
+        if (deletedOrdersUpperSet.has(upperQ) || deletedOrdersUpperSet.has(candidateOrderId)) {
+          return res.status(404).json({
+            ok: false,
+            found: false,
+            error: `"${rawQuery}" অর্ডারটি স্থায়ীভাবে ডিলিট করা হয়েছে।`,
+          });
+        }
         const allOrdersList = Object.values(ordMirror.orders || {});
         serverOrdersMirrorMatch =
           ordMirror.orders?.[rawQuery] ||
@@ -8444,6 +8654,7 @@ Return strict JSON with 100% complete, rich Bengali product details:
           allOrdersList.find((o: any) => {
             if (!o) return false;
             const idStr = String(o.id || '').toUpperCase();
+            if (deletedOrdersUpperSet.has(idStr)) return false;
             const cidStr = String(o.consignmentId || '').toUpperCase();
             const trkStr = String(o.trackingNumber || o.trackingId || '').toUpperCase();
             const phStr = String(o.customer?.phone || '')
@@ -8470,7 +8681,7 @@ Return strict JSON with 100% complete, rich Bengali product details:
           2800,
           'Firestore track direct order'
         );
-        if (directSnap.exists()) {
+        if (directSnap.exists() && !deletedOrdersUpperSet.has(String(directSnap.id).toUpperCase())) {
           firestoreOrder = { id: directSnap.id, ...(directSnap.data() as any) };
         } else {
           const allOrdersSnap = await withTimeout(
@@ -8482,6 +8693,7 @@ Return strict JSON with 100% complete, rich Bengali product details:
             if (firestoreOrder) return;
             const d: any = docItem.data() || {};
             const idStr = String(d.id || docItem.id || '').toUpperCase();
+            if (deletedOrdersUpperSet.has(idStr)) return;
             const cidStr = String(d.consignmentId || '').toUpperCase();
             const trkStr = String(d.trackingNumber || d.trackingId || '').toUpperCase();
             const phStr = String(d.customer?.phone || '')
@@ -8512,6 +8724,14 @@ Return strict JSON with 100% complete, rich Bengali product details:
       const resolvedOrderId = String(
         baseRecord.id || baseRecord.orderId || (upperQ.startsWith('DKD-') ? upperQ : '')
       ).trim();
+
+      if (resolvedOrderId && deletedOrdersUpperSet.has(resolvedOrderId.toUpperCase())) {
+        return res.status(404).json({
+          ok: false,
+          found: false,
+          error: `"${resolvedOrderId}" অর্ডারটি স্থায়ীভাবে ডিলিট করা হয়েছে।`,
+        });
+      }
 
       if (!resolvedOrderId && !baseRecord.consignmentId && !baseRecord.trackingNumber) {
         return res.status(404).json({

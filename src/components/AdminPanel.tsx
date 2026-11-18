@@ -160,7 +160,10 @@ import {
   deleteOrdersBulkPersisted,
   getDeletedOrderIds,
   addDeletedOrderId,
+  setRemoteDeletedOrderIds,
   removeDeletedOrderIds,
+  computeOrderSourceMessageHash,
+  findExistingDuplicateOrder,
   mergeAndPersistAllOrders,
   getPersistedPurchases,
   getDeletedPurchaseIds,
@@ -774,14 +777,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [manualOrderQuantity, setManualOrderQuantity] = useState<number>(1);
   const [manualOrderDiscount, setManualOrderDiscount] = useState<number>(0);
   const [manualOrderNotes, setManualOrderNotes] = useState('');
+  const [manualOrderExternalId, setManualOrderExternalId] = useState('');
   const [manualOrderSubmitting, setManualOrderSubmitting] = useState(false);
   const [waScreenshotText, setWaScreenshotText] = useState('');
   const [waScreenshotPreview, setWaScreenshotPreview] = useState<string>('');
   const [waExtracting, setWaExtracting] = useState(false);
 
-  // Order Details Full View & Invoice Modals
+  // Order Details Full View, Invoice & Permanent Delete Confirmation Modals
   const [selectedOrderForView, setSelectedOrderForView] = useState<Order | null>(null);
   const [selectedOrderForInvoice, setSelectedOrderForInvoice] = useState<Order | null>(null);
+  const [orderPendingDelete, setOrderPendingDelete] = useState<Order | null>(null);
+  const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
+  const [deleteOrderError, setDeleteOrderError] = useState<string>('');
 
   // Real-time Order Edit Modal State
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
@@ -2605,15 +2612,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         try {
           const delOrdDoc = await getDoc(doc(db, 'settings', 'deleted_orders'));
           if (delOrdDoc.exists() && Array.isArray(delOrdDoc.data()?.ids)) {
-            delOrdDoc.data()!.ids.forEach((id: string) => {
-              if (id) addDeletedOrderId(id);
-            });
+            setRemoteDeletedOrderIds(delOrdDoc.data()!.ids);
           }
         } catch {
           // ignore
         }
-
-        const deletedOrderSet = getDeletedOrderIds();
 
         // 2. Fetch server mirror orders (/api/orders -> data/orders_mirror.json), filtering out any deleted IDs
         let serverMirrorOrders: Order[] = [];
@@ -2621,9 +2624,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           const srvOrdRes = await fetch('/api/orders');
           if (srvOrdRes.ok) {
             const srvOrdJson = await srvOrdRes.json();
+            if (Array.isArray(srvOrdJson?.deletedIds)) {
+              setRemoteDeletedOrderIds(srvOrdJson.deletedIds);
+            }
+            const currentDelSet = getDeletedOrderIds();
             if (Array.isArray(srvOrdJson?.orders)) {
               serverMirrorOrders = srvOrdJson.orders.filter(
-                (o: any) => o && o.id && !deletedOrderSet.has(o.id)
+                (o: any) => o && o.id && !currentDelSet.has(o.id)
               );
               serverOrdersRef.current = serverMirrorOrders;
             }
@@ -2632,6 +2639,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           // ignore
         }
 
+        const deletedOrderSet = getDeletedOrderIds();
+
         const t0 = performance.now();
         const snap = await getDocs(collection(db, 'orders'));
         setPingLatencyMs(Math.round(performance.now() - t0));
@@ -2639,8 +2648,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         const firestoreOrders: Order[] = [];
         snap.forEach((d) => {
           const data = d.data() as Order;
-          if (data && data.id) {
-            firestoreOrders.push(data);
+          const id = data?.id || d.id;
+          if (id && deletedOrderSet.has(id)) {
+            // Purge any lingering deleted order document from Firestore
+            deleteDoc(doc(db, 'orders', d.id)).catch(() => null);
+            return;
+          }
+          if (data && id && !deletedOrderSet.has(id)) {
+            firestoreOrders.push({ ...data, id });
           }
         });
 
@@ -2815,9 +2830,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       (snap) => {
         if (snap.exists() && Array.isArray(snap.data()?.ids)) {
           const ids = snap.data()!.ids as string[];
-          ids.forEach((id) => {
-            if (id) addDeletedOrderId(id);
-          });
+          setRemoteDeletedOrderIds(ids);
           const delSet = getDeletedOrderIds();
           serverOrdersRef.current = serverOrdersRef.current.filter((o) => !delSet.has(o.id));
           setOrders((prev) => {
@@ -2839,6 +2852,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         snap.forEach((d) => {
           const data = d.data() as Order;
           const id = data?.id || d.id;
+          if (id && delSet.has(id)) {
+            deleteDoc(doc(db, 'orders', d.id)).catch(() => null);
+            return;
+          }
           if (data && id && !delSet.has(id)) {
             firestoreOrders.push({ ...data, id });
           }
@@ -2929,8 +2946,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       }
     );
 
-    // Realtime live listener for dropped / abandoned leads with automatic partial-phone deduplication & full-order auto-recovery
-    const autoRecoveredPhones = new Set<string>();
+    // Realtime live listener for dropped / abandoned leads with automatic partial-phone deduplication
+    // CRITICAL: Never auto-create orders inside this listener, as doing so resurrects deleted/cancelled orders and creates duplicate entries!
     const unsubLeads = onSnapshot(
       collection(db, 'abandoned_leads'),
       (snap) => {
@@ -2941,112 +2958,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           serverMirrorOrders: serverOrdersRef.current,
         });
         const cleanedList = cleanupDuplicateAndPartialLeads(rawList, currentOrders);
-
-        // Automatically recover any complete direct-form order (11-digit phone + real name + real address)
-        // that got stuck in abandoned_leads so it immediately appears in #04 Orders & #18 Command Center!
-        const existingPhoneSet = new Set(
-          currentOrders
-            .filter((o) => o.status !== 'cancelled')
-            .map((o) => normalizePhone(o.customer?.phone || ''))
-            .filter((p) => p.length === 11)
-        );
-
-        for (const lead of cleanedList) {
-          const cleanPhone = normalizePhone(lead.customerPhone || '');
-          const hasRealName =
-            Boolean(lead.customerName) &&
-            lead.customerName.trim().length >= 2 &&
-            lead.customerName.trim() !== 'সম্মানিত ক্রেতা' &&
-            lead.customerName.trim() !== 'নাম উল্লেখ নেই';
-            const addrText = (lead.customerAddress || '').trim();
-            const hasRealAddress = addrText.length >= 4;
-
-          if (
-            cleanPhone.length === 11 &&
-            /^01\d{9}$/.test(cleanPhone) &&
-            hasRealName &&
-            hasRealAddress &&
-            !existingPhoneSet.has(cleanPhone) &&
-            !autoRecoveredPhones.has(cleanPhone)
-          ) {
-            autoRecoveredPhones.add(cleanPhone);
-            existingPhoneSet.add(cleanPhone);
-            const fallbackProd =
-              products.find((p) => p.id === lead.productId) ||
-              products.find((p) => lead.productName && p.name === lead.productName) ||
-              products[0];
-            const isOutside =
-              lead.deliveryArea === 'outside_dhaka' ||
-              (addrText &&
-                !/ঢাকা|dhaka|mirpur|uttara|dhanmondi|mohammadpur|banani|gulshan|badda|rampura|jatrabari/i.test(
-                  addrText
-                ));
-            const shipFee = isOutside ? 120 : 70;
-            const itemQty = Math.max(1, Number(lead.quantity) || 1);
-            const unitPrice = Number(
-              lead.productPrice || lead.items?.[0]?.price || fallbackProd?.price || 1250
-            );
-            const subtotal = unitPrice * itemQty;
-            const total = Number(lead.totalAmount || lead.estimatedTotal || subtotal + shipFee);
-            const recoveredOrderId = `DKD-${Math.floor(100000 + Math.random() * 900000)}`;
-            const recoveredOrder: Order = {
-              id: recoveredOrderId,
-              customer: {
-                name: (lead.customerName || 'সম্মানিত ক্রেতা').trim(),
-                phone: cleanPhone,
-                address: addrText,
-                city: isOutside ? 'Outside Dhaka' : 'Dhaka',
-                district: isOutside ? 'ঢাকার বাইরে (Outside Dhaka)' : 'ঢাকা (Inside Dhaka)',
-              },
-              items:
-                Array.isArray(lead.items) && lead.items.length > 0
-                  ? lead.items.map((it, idx) => ({
-                      id: it.productId || fallbackProd?.id || `item-${idx}`,
-                      productId: it.productId || fallbackProd?.id || `item-${idx}`,
-                      name: it.productName || fallbackProd?.name || 'অরিজিনাল কালেকশন',
-                      price: Number(it.price || unitPrice),
-                      quantity: Math.max(1, Number(it.quantity || itemQty)),
-                      image:
-                        it.productImage ||
-                        fallbackProd?.images?.[0] ||
-                        '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg',
-                      selectedColor: it.selectedColor || 'Standard',
-                      selectedSize: it.selectedSize || 'Standard',
-                      category: fallbackProd?.category || 'home_decor',
-                    }))
-                  : [
-                      {
-                        id: lead.productId || fallbackProd?.id || 'dkd-recovered',
-                        productId: lead.productId || fallbackProd?.id || 'dkd-recovered',
-                        name: lead.productName || fallbackProd?.name || 'অরিজিনাল কালেকশন',
-                        price: unitPrice,
-                        quantity: itemQty,
-                        image:
-                          lead.productImage ||
-                          fallbackProd?.images?.[0] ||
-                          '/uploads/product/Ha2ef56dd79ed496bafac7990404868f7u.jpg',
-                        selectedColor: 'Standard',
-                        selectedSize: 'Standard',
-                        category: fallbackProd?.category || 'home_decor',
-                      },
-                    ],
-              subtotal,
-              shippingCost: shipFee,
-              discount: Math.max(0, subtotal + shipFee - total),
-              total,
-              paymentMethod: 'cod',
-              status: 'pending',
-              userId: null,
-              createdAt: Number(lead.createdAt || Date.now()),
-              updatedAt: Date.now(),
-            };
-            lead.status = 'converted';
-            lead.convertedOrderId = recoveredOrderId;
-            saveOrderPersisted(recoveredOrder).catch(() => null);
-            markLeadConverted(cleanPhone, recoveredOrderId).catch(() => null);
-          }
-        }
-
         cleanedList.sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
         setAbandonedLeads(cleanedList);
       },
@@ -3059,10 +2970,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     const handleInstantOrderSync = (evt?: Event) => {
       const customEvt = evt as CustomEvent<{ order?: Order }> | undefined;
       const incomingOrd = customEvt?.detail?.order;
-      if (incomingOrd && incomingOrd.id) {
+      const delSet = getDeletedOrderIds();
+      if (incomingOrd && incomingOrd.id && !delSet.has(incomingOrd.id)) {
         serverOrdersRef.current = [
           incomingOrd,
-          ...serverOrdersRef.current.filter((o) => o && o.id !== incomingOrd.id),
+          ...serverOrdersRef.current.filter((o) => o && o.id !== incomingOrd.id && !delSet.has(o.id)),
         ];
       }
       const merged = mergeAndPersistAllOrders({
@@ -3070,7 +2982,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         serverMirrorOrders: serverOrdersRef.current,
       });
       setOrders(merged);
-      if (incomingOrd && incomingOrd.id) {
+      if (incomingOrd && incomingOrd.id && !delSet.has(incomingOrd.id)) {
         setSelectedOrderForView((prev) =>
           prev && prev.id === incomingOrd.id ? incomingOrd : prev
         );
@@ -3079,7 +2991,22 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         );
       }
     };
+
+    const handleInstantOrderDelete = (evt?: Event) => {
+      const customEvt = evt as CustomEvent<{ orderId?: string }> | undefined;
+      const delId = customEvt?.detail?.orderId;
+      const delSet = getDeletedOrderIds();
+      if (delId) delSet.add(delId);
+      serverOrdersRef.current = serverOrdersRef.current.filter((o) => o && !delSet.has(o.id));
+      setOrders((prev) => {
+        const next = prev.filter((o) => o && !delSet.has(o.id));
+        syncOrdersToLocalCache(next);
+        return next;
+      });
+    };
+
     window.addEventListener('dokandari:orders-updated', handleInstantOrderSync);
+    window.addEventListener('dokandari:orders-deleted', handleInstantOrderDelete);
 
     // Realtime live listener for store settings & hero banners
     const unsubStoreContent = onSnapshot(
@@ -3122,6 +3049,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
     return () => {
       window.removeEventListener('dokandari:orders-updated', handleInstantOrderSync);
+      window.removeEventListener('dokandari:orders-deleted', handleInstantOrderDelete);
       unsubDeletedOrders();
       unsubOrders();
       unsubPurchases();
@@ -3170,29 +3098,50 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   };
 
-  // Delete a single Demo / Fake / Cancelled Order & immediately subtract its price from Sales Analytics
-  const handleDeleteOrder = async (order: Order) => {
-    const deductedAmount = Number(order.total) || 0;
+  // Open Confirmation Popup before permanently deleting a specific order
+  const requestDeleteOrder = (order: Order) => {
+    if (!order || !order.id || deletingOrderId === order.id) return;
+    setDeleteOrderError('');
+    setOrderPendingDelete(order);
+  };
+
+  // Permanently delete the confirmed order from Backend API + Firestore DB FIRST, and only remove from UI after DB delete succeeds
+  const confirmPermanentDeleteOrder = async () => {
+    if (!orderPendingDelete || deletingOrderId) return;
+    const targetOrder = orderPendingDelete;
+    const deductedAmount = Number(targetOrder.total) || 0;
+    setDeletingOrderId(targetOrder.id);
+    setDeleteOrderError('');
+
     try {
-      addDeletedOrderId(order.id);
-      serverOrdersRef.current = serverOrdersRef.current.filter((o) => o.id !== order.id);
+      // 1. Execute permanent database deletion FIRST (Backend API + Firestore `orders` + `settings/deleted_orders` + child tracking records)
+      await deleteOrderPersisted(targetOrder.id);
+
+      // 2. Only after Database Delete succeeds, remove the specific order from Admin Dashboard state
+      serverOrdersRef.current = serverOrdersRef.current.filter((o) => o.id !== targetOrder.id);
       setOrders((prev) => {
-        const next = prev.filter((o) => o.id !== order.id);
+        const next = prev.filter((o) => o.id !== targetOrder.id);
         syncOrdersToLocalCache(next);
         return next;
       });
-      if (selectedOrderForView?.id === order.id) setSelectedOrderForView(null);
-      if (selectedOrderForInvoice?.id === order.id) setSelectedOrderForInvoice(null);
-      if (selectedOrderScreenshotModal?.id === order.id) setSelectedOrderScreenshotModal(null);
-
-      await deleteOrderPersisted(order.id);
+      if (selectedOrderForView?.id === targetOrder.id) setSelectedOrderForView(null);
+      if (selectedOrderForInvoice?.id === targetOrder.id) setSelectedOrderForInvoice(null);
+      if (selectedOrderScreenshotModal?.id === targetOrder.id) setSelectedOrderScreenshotModal(null);
+      setOrderPendingDelete(null);
 
       setFeedback(
-        `🗑️ অর্ডার #${order.id} (${order.customer.name} — ৳${deductedAmount.toLocaleString()}) ফায়ারস্টোর ডাটাবেজ থেকে স্থায়ীভাবে ডিলিট হয়েছে এবং সেলস অ্যানালাইসিস থেকে সাথে সাথে -৳${deductedAmount.toLocaleString()} মাইনাস হয়েছে!`
+        `🗑️ অর্ডার #${targetOrder.id} (${targetOrder.customer.name} — ৳${deductedAmount.toLocaleString()}) মূল ডাটাবেজ থেকে স্থায়ীভাবে ডিলিট সম্পন্ন হয়েছে!`
       );
       setTimeout(() => setFeedback(''), 5500);
-    } catch (err) {
-      console.warn('Delete order error:', err);
+    } catch (err: any) {
+      const errMsg =
+        err?.message ||
+        'ডাটাবেজ থেকে অর্ডারটি স্থায়ীভাবে Delete করা সম্ভব হয়নি। অনুগ্রহ করে ইন্টারনেট বা সার্ভার সংযোগ পরীক্ষা করে আবার চেষ্টা করুন।';
+      setDeleteOrderError(errMsg);
+      setFeedback(`❌ ত্রুটি: ${errMsg}`);
+      setTimeout(() => setFeedback(''), 5500);
+    } finally {
+      setDeletingOrderId(null);
     }
   };
 
@@ -3207,18 +3156,22 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     const totalDeducted = targetOrders.reduce((sum, o) => sum + (Number(o.total) || 0), 0);
     const ids = targetOrders.map((o) => o.id);
     const idSet = new Set(ids);
-    ids.forEach((id) => addDeletedOrderId(id));
-    serverOrdersRef.current = serverOrdersRef.current.filter((o) => !idSet.has(o.id));
-    setOrders((prev) => {
-      const next = prev.filter((o) => !idSet.has(o.id));
-      syncOrdersToLocalCache(next);
-      return next;
-    });
-    await deleteOrdersBulkPersisted(ids);
-    setFeedback(
-      `🗑️ মোট ${ids.length}টি বাতিল/ডেমো অর্ডার (মোট ৳${totalDeducted.toLocaleString()}) ফায়ারস্টোর ডাটাবেজ ও সেলস অ্যানালাইটিক্স থেকে স্থায়ীভাবে মুছে ফেলা হয়েছে!`
-    );
-    setTimeout(() => setFeedback(''), 5500);
+    try {
+      await deleteOrdersBulkPersisted(ids);
+      serverOrdersRef.current = serverOrdersRef.current.filter((o) => !idSet.has(o.id));
+      setOrders((prev) => {
+        const next = prev.filter((o) => !idSet.has(o.id));
+        syncOrdersToLocalCache(next);
+        return next;
+      });
+      setFeedback(
+        `🗑️ মোট ${ids.length}টি বাতিল/ডেমো অর্ডার (মোট ৳${totalDeducted.toLocaleString()}) ফায়ারস্টোর ডাটাবেজ ও সেলস অ্যানালাইটিক্স থেকে স্থায়ীভাবে মুছে ফেলা হয়েছে!`
+      );
+      setTimeout(() => setFeedback(''), 5500);
+    } catch (err: any) {
+      setFeedback(`❌ বাতিল অর্ডার ডিলিট করতে ত্রুটি হয়েছে: ${err?.message || 'আবার চেষ্টা করুন'}`);
+      setTimeout(() => setFeedback(''), 5000);
+    }
   };
 
   // Reset legacy fake courier tracking number so Admin can book with real Steadfast / Pathao
@@ -3728,8 +3681,49 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
     const orderId = `DKD-${Math.floor(100000 + Math.random() * 900000)}`;
     const itemId = selectedProd?.id || `custom-${Date.now()}`;
+    const trimmedExternalId = manualOrderExternalId.trim();
+    const sourceMessageHash = computeOrderSourceMessageHash({
+      rawMessageText: waScreenshotText,
+      screenshotData: waScreenshotPreview,
+      phone: cleanPhone,
+      productId: itemId,
+      quantity: qty,
+      total,
+    });
+
+    // DUPLICATE ORDER PREVENTION CHECK:
+    // Block duplicate order creation if the same External/Source Order ID or the exact same WhatsApp/Messenger message was already processed
+    const existingDuplicate = findExistingDuplicateOrder(
+      {
+        externalOrderId: trimmedExternalId || undefined,
+        sourceOrderId: trimmedExternalId || undefined,
+        sourceMessageHash: sourceMessageHash || undefined,
+      },
+      orders
+    );
+    if (existingDuplicate) {
+      setFeedback(
+        `⚠️ ডুপ্লিকেট অর্ডার প্রতিরোধ করা হয়েছে! একই External Order ID বা হোয়াটসঅ্যাপ মেসেজ থেকে অর্ডার (#${existingDuplicate.id} — ${existingDuplicate.customer.name}) ইতোমধ্যে এন্ট্রি করা আছে।`
+      );
+      setTimeout(() => setFeedback(''), 6000);
+      return;
+    }
+
+    const idempotencyKey =
+      trimmedExternalId
+        ? `ext_${trimmedExternalId}`
+        : sourceMessageHash
+        ? `wa_${sourceMessageHash}`
+        : `manual_${cleanPhone}_${itemId}_${qty}_${total}_${Math.floor(Date.now() / 15000)}`;
+
     const newOrder: Order = {
       id: orderId,
+      ...(trimmedExternalId
+        ? { externalOrderId: trimmedExternalId, sourceOrderId: trimmedExternalId }
+        : {}),
+      ...(sourceMessageHash ? { sourceMessageHash } : {}),
+      idempotencyKey,
+      orderSource: waScreenshotText || waScreenshotPreview ? 'whatsapp_ai' : 'manual_admin',
       items: [
         {
           id: itemId,
@@ -3773,14 +3767,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
     setManualOrderSubmitting(true);
     try {
-      await saveOrderPersisted(newOrder);
-      markLeadConverted(cleanPhone, orderId).catch(() => null);
-      trackPixelPurchase(newOrder).then((capiRes) => {
+      const savedOrder = await saveOrderPersisted(newOrder);
+      if (savedOrder.id !== newOrder.id) {
+        setFeedback(
+          `ℹ️ ডুপ্লিকেট অর্ডার প্রতিরোধ করা হয়েছে — পূর্বের অর্ডার রেকর্ড (#${savedOrder.id}) ব্যবহৃত হয়েছে!`
+        );
+        setTimeout(() => setFeedback(''), 5500);
+        return;
+      }
+      markLeadConverted(cleanPhone, savedOrder.id).catch(() => null);
+      trackPixelPurchase(savedOrder).then((capiRes) => {
         if (capiRes) {
           const withTracking: Order = {
-            ...newOrder,
+            ...savedOrder,
             pixelTracking: {
-              eventId: capiRes.eventId || `dkd_purchase_${orderId}`,
+              eventId: capiRes.eventId || `dkd_purchase_${savedOrder.id}`,
               browserFired: true,
               capiDispatched: Boolean(capiRes.capiResults && capiRes.capiResults.length > 0),
               capiStatus:
@@ -3795,30 +3796,29 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             },
           };
           saveOrderPersisted(withTracking).catch(() => null);
-          setOrders((prev) => prev.map((o) => (o.id === orderId ? withTracking : o)));
+          setOrders((prev) => prev.map((o) => (o.id === savedOrder.id ? withTracking : o)));
         }
       });
       setOrders((prev) => {
-        const filtered = prev.filter((o) => o.id !== newOrder.id);
-        return [newOrder, ...filtered];
+        const filtered = prev.filter((o) => o.id !== savedOrder.id);
+        return [savedOrder, ...filtered];
       });
       setManualOrderName('');
       setManualOrderPhone('');
       setManualOrderAddress('');
       setManualOrderNotes('');
+      setManualOrderExternalId('');
       setManualOrderQuantity(1);
       setManualOrderDiscount(0);
       setWaScreenshotPreview('');
       setWaScreenshotText('');
       setIsManualOrderOpen(false);
       setSearchTerm('');
-      setFeedback(`🎉 অর্ডার #${orderId} সফলভাবে তৈরি ও ফায়ারবেস + মেটা/টিকটক CAPI-তে সিঙ্ক হয়েছে!`);
+      setFeedback(`🎉 অর্ডার #${savedOrder.id} সফলভাবে তৈরি ও ফায়ারবেস + মেটা/টিকটক CAPI-তে সিঙ্ক হয়েছে!`);
       setTimeout(() => setFeedback(''), 5500);
     } catch (err: any) {
       console.warn('Manual order create note:', err);
-      setOrders((prev) => [newOrder, ...prev]);
-      setIsManualOrderOpen(false);
-      setFeedback(`✅ অর্ডার #${orderId} তালিকায় যুক্ত হয়েছে!`);
+      setFeedback(`❌ অর্ডার সেভ করতে ত্রুটি হয়েছে: ${err?.message || 'আবার চেষ্টা করুন'}`);
       setTimeout(() => setFeedback(''), 4000);
     } finally {
       setManualOrderSubmitting(false);
@@ -5102,9 +5102,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       const subtotal = unitPrice * itemQty;
       const total = Number(lead.totalAmount || lead.estimatedTotal || subtotal + shipFee);
       const orderId = `DKD-${Math.floor(100000 + Math.random() * 900000)}`;
+      const leadSourceOrderId = `lead:${lead.id || cleanPhone}`;
 
       const newOrder: Order = {
         id: orderId,
+        sourceOrderId: leadSourceOrderId,
+        idempotencyKey: `lead_conv_${lead.id || cleanPhone}`,
+        orderSource: 'lead_conversion',
         customer: {
           name: (lead.customerName || 'সম্মানিত ক্রেতা').trim(),
           phone: cleanPhone,
@@ -5155,21 +5159,22 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         updatedAt: Date.now(),
       };
 
-      await saveOrderPersisted(newOrder);
-      await markLeadConverted(cleanPhone, orderId);
+      const savedOrder = await saveOrderPersisted(newOrder);
+      const finalId = savedOrder.id || orderId;
+      await markLeadConverted(cleanPhone, finalId);
       await updateLeadStatus(lead.id, 'converted');
 
-      setOrders((prev) => [newOrder, ...prev.filter((o) => o.id !== orderId)]);
+      setOrders((prev) => [savedOrder, ...prev.filter((o) => o.id !== finalId)]);
       setAbandonedLeads((prev) =>
         cleanupDuplicateAndPartialLeads(
           prev.map((l) =>
-            l.id === lead.id ? { ...l, status: 'converted', convertedOrderId: orderId } : l
+            l.id === lead.id ? { ...l, status: 'converted', convertedOrderId: finalId } : l
           ),
-          [newOrder, ...orders]
+          [savedOrder, ...orders]
         )
       );
       setFeedback(
-        `🎉 লিডটি সফলভাবে মূল অর্ডারে (#${orderId} — ${newOrder.customer.name}) রূপান্তরিত হয়েছে এবং #০৪ অর্ডার ও #১৮ কমান্ড সেন্টারে যুক্ত হয়েছে!`
+        `🎉 লিডটি সফলভাবে মূল অর্ডারে (#${finalId} — ${savedOrder.customer.name}) রূপান্তরিত হয়েছে এবং #০৪ অর্ডার ও #১৮ কমান্ড সেন্টারে যুক্ত হয়েছে!`
       );
       setTimeout(() => setFeedback(''), 5000);
     } catch (err) {
@@ -7238,18 +7243,34 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   onClick={async () => {
                     setFeedback('🔄 সার্ভার মিরর, ফায়ারস্টোর ও লোকাল ক্যাশ থেকে সকল পূর্ববর্তী ও বর্তমান অর্ডার রিকভারি ও সিঙ্ক হচ্ছে...');
                     try {
+                      try {
+                        const delSnap = await getDoc(doc(db, 'settings', 'deleted_orders'));
+                        if (delSnap.exists() && Array.isArray(delSnap.data()?.ids)) {
+                          setRemoteDeletedOrderIds(delSnap.data()!.ids);
+                        }
+                      } catch {
+                        // ignore
+                      }
                       const srvOrdRes = await fetch('/api/orders');
                       if (srvOrdRes.ok) {
                         const srvOrdJson = await srvOrdRes.json();
+                        if (Array.isArray(srvOrdJson?.deletedIds)) {
+                          setRemoteDeletedOrderIds(srvOrdJson.deletedIds);
+                        }
+                        const delSetNow = getDeletedOrderIds();
                         if (Array.isArray(srvOrdJson?.orders)) {
-                          serverOrdersRef.current = srvOrdJson.orders;
+                          serverOrdersRef.current = srvOrdJson.orders.filter(
+                            (o: any) => o && o.id && !delSetNow.has(o.id)
+                          );
                         }
                       }
+                      const delSet = getDeletedOrderIds();
                       const snap = await getDocs(collection(db, 'orders'));
                       const firestoreOrders: Order[] = [];
                       snap.forEach((d) => {
                         const data = d.data() as Order;
-                        if (data && data.id) firestoreOrders.push(data);
+                        const id = data?.id || d.id;
+                        if (data && id && !delSet.has(id)) firestoreOrders.push({ ...data, id });
                       });
                       const merged = mergeAndPersistAllOrders({
                         localOrders: getPersistedOrders(),
@@ -7257,7 +7278,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         firestoreOrders,
                       });
                       setOrders(merged);
-                      setFeedback(`✅ সফলভাবে সকল ${merged.length}টি অর্ডার (গতকালের ও আজকের সব অর্ডার সহ) রিকভার ও সিঙ্ক হয়েছে!`);
+                      setFeedback(`✅ সফলভাবে সকল ${merged.length}টি অর্ডার সিঙ্ক হয়েছে (ডিলিটকৃত অর্ডার বাদে)!`);
                     } catch {
                       const merged = mergeAndPersistAllOrders({
                         localOrders: getPersistedOrders(),
@@ -7514,7 +7535,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         </div>
                       </div>
 
-                      <div className="sm:col-span-2">
+                      <div>
                         <label className="block font-bold text-stone-700 mb-1">স্পেশাল নোট (ঐচ্ছিক)</label>
                         <input
                           type="text"
@@ -7522,6 +7543,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           onChange={(e) => setManualOrderNotes(e.target.value)}
                           placeholder="যেমন: কালার গোল্ডেন, দ্রুত ডেলিভারি..."
                           className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-stone-700 mb-1">
+                          External / Source Order ID (ঐচ্ছিক — ডুপ্লিকেট রোধে)
+                        </label>
+                        <input
+                          type="text"
+                          value={manualOrderExternalId}
+                          onChange={(e) => setManualOrderExternalId(e.target.value)}
+                          placeholder="যেমন: WA-10025 বা FB-88412"
+                          className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl font-mono"
                         />
                       </div>
                     </div>
@@ -7806,12 +7840,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => handleDeleteOrder(o)}
-                                  className="px-2.5 py-1.5 rounded-xl bg-red-600 hover:bg-red-700 text-white border border-red-700 text-[11px] font-extrabold cursor-pointer transition-all flex items-center gap-1 shadow-2xs"
-                                  title={`এই ডেমো/ফেক অর্ডারটি ডিলিট করুন (সেলস থেকে সাথে সাথে -৳${o.total.toLocaleString()} মাইনাস হবে)`}
+                                  disabled={deletingOrderId === o.id}
+                                  onClick={() => requestDeleteOrder(o)}
+                                  className="px-2.5 py-1.5 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white border border-red-700 text-[11px] font-extrabold cursor-pointer transition-all flex items-center gap-1 shadow-2xs"
+                                  title={`এই অর্ডারটি মূল ডাটাবেজ থেকে স্থায়ীভাবে ডিলিট করুন (-৳${o.total.toLocaleString()})`}
                                 >
                                   <Trash2 className="w-3.5 h-3.5 text-white" />
-                                  <span>ডিলিট</span>
+                                  <span>{deletingOrderId === o.id ? 'ডিলিট হচ্ছে...' : 'ডিলিট'}</span>
                                 </button>
                               </div>
                             </td>
@@ -8091,11 +8126,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleDeleteOrder(selectedOrderForView)}
-                      className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      disabled={deletingOrderId === selectedOrderForView.id}
+                      onClick={() => requestDeleteOrder(selectedOrderForView)}
+                      className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-xs"
                     >
                       <Trash2 className="w-4 h-4" />
-                      <span>🗑️ অর্ডার ডিলিট করুন (-৳{selectedOrderForView.total.toLocaleString()})</span>
+                      <span>
+                        {deletingOrderId === selectedOrderForView.id
+                          ? 'ডিলিট হচ্ছে...'
+                          : `🗑️ অর্ডার ডিলিট করুন (-৳${selectedOrderForView.total.toLocaleString()})`}
+                      </span>
                     </button>
                     <button
                       type="button"
@@ -8103,6 +8143,66 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       className="px-4 py-2 rounded-xl border border-stone-300 text-stone-700 font-bold text-xs cursor-pointer"
                     >
                       বন্ধ করুন
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* PERMANENT ORDER DELETE CONFIRMATION POPUP MODAL */}
+            {orderPendingDelete && (
+              <div className="fixed inset-0 z-[70] bg-stone-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+                <div className="bg-white rounded-3xl border-2 border-red-200 max-w-md w-full p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95">
+                  <div className="flex items-start gap-3">
+                    <div className="w-11 h-11 rounded-2xl bg-red-100 text-red-600 flex items-center justify-center shrink-0">
+                      <Trash2 className="w-5 h-5" />
+                    </div>
+                    <div className="space-y-1">
+                      <h4 className="text-base font-black text-stone-900">
+                        অর্ডার স্থায়ীভাবে ডিলিট নিশ্চিতকরণ
+                      </h4>
+                      <p className="text-xs font-bold text-stone-600">
+                        অর্ডার আইডি: <span className="font-mono text-red-600">#{orderPendingDelete.id}</span> •{' '}
+                        {orderPendingDelete.customer?.name} (৳{Number(orderPendingDelete.total || 0).toLocaleString()})
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="p-3.5 rounded-2xl bg-red-50 border border-red-200 text-xs font-bold text-red-900 leading-relaxed">
+                    আপনি কি নিশ্চিতভাবে এই অর্ডারটি স্থায়ীভাবে Delete করতে চান? এই কাজটি Undo করা যাবে না।
+                  </div>
+
+                  {deleteOrderError && (
+                    <div className="p-3 rounded-xl bg-rose-100 border border-rose-300 text-xs font-bold text-rose-800">
+                      ⚠️ {deleteOrderError}
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-end gap-2.5 pt-2">
+                    <button
+                      type="button"
+                      disabled={Boolean(deletingOrderId)}
+                      onClick={() => {
+                        if (deletingOrderId) return;
+                        setOrderPendingDelete(null);
+                        setDeleteOrderError('');
+                      }}
+                      className="px-4 py-2.5 rounded-xl border border-stone-300 bg-white hover:bg-stone-100 text-stone-800 font-extrabold text-xs cursor-pointer disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={Boolean(deletingOrderId)}
+                      onClick={confirmPermanentDeleteOrder}
+                      className="px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-extrabold text-xs flex items-center gap-1.5 cursor-pointer shadow-sm disabled:opacity-50"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      <span>
+                        {deletingOrderId === orderPendingDelete.id
+                          ? 'Deleting...'
+                          : 'Permanently Delete'}
+                      </span>
                     </button>
                   </div>
                 </div>

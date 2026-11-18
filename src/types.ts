@@ -391,6 +391,18 @@ export interface Order {
   actualReturnCharge?: number;
   chargeVerificationStatus?: ExpenseVerificationStatus;
   returnIdempotencyKey?: string;
+  // Duplicate Order Prevention & Idempotency fields
+  externalOrderId?: string;
+  sourceOrderId?: string;
+  idempotencyKey?: string;
+  sourceMessageHash?: string;
+  orderSource?:
+    | 'website_pdp'
+    | 'website_cart'
+    | 'whatsapp_ai'
+    | 'manual_admin'
+    | 'lead_conversion'
+    | 'external_api';
 }
 
 export type CanonicalExpenseCategory =

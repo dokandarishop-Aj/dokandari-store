@@ -3359,21 +3359,60 @@ export async function deleteProductPersisted(productId: string): Promise<void> {
 /**
  * Persists a customer Order to both localStorage (instant backup) and Firestore `orders` collection
  */
-export function getDeletedOrderIds(): Set<string> {
+const remoteDeletedOrderIdsCache = new Set<string>();
+
+export function setRemoteDeletedOrderIds(ids: string[]): void {
+  if (!Array.isArray(ids)) return;
   try {
     const raw = localStorage.getItem(LS_DELETED_ORDER_IDS_KEY);
-    if (!raw) return new Set();
-    const parsed = JSON.parse(raw);
-    return new Set(Array.isArray(parsed) ? parsed : []);
+    const parsed = raw ? JSON.parse(raw) : [];
+    const merged = new Set<string>(Array.isArray(parsed) ? parsed : []);
+    for (const id of ids) {
+      if (id && typeof id === 'string') {
+        const clean = id.trim();
+        if (clean) {
+          remoteDeletedOrderIdsCache.add(clean);
+          merged.add(clean);
+        }
+      }
+    }
+    localStorage.setItem(LS_DELETED_ORDER_IDS_KEY, JSON.stringify(Array.from(merged)));
   } catch {
-    return new Set();
+    for (const id of ids) {
+      if (id && typeof id === 'string') {
+        remoteDeletedOrderIdsCache.add(id.trim());
+      }
+    }
   }
 }
 
+export function getDeletedOrderIds(): Set<string> {
+  const combined = new Set<string>(remoteDeletedOrderIdsCache);
+  try {
+    const raw = localStorage.getItem(LS_DELETED_ORDER_IDS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        for (const id of parsed) {
+          if (id && typeof id === 'string') {
+            combined.add(id.trim());
+          }
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return combined;
+}
+
 export function addDeletedOrderId(orderId: string): void {
+  const clean = String(orderId || '').trim();
+  if (!clean) return;
+  remoteDeletedOrderIdsCache.add(clean);
   try {
     const set = getDeletedOrderIds();
-    set.add(orderId);
+    set.add(clean);
     localStorage.setItem(LS_DELETED_ORDER_IDS_KEY, JSON.stringify(Array.from(set)));
   } catch {
     // ignore
@@ -3386,6 +3425,10 @@ export function removeDeletedOrderIds(orderIds: string[]): void {
     const set = getDeletedOrderIds();
     let changed = false;
     for (const id of orderIds) {
+      if (remoteDeletedOrderIdsCache.has(id)) {
+        remoteDeletedOrderIdsCache.delete(id);
+        changed = true;
+      }
       if (set.has(id)) {
         set.delete(id);
         changed = true;
@@ -3399,10 +3442,88 @@ export function removeDeletedOrderIds(orderIds: string[]): void {
   }
 }
 
+/**
+ * Computes a deterministic hash for a WhatsApp / Messenger message or screenshot order entry
+ * so processing the exact same message/screenshot twice will reuse the existing order instead of creating a duplicate.
+ * Note: Does NOT block the same customer (phone/name) from placing new, distinct orders.
+ */
+export function computeOrderSourceMessageHash(params: {
+  rawMessageText?: string;
+  screenshotData?: string;
+  phone?: string;
+  productId?: string;
+  quantity?: number;
+  total?: number;
+}): string {
+  const msg = String(params.rawMessageText || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+  const shot = String(params.screenshotData || '').trim();
+  const shotFingerprint = shot
+    ? `${shot.length}:${shot.slice(0, 64)}:${shot.slice(-64)}`
+    : '';
+  // Only generate a message hash if there is an actual WhatsApp/Messenger text or screenshot payload
+  if (!msg && !shotFingerprint) return '';
+
+  const phoneClean = String(params.phone || '')
+    .replace(/\D/g, '')
+    .replace(/^88/, '');
+  const prod = String(params.productId || '').trim().toLowerCase();
+  const qty = Math.max(1, Number(params.quantity) || 1);
+  const tot = Math.round(Number(params.total) || 0);
+  const rawPayload = `msg=${msg}|shot=${shotFingerprint}|ph=${phoneClean}|pr=${prod}|qty=${qty}|tot=${tot}`;
+
+  let h1 = 0xdeadbeef ^ rawPayload.length;
+  let h2 = 0x41c6ce57 ^ rawPayload.length;
+  for (let i = 0; i < rawPayload.length; i++) {
+    const ch = rawPayload.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return `msg_${(h2 >>> 0).toString(16).padStart(8, '0')}${(h1 >>> 0).toString(16).padStart(8, '0')}`;
+}
+
+/**
+ * Checks if an order with the same External Order ID, Source Order ID, Idempotency Key,
+ * or WhatsApp/Messenger Message Hash already exists in active (non-deleted) orders.
+ * Strictly follows Rule 5: NEVER treats two orders as duplicate merely because Customer Name or Phone matches.
+ */
+export function findExistingDuplicateOrder(
+  candidate: Partial<Order>,
+  existingOrders?: Order[]
+): Order | null {
+  const deletedIds = getDeletedOrderIds();
+  const pool = Array.isArray(existingOrders) ? existingOrders : getPersistedOrders();
+
+  const extId = String(candidate.externalOrderId || '').trim();
+  const srcId = String(candidate.sourceOrderId || '').trim();
+  const idemKey = String(candidate.idempotencyKey || '').trim();
+  const msgHash = String(candidate.sourceMessageHash || '').trim();
+
+  if (!extId && !srcId && !idemKey && !msgHash) {
+    return null;
+  }
+
+  for (const ord of pool) {
+    if (!ord || !ord.id || deletedIds.has(ord.id)) continue;
+    if (candidate.id && ord.id === candidate.id) continue;
+    if (extId && String(ord.externalOrderId || '').trim() === extId) return ord;
+    if (srcId && String(ord.sourceOrderId || '').trim() === srcId) return ord;
+    if (idemKey && String(ord.idempotencyKey || '').trim() === idemKey) return ord;
+    if (msgHash && String(ord.sourceMessageHash || '').trim() === msgHash) return ord;
+  }
+
+  return null;
+}
+
 export function syncOrdersToLocalCache(ordersList: Order[]): void {
   if (!Array.isArray(ordersList)) return;
+  const deletedIds = getDeletedOrderIds();
   const sorted = [...ordersList]
-    .filter((o) => o && o.id)
+    .filter((o) => o && o.id && !deletedIds.has(o.id))
     .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
   try {
     const json = JSON.stringify(sorted.slice(0, 500));
@@ -3565,9 +3686,32 @@ export function buildCustomerTrackingUrl(order: {
   }`;
 }
 
-export async function saveOrderPersisted(order: Order): Promise<Order> {
-  // Ensure order is not marked as deleted if re-saved
-  removeDeletedOrderIds([order.id]);
+export async function saveOrderPersisted(
+  order: Order,
+  options?: { allowRestoreDeleted?: boolean }
+): Promise<Order> {
+  const currentDeletedIds = getDeletedOrderIds();
+  if (currentDeletedIds.has(order.id)) {
+    if (options?.allowRestoreDeleted) {
+      removeDeletedOrderIds([order.id]);
+    } else {
+      // CRITICAL: Never allow background tasks (CAPI, tracking sync, etc.) to resurrect a permanently deleted order!
+      return order;
+    }
+  }
+
+  const existingOrdersList = getPersistedOrders();
+  const prevStoredOrder = existingOrdersList.find((o) => o && o.id === order.id);
+
+  // DUPLICATE ORDER PREVENTION & IDEMPOTENCY CHECK:
+  // If creating a new order (`!prevStoredOrder`), check if an order with the same `externalOrderId`,
+  // `sourceOrderId`, `idempotencyKey`, or `sourceMessageHash` already exists in local cache or Firestore.
+  if (!prevStoredOrder) {
+    const localDup = findExistingDuplicateOrder(order, existingOrdersList);
+    if (localDup) {
+      return localDup;
+    }
+  }
 
   // Keep self-contained data:image/jpeg or https URL directly in Firestore (< 700KB) for 100% lifetime persistence
   // across all servers, devices, and deployments (never replace with ephemeral /uploads/ path).
@@ -3602,9 +3746,6 @@ export async function saveOrderPersisted(order: Order): Promise<Order> {
     trackingId: effectiveTrackingId,
     trackingNumber: order.trackingNumber,
   });
-
-  const existingOrdersList = getPersistedOrders();
-  const prevStoredOrder = existingOrdersList.find((o) => o && o.id === order.id);
 
   // Determine packaging snapshot & fields:
   // - If caller passed packagingSnapshot or order already had packagingSnapshot, preserve it.
@@ -3701,14 +3842,47 @@ export async function saveOrderPersisted(order: Order): Promise<Order> {
       : [],
   });
 
-  // 1. Save to localStorage backup so customer & admin never lose an order (supports unlimited consecutive orders)
+  // 1. Save to Server Order Mirror (`/api/orders`) first when online so server-level idempotency check can intercept duplicates
+  let serverSavedOrder: Order | null = null;
+  let serverOk = false;
+  if (typeof fetch !== 'undefined') {
+    try {
+      const srvResp = await fetch('/api/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          order: cleanOrder,
+          allowRestoreDeleted: Boolean(options?.allowRestoreDeleted),
+        }),
+      });
+      if (srvResp.status === 409) {
+        // Order was permanently deleted
+        addDeletedOrderId(cleanOrder.id);
+        return cleanOrder;
+      }
+      if (srvResp.ok) {
+        serverOk = true;
+        const srvJson = await srvResp.json().catch(() => null);
+        if (srvJson?.duplicatePrevented && srvJson?.order?.id) {
+          serverSavedOrder = srvJson.order as Order;
+          return serverSavedOrder;
+        }
+      }
+    } catch {
+      // Server endpoint unreachable (e.g., direct Node script or offline) — continue with Firestore
+    }
+  }
+
+  // 2. Save to localStorage backup so customer & admin never lose an order
   try {
     const deletedIds = getDeletedOrderIds();
-    const filtered = existingOrdersList.filter(
-      (o) => o && o.id && o.id !== cleanOrder.id && !deletedIds.has(o.id)
-    );
-    filtered.unshift(cleanOrder);
-    syncOrdersToLocalCache(filtered);
+    if (!deletedIds.has(cleanOrder.id)) {
+      const filtered = existingOrdersList.filter(
+        (o) => o && o.id && o.id !== cleanOrder.id && !deletedIds.has(o.id)
+      );
+      filtered.unshift(cleanOrder);
+      syncOrdersToLocalCache(filtered);
+    }
   } catch (e) {
     console.warn('localStorage order backup note:', e);
   }
@@ -3724,25 +3898,19 @@ export async function saveOrderPersisted(order: Order): Promise<Order> {
     }
   }
 
-  // 2. Save to Server Order Mirror + Server Firestore (`/api/orders`), Server Courier Tracking Mirror (`/api/courier/track/register`), and Client Firestore `orders` collection in parallel
-  const [fsRes, apiRes] = await Promise.allSettled([
+  // 3. Save to Client Firestore `orders` collection & Server Courier Tracking Mirror (`/api/courier/track/register`)
+  const [fsRes] = await Promise.allSettled([
     setDoc(doc(db, 'orders', cleanOrder.id), cleanOrder),
-    fetch('/api/orders', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ order: cleanOrder }),
-    }),
-    fetch('/api/courier/track/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ order: cleanOrder }),
-    }),
+    typeof fetch !== 'undefined'
+      ? fetch('/api/courier/track/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ order: cleanOrder }),
+        })
+      : Promise.resolve(null),
   ]);
 
-  if (
-    fsRes.status === 'rejected' &&
-    (apiRes.status === 'rejected' || (apiRes.status === 'fulfilled' && !apiRes.value.ok))
-  ) {
+  if (fsRes.status === 'rejected' && !serverOk) {
     throw new Error('ডাটাবেজে অর্ডার আপডেট করতে ব্যর্থ হয়েছে। অনুগ্রহ করে ইন্টারনেট সংযোগ চেক করুন।');
   }
 
@@ -3761,51 +3929,112 @@ export async function saveOrderPersisted(order: Order): Promise<Order> {
 }
 
 /**
- * Permanently deletes a demo/fake/cancelled order from Firestore, localStorage, and records its ID
- * in `settings/deleted_orders` so it never reappears and is immediately deducted from Sales Analytics.
+ * Permanently deletes an order from Firestore `orders` collection, Server Order Mirror (`/api/orders/delete`),
+ * Order-specific Courier Tracking Mirror, and Order-specific Auto Expenses, and records its ID
+ * in `settings/deleted_orders` so it NEVER reappears after Page Refresh, Logout/Login, or Server Restart.
+ * Throws an error if database deletion fails so UI state is only updated after confirmed DB deletion.
  */
 export async function deleteOrderPersisted(orderId: string): Promise<void> {
-  if (!orderId) return;
-  addDeletedOrderId(orderId);
+  const cleanId = String(orderId || '').trim();
+  if (!cleanId) {
+    throw new Error('অর্ডার আইডি পাওয়া যায়নি।');
+  }
 
-  // 1. Remove from localStorage backup immediately
+  // 1. Read existing `settings/deleted_orders` from Firestore so we always union and never overwrite previous deleted IDs
+  const unionDeleted = getDeletedOrderIds();
+  unionDeleted.add(cleanId);
+  try {
+    const existingDelSnap = await getDoc(doc(db, 'settings', 'deleted_orders'));
+    if (existingDelSnap.exists() && Array.isArray(existingDelSnap.data()?.ids)) {
+      for (const id of existingDelSnap.data()!.ids) {
+        if (id && typeof id === 'string') {
+          unionDeleted.add(id.trim());
+        }
+      }
+    }
+  } catch {
+    // ignore read error if offline, will still union with local cache
+  }
+  const allDeletedList = Array.from(unionDeleted);
+
+  // 2. Execute permanent deletion in Backend API (`/api/orders/delete`) and Firestore (`orders/{id}` + `settings/deleted_orders`)
+  const [fsDeleteRes, fsSettingsRes, apiDeleteRes] = await Promise.allSettled([
+    deleteDoc(doc(db, 'orders', cleanId)),
+    setDoc(
+      doc(db, 'settings', 'deleted_orders'),
+      { ids: allDeletedList, updatedAt: Date.now() },
+      { merge: true }
+    ),
+    typeof fetch !== 'undefined'
+      ? fetch('/api/orders/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ orderId: cleanId }),
+        })
+      : Promise.reject(new Error('No fetch')),
+  ]);
+
+  const firestoreDeletedOk = fsDeleteRes.status === 'fulfilled' && fsSettingsRes.status === 'fulfilled';
+  let serverDeletedOk = false;
+  if (apiDeleteRes.status === 'fulfilled' && apiDeleteRes.value && apiDeleteRes.value.ok) {
+    const apiJson = await apiDeleteRes.value.json().catch(() => null);
+    serverDeletedOk = Boolean(apiJson?.success);
+  }
+
+  if (!firestoreDeletedOk && !serverDeletedOk) {
+    throw new Error(
+      'ডাটাবেজ থেকে অর্ডারটি স্থায়ীভাবে Delete করা সম্ভব হয়নি। অনুগ্রহ করে ইন্টারনেট সংযোগ বা সার্ভার চেক করে আবার চেষ্টা করুন।'
+    );
+  }
+
+  // 3. Clean up ONLY order-specific auto-generated child expense records (`source === 'order_expense_auto'` and `referenceId === cleanId`)
+  //    Never touches Customer Profile, Product Database, Stock History, Global Financial Records, or other orders!
+  try {
+    const localExpenses = getPersistedOperatingExpenses();
+    const childAutoExpenses = localExpenses.filter(
+      (exp) => exp && exp.source === 'order_expense_auto' && exp.referenceId === cleanId
+    );
+    if (childAutoExpenses.length > 0) {
+      const remainingExpenses = localExpenses.filter(
+        (exp) => !(exp && exp.source === 'order_expense_auto' && exp.referenceId === cleanId)
+      );
+      syncOperatingExpensesToLocalCache(remainingExpenses);
+      for (const childExp of childAutoExpenses) {
+        deleteDoc(doc(db, 'business_expenses', childExp.id)).catch(() => null);
+      }
+    }
+  } catch {
+    // ignore child auto-expense cleanup note
+  }
+
+  // 4. Mark order ID as permanently deleted in memory + localStorage & remove from local orders cache
+  setRemoteDeletedOrderIds(allDeletedList);
+  addDeletedOrderId(cleanId);
+
   try {
     const existing = getPersistedOrders();
-    const next = existing.filter((o) => o && o.id !== orderId);
+    const next = existing.filter((o) => o && o.id !== cleanId);
     syncOrdersToLocalCache(next);
   } catch (e) {
     console.warn('localStorage order delete note:', e);
   }
 
-  // 2. Delete document from Firestore `orders` collection & Server mirror
-  try {
-    await Promise.allSettled([
-      deleteDoc(doc(db, 'orders', orderId)),
-      fetch('/api/orders/delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderId }),
-      }),
-    ]);
-  } catch (err) {
-    console.warn('Firestore order delete note:', err);
-  }
-
-  // 3. Persist deleted order IDs in `settings/deleted_orders` so all sessions stay in sync
-  try {
-    const allDeleted = Array.from(getDeletedOrderIds());
-    await setDoc(
-      doc(db, 'settings', 'deleted_orders'),
-      { ids: allDeleted, updatedAt: Date.now() },
-      { merge: true }
-    );
-  } catch {
-    // ignore
+  if (typeof window !== 'undefined') {
+    try {
+      window.dispatchEvent(
+        new CustomEvent('dokandari:orders-deleted', { detail: { orderId: cleanId } })
+      );
+    } catch {
+      // ignore
+    }
   }
 }
 
 export async function deleteOrdersBulkPersisted(orderIds: string[]): Promise<void> {
-  for (const id of orderIds) {
+  const validIds = Array.from(
+    new Set((orderIds || []).map((id) => String(id || '').trim()).filter(Boolean))
+  );
+  for (const id of validIds) {
     await deleteOrderPersisted(id);
   }
 }

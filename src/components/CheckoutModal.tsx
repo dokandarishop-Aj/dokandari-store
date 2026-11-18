@@ -142,6 +142,13 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     setIsSubmitting(true);
 
     try {
+      const attemptSeed =
+        (window as any).__dkdCartAttemptKey ||
+        `cart-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      (window as any).__dkdCartAttemptKey = attemptSeed;
+      const itemsSig = items.map((i) => `${i.productId || i.id}:${i.quantity}`).join(',');
+      const idempotencyKey = `${attemptSeed}-${cleanPhoneDigits}-${itemsSig}-${currentTotal}`;
+
       const randomNum = Math.floor(100000 + Math.random() * 900000);
       const orderId = `DKD-${randomNum}`;
 
@@ -157,6 +164,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       const eventId = `dkd_purchase_${orderId}`;
       const newOrder: Order = {
         id: orderId,
+        idempotencyKey,
+        orderSource: 'website_cart',
         customer,
         items,
         subtotal,
@@ -178,34 +187,36 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         updatedAt: Date.now(),
       };
 
-      // Save order to Firestore and local backup
-      await saveOrderPersisted(newOrder);
+      // Save order to Firestore and local backup (idempotent against retries)
+      const savedOrder = await saveOrderPersisted(newOrder);
+      const finalOrderId = savedOrder.id || orderId;
+      delete (window as any).__dkdCartAttemptKey;
 
       // Mark abandoned lead as successfully converted
-      markLeadConverted(cleanPhoneDigits, orderId);
+      markLeadConverted(cleanPhoneDigits, finalOrderId);
 
       try {
-        window.history.pushState(null, '', `/?thank_you=${encodeURIComponent(orderId)}&brand=dokandari`);
+        window.history.pushState(null, '', `/?thank_you=${encodeURIComponent(finalOrderId)}&brand=dokandari`);
       } catch {
         // ignore
       }
 
-      setCompletedOrder(newOrder);
+      setCompletedOrder(savedOrder);
       clearCart();
 
       trackPixelPageView();
       // Track Purchase event across all active pixels & update Firestore order with CAPI receipt
       trackPixelPurchase({
-        id: orderId,
-        total: currentTotal,
-        items,
+        id: finalOrderId,
+        total: savedOrder.total,
+        items: savedOrder.items,
         customer: { phone: customerPhone, name: customerName, email: userProfile?.email },
       }).then((capiRes) => {
         if (capiRes) {
           const updatedWithTracking: Order = {
-            ...newOrder,
+            ...savedOrder,
             pixelTracking: {
-              eventId: capiRes.eventId || eventId,
+              eventId: capiRes.eventId || `dkd_purchase_${finalOrderId}`,
               browserFired: true,
               capiDispatched: Boolean(capiRes.capiResults && capiRes.capiResults.length > 0),
               capiStatus:

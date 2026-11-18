@@ -652,11 +652,19 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
 
     setIsOrdering(true);
     try {
+      const attemptSeed =
+        (window as any).__dkdPdpAttemptKey ||
+        `pdp-${product.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      (window as any).__dkdPdpAttemptKey = attemptSeed;
+      const idempotencyKey = `${attemptSeed}-${cleanPhoneDigits}-${quantity}-${totalPrice}`;
+
       const randomId = Math.floor(100000 + Math.random() * 900000);
       const orderId = `DKD-${randomId}`;
 
       const newOrder: Order = {
         id: orderId,
+        idempotencyKey,
+        orderSource: 'website_pdp',
         customer: {
           name: customerName.trim(),
           phone: cleanPhoneDigits,
@@ -700,35 +708,38 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
         updatedAt: Date.now(),
       };
 
-      await saveOrderPersisted(newOrder);
+      const savedOrder = await saveOrderPersisted(newOrder);
+      const finalOrderId = savedOrder.id || orderId;
+      // Reset attempt seed once order succeeds so customer can place another order later if desired
+      delete (window as any).__dkdPdpAttemptKey;
 
       // Mark the captured lead as converted
-      markLeadConverted(cleanPhoneDigits, orderId);
+      markLeadConverted(cleanPhoneDigits, finalOrderId);
 
       // CRITICAL: Change URL to /?thank_you=:orderId FIRST before firing PageView + Purchase
       // so refreshing never causes a 404 in any external browser!
       try {
-        window.history.pushState(null, '', `/?thank_you=${encodeURIComponent(orderId)}&brand=dokandari`);
+        window.history.pushState(null, '', `/?thank_you=${encodeURIComponent(finalOrderId)}&brand=dokandari`);
       } catch {
         // ignore
       }
 
-      setCompletedOrder(newOrder);
+      setCompletedOrder(savedOrder);
       setViewStep('thank_you');
       window.scrollTo({ top: 0, behavior: 'smooth' });
 
       trackPixelPageView();
       trackPixelPurchase({
-        id: orderId,
-        total: totalPrice,
-        items: newOrder.items,
+        id: finalOrderId,
+        total: savedOrder.total,
+        items: savedOrder.items,
         customer: { phone: customerPhone, name: customerName, email: userProfile?.email },
       }).then((capiRes) => {
         if (capiRes) {
           const updatedWithTracking: Order = {
-            ...newOrder,
+            ...savedOrder,
             pixelTracking: {
-              eventId: capiRes.eventId || eventId,
+              eventId: capiRes.eventId || `dkd_purchase_${finalOrderId}`,
               browserFired: true,
               capiDispatched: Boolean(capiRes.capiResults && capiRes.capiResults.length > 0),
               capiStatus:
